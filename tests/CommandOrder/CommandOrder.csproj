@@ -1,0 +1,30 @@
+<!-- CommandOrder — regression test for the command-ordering desync.
+
+     Simulation.CanonicalOrder must be a TOTAL order. If two commands ever
+     compare equal, the sort leaves them in arrival order — and arrival order is
+     exactly the thing that differs between machines on a real network. Two peers
+     then apply the same commands in different sequences and silently diverge.
+
+     LoopbackTransport can't expose this (it delivers in one fixed order), so
+     this test ships its own transport that hands the SAME commands to the two
+     clients in OPPOSITE orders — the worst case ENet can produce — and demands
+     they still agree.
+
+     Run with `dotnet run` from this directory. Exit code 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>CommandOrder</RootNamespace>
+    <AssemblyName>CommandOrder</AssemblyName>
+    <!-- The sim must never silently pick up a float. Warnings are errors here. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

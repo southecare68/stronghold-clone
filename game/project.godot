@@ -1,0 +1,19 @@
+; Godot 4 project file. If the editor complains about the version, open it in
+; your installed Godot 4.x .NET build and let it upgrade/regenerate — the
+; scripts are what matter.
+
+config_version=5
+
+[application]
+
+config/name="Stronghold Clone"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
+
+[dotnet]
+
+project/assembly_name="StrongholdClone"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

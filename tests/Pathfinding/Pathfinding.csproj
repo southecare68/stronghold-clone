@@ -1,0 +1,29 @@
+<!-- Pathfinding — the map, the RNG, and grid A*, tested without Godot.
+
+     These are Phase 2 foundations, and they are exactly the kind of code that
+     desyncs a lockstep match quietly: on an open map many routes tie for
+     shortest, and if the tie-break depends on discovery order rather than on the
+     map, two machines send their units different ways and drift apart with no
+     error anywhere. So determinism is tested as a first-class property here,
+     not just correctness.
+
+     Godot-free, so this also runs on the Ubuntu x86 box — the golden paths below
+     are integer results and must come out identical there.
+
+     Run with `dotnet run` from this directory. Exit code 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>PathfindingTests</RootNamespace>
+    <AssemblyName>PathfindingTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

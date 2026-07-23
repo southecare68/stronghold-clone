@@ -1,0 +1,9 @@
+<Project Sdk="Godot.NET.Sdk/4.7.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>disable</Nullable>
+    <!-- The Sdk version must match the installed Godot editor (4.7.1). If you
+         upgrade Godot, bump it here too. -->
+  </PropertyGroup>
+</Project>

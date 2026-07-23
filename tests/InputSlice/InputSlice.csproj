@@ -1,0 +1,30 @@
+<!-- InputSlice — headless stand-in for "someone at the keyboard".
+
+     Main.cs is the one part of the vertical slice a test cannot reach: it needs
+     Godot, a window, and a real mouse. This project reproduces exactly what
+     Main.cs does with input — box-select in SCREEN space, right-click to a
+     screen point, issue a Move command — against the same engine-agnostic sim,
+     and checks both lockstep clients agree on every tick while the units move.
+
+     It does NOT replace eyeballing the window; it covers the sim-side claim
+     ("units move under input and stay in sync") so the only thing left needing a
+     human is that the pixels match. See CONTEXT_HANDOFF.md.
+
+     Run with `dotnet run` from this directory. Exit code 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>InputSlice</RootNamespace>
+    <AssemblyName>InputSlice</AssemblyName>
+    <!-- The sim must never silently pick up a float. Warnings are errors here. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

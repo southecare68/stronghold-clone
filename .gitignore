@@ -1,0 +1,20 @@
+# Godot 4+
+.godot/
+/game/.godot/
+/builds/
+export_presets.cfg
+
+# .NET / C#
+.mono/
+mono_crash.*
+bin/
+obj/
+*.user
+*.sln.DotSettings.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node prototype
+node_modules/
