@@ -21,11 +21,19 @@ using System.Collections.Generic;
 using Sim;
 using Netcode;
 
+// Godot ships its own TileMap node; in this file the name always means ours.
+using TileMap = Sim.TileMap;
+
 public partial class Main : Node2D
 {
     const int TicksPerSecond = 20;
     const double Step = 1.0 / TicksPerSecond;
     const float PxPerUnit = 12f;     // world units -> screen pixels
+
+    // The match map. Every client builds its OWN copy; TileMap.Demo is
+    // deterministic, so all copies are identical and StateChecksum's map
+    // fingerprint agrees. Sized to fit the window set in project.godot.
+    const int DemoSize = 56;
 
     // Never simulate more than this many ticks in one frame. Without a cap, a
     // long stall followed by a burst of arriving turns would try to catch up all
@@ -106,8 +114,8 @@ public partial class Main : Node2D
         {
             var loop = new LoopbackTransport();
             _net = loop;
-            _me = new Client(1, loop);
-            _other = new Client(2, loop);
+            _me = new Client(1, loop, TileMap.Demo(DemoSize));
+            _other = new Client(2, loop, TileMap.Demo(DemoSize));
             loop.Connect(_me);
             loop.Connect(_other);
             _myPlayer = 1;
@@ -117,7 +125,7 @@ public partial class Main : Node2D
         _enet = mode == "HOST" ? EnetTransport.Host(port) : EnetTransport.Join(address, port);
         _net = _enet;
         _myPlayer = _enet.PlayerId;
-        _me = new Client(_myPlayer, _enet);
+        _me = new Client(_myPlayer, _enet, TileMap.Demo(DemoSize));
         _enet.Attach(_me);
 
         if (mode == "HOST")
@@ -346,15 +354,24 @@ public partial class Main : Node2D
     }
 
     // ---- Rendering (float is fine HERE — this is not the sim) ----------------
+    // Terrain palette. Ground is the background; only the rest is drawn per tile.
+    static readonly Color GroundColor = new(0.17f, 0.21f, 0.15f);
+    static readonly Color WaterColor = new(0.12f, 0.24f, 0.40f);
+    static readonly Color RockColor = new(0.34f, 0.33f, 0.31f);
+    static readonly Color MarshColor = new(0.24f, 0.25f, 0.11f);
+
     public override void _Draw()
     {
+        DrawTerrain();
+        DrawPaths();
+
         foreach (var u in _me.Sim.Units)
         {
             var p = WorldToScreen(u);
             var color = u.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
-            DrawCircle(p, 7f, color);
+            DrawCircle(p, 6f, color);
             if (_selected.Contains(u.Id))
-                DrawArc(p, 10f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+                DrawArc(p, 9f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
         }
         if (_boxing)
         {
@@ -363,6 +380,57 @@ public partial class Main : Node2D
             DrawRect(r, new Color(1, 1, 1, 0.6f), false, 1f);
         }
     }
+
+    // Ground is one background rect; only water/rock/marsh are drawn per tile, so
+    // this stays cheap even though terrain never changes. Tiles are centred on
+    // their integer coordinate, matching where a unit standing on that tile draws.
+    void DrawTerrain()
+    {
+        var map = _me.Sim.Map;
+        DrawRect(new Rect2(TileCorner(0, 0),
+                           new Vector2(map.Width * PxPerUnit, map.Height * PxPerUnit)),
+                 GroundColor);
+
+        for (int y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width; x++)
+            {
+                var t = map.At(x, y);
+                if (t == Terrain.Ground) continue;
+                DrawRect(new Rect2(TileCorner(x, y), new Vector2(PxPerUnit, PxPerUnit)),
+                         t switch
+                         {
+                             Terrain.Water => WaterColor,
+                             Terrain.Rock => RockColor,
+                             _ => MarshColor,
+                         });
+            }
+    }
+
+    // The remaining route of each selected unit, so string-pulling is visible:
+    // on open ground it is a single straight line to the goal; around the wall or
+    // lake it kinks only at the corners it must round.
+    void DrawPaths()
+    {
+        var line = new Color(1f, 0.9f, 0.4f, 0.55f);
+        foreach (var u in _me.Sim.Units)
+        {
+            if (!_selected.Contains(u.Id) || !u.HasPath) continue;
+
+            var prev = DrawWorld(u) * PxPerUnit;
+            for (int i = u.PathIndex; i < u.Path.Count; i++)
+            {
+                var wp = new Vector2(u.Path[i].X, u.Path[i].Y) * PxPerUnit;
+                DrawLine(prev, wp, line, 1.5f);
+                DrawCircle(wp, 2.5f, line);
+                prev = wp;
+            }
+        }
+    }
+
+    // Top-left corner of a tile in screen space. Tiles are centred on the integer
+    // coordinate, so tile (x,y) spans half a tile either side of (x,y)*Px.
+    static Vector2 TileCorner(int x, int y) =>
+        new Vector2((x - 0.5f) * PxPerUnit, (y - 0.5f) * PxPerUnit);
 
     public override void _ExitTree() => _enet?.Close();
 

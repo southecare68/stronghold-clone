@@ -10,6 +10,13 @@ config/name="Stronghold Clone"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 
+[display]
+
+; Sized to fit the demo map (Main.DemoSize tiles * Main.PxPerUnit px) with room
+; for the HUD. The networked launch commands override this with --resolution.
+window/size/viewport_width=720
+window/size/viewport_height=720
+
 [dotnet]
 
 project/assembly_name="StrongholdClone"

@@ -261,10 +261,15 @@ than mod the closed 2006 engine, which was too limiting.
    different `StateChecksum` but identical frozen `Checksum()`, so a mismatched
    map is caught on the first comparison.
 
-   ⚠️ **Not done yet:** the *game window* still starts on `TileMap.Open()`, so
-   there is nothing on screen to route around and no terrain is drawn. Seeing
-   path-following live needs `Main.cs` to build a map (there is `TileMap.Demo()`
-   ready) and render tiles. That is the natural next visual step.
+   ✅ **Now visible in the window** (2026-07-23). `Main.cs` starts on
+   `TileMap.Demo(56)` and draws terrain (ground / rock wall with a gate / lake /
+   marsh) plus the selected units' remaining route as a yellow line. Verified by
+   screenshot: three units box-selected top-left and ordered across the map
+   routed **through the wall gate and around the lake's corner**, the path line
+   kinking only at those corners with dead-straight legs between (string-pulling
+   working), then arrived stacked at the destination with no clipping through
+   wall or water. `IN SYNC ✓` throughout. Terrain draws as one ground background
+   rect plus only the non-ground tiles, so it stays cheap.
 
 ## Immediate next tasks (in order)
 8. **The cross-architecture run — the test that actually matters.** Everything
@@ -283,12 +288,10 @@ than mod the closed 2006 engine, which was too limiting.
    other, watching for `DESYNC` in the HUD or `[sim]` in the log. Doing the
    headless check first means that if the live match desyncs, you already know
    the sim is innocent and the fault is in the transport.
-9. **Draw the terrain and start on a real map.** `Main.cs` builds `TileMap.Open()`
-   today; switch it to `TileMap.Demo()` (or a chosen map), render the tiles, and
-   you can watch units route around the wall and lake. Small engine-layer job,
-   and it makes everything above visible.
-10. **Phase 2 gameplay proper:** economy, buildings, combat, win/lose. Each adds
-   simulation state — mix it into `StateChecksum()`, never into `Checksum()`.
+9. **Phase 2 gameplay proper:** economy, buildings, combat, win/lose. Each adds
+   simulation state — mix it into `StateChecksum()`, never into `Checksum()`,
+   and switch the netcode's checksum calls to `StateChecksum()` when the first
+   non-unit state lands (see the golden-constant section).
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

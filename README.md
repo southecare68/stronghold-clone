@@ -40,8 +40,9 @@ stronghold-clone/
 
 ## Run the game
 Open the `game/` folder in a **Godot 4.x .NET (C#) editor build** and press
-Play. Left-drag to box-select your units, right-click to move them. The HUD
-shows the tick, state checksum, and sync state.
+Play. Left-drag to box-select your units, right-click to move them; they route
+around the terrain (a walled gate, a lake, marsh) and the selected units' path
+is drawn as a line. The HUD shows the tick, state checksum, and sync state.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
