@@ -46,6 +46,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `CommandOrder/` — command ordering is total, not arrival-order dependent
   - `Netcode/` — wire format, join codes, stalling, desync detection, rejoin
   - `Pathfinding/` — map, RNG, and deterministic grid A* (Phase 2 foundations)
+  - `PathFollowing/` — units follow smoothed routes; two-client StateChecksum sync
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -231,8 +232,42 @@ than mod the closed 2006 engine, which was too limiting.
    time and the host is the only source; 3+ players need a decision about who
    snapshots whom.
 
+7. ✅ **Unit movement follows the pathfinder, with smoothing.** A Move command
+   now becomes an A* route the unit walks waypoint by waypoint, instead of
+   sliding in a straight line through walls.
+
+   **String-pulling is the load-bearing part**, for two reasons at once:
+   - It stops units zig-zagging along tile centres — the route collapses to the
+     fewest straight legs that stay clear.
+   - It is what protects `0xB1A7A676`. On open ground the first shortcut check
+     sees the destination directly, the whole route becomes one leg, and the
+     movement maths is bit-identical to the pre-pathfinding sim. `SimParity`
+     (which runs on the default open map) still prints 0xB1A7A676.
+
+   **A real design bug the tests caught:** smoothing by line-of-sight alone
+   ignores terrain COST. Marsh is passable, so a plain-LOS smoother straightened
+   an A* detour right back through the marsh it had been computed to avoid —
+   shorter in tiles, more expensive to walk. Fix: `TileMap.HasClearRun` only
+   shortcuts across **ground**, never costlier terrain, so cost-optimal detours
+   survive smoothing while uniform ground still collapses to one leg.
+   (`HasLineOfSight`, the pure-passability version, stays for future vision/
+   ranged-fire use.)
+
+   **Checksum split, per the decision below.** `Simulation.Checksum()` is frozen
+   (units only, == Node). New `StateChecksum()` covers everything the network
+   compares — unit targets, remaining paths, next-id, and the map's fingerprint.
+   `tests/PathFollowing` runs two clients over the obstacle map for 600 ticks and
+   `StateChecksum` agrees every tick; it also shows two different maps producing
+   different `StateChecksum` but identical frozen `Checksum()`, so a mismatched
+   map is caught on the first comparison.
+
+   ⚠️ **Not done yet:** the *game window* still starts on `TileMap.Open()`, so
+   there is nothing on screen to route around and no terrain is drawn. Seeing
+   path-following live needs `Main.cs` to build a map (there is `TileMap.Demo()`
+   ready) and render tiles. That is the natural next visual step.
+
 ## Immediate next tasks (in order)
-7. **The cross-architecture run — the test that actually matters.** Everything
+8. **The cross-architecture run — the test that actually matters.** Everything
    above ran on one Mac, so it proves the protocol, NOT determinism across
    CPUs. The fixed-point rule is still unproven where it counts.
 
@@ -240,19 +275,20 @@ than mod the closed 2006 engine, which was too limiting.
    Ubuntu box and run `dotnet run --project tests/SimParity`. It is deliberately
    Godot-free, so it needs only the .NET SDK. If x86 also prints **0xB1A7A676**,
    300 ticks of identical fixed-point math on a different CPU is settled
-   headlessly. `CommandOrder` and `Netcode` run there too.
+   headlessly. `CommandOrder`, `Netcode`, `Pathfinding` and `PathFollowing` run
+   there too — and `Pathfinding`'s pinned golden routes are a second integer
+   cross-architecture probe.
 
    Then the live match: `--host` on one machine, `--join=<its LAN IP>` on the
    other, watching for `DESYNC` in the HUD or `[sim]` in the log. Doing the
    headless check first means that if the live match desyncs, you already know
    the sim is innocent and the fault is in the transport.
-8. **Phase 2, continued.** The map and pathfinder are in (see below); what
-   remains is economy, buildings, combat, and win/lose conditions — plus wiring
-   unit movement onto the pathfinder.
-
-   ⚠️ **Read "the golden constant problem" below first.** Every one of those
-   adds state to the simulation, and the moment that state is checksummed,
-   `0xB1A7A676` changes. That needs a decision, not a quiet edit.
+9. **Draw the terrain and start on a real map.** `Main.cs` builds `TileMap.Open()`
+   today; switch it to `TileMap.Demo()` (or a chosen map), render the tiles, and
+   you can watch units route around the wall and lake. Small engine-layer job,
+   and it makes everything above visible.
+10. **Phase 2 gameplay proper:** economy, buildings, combat, win/lose. Each adds
+   simulation state — mix it into `StateChecksum()`, never into `Checksum()`.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy
@@ -292,13 +328,22 @@ moment the tie-break changed. Being integer-only, those routes must come out
 identical on the Ubuntu x86 box too — so this test is a second cross-architecture
 probe alongside `SimParity`.
 
-## The golden constant problem — DECIDED: keep a legacy hash
-**`Simulation.Checksum()` is frozen.** It hashes tick number and per-unit
-id/owner/x/y/hp, it still equals Node's **0xB1A7A676**, and Phase 2 must not add
-a single field to it. A new **`StateChecksum()`** covering everything —
-stockpiles, buildings, RNG state, unit orders — becomes what turns piggyback and
-what desync detection compares. `SimParity` keeps using `Checksum()`, so the
-verified movement core stays pinned while the game grows around it.
+## The golden constant problem — DECIDED and IMPLEMENTED: legacy hash
+**`Simulation.Checksum()` is frozen and `StateChecksum()` now exists.**
+`Checksum()` hashes tick number and per-unit id/owner/x/y/hp, still equals
+Node's **0xB1A7A676**, and Phase 2 must not add a single field to it.
+`StateChecksum()` covers everything that can diverge — unit targets, remaining
+paths, next-id, the map fingerprint, and (as they arrive) stockpiles, buildings,
+RNG state. **`StateChecksum()` is what turns piggyback and what desync detection
+compares; `Checksum()` is only the frozen regression guard.** `SimParity` keeps
+using `Checksum()`, so the verified movement core stays pinned while the game
+grows around it.
+
+⚠️ One wiring task outstanding: the network layer (`Client`/turns/`MatchSnapshot`)
+still exchanges and verifies `Checksum()`, not `StateChecksum()`. Harmless today —
+the only sim state that exists is units, which both hashes cover identically — but
+**the day the first non-unit state lands, switch the netcode's checksum calls to
+`StateChecksum()`** or desyncs in that new state go undetected on the wire.
 
 ⚠️ **The subtle part, and it is not the added fields.** Wiring movement onto the
 pathfinder threatens 0xB1A7A676 through unit **positions**, which `Checksum()`

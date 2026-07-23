@@ -107,15 +107,31 @@ namespace Sim
         public int EnterCost(int x, int y) =>
             At(x, y) == Terrain.Marsh ? MarshCost : StepCost;
 
-        // Can a unit walk straight from one tile to another without clipping
-        // anything? This is what lets a path be smoothed: if the far end of a
-        // route is directly visible, every waypoint in between is noise.
+        // Is there an unobstructed straight line from one tile to another? Used
+        // for line of sight (later: vision, ranged fire) and as the geometric
+        // half of path smoothing.
         //
-        // Integer Bresenham, and it applies the SAME strict corner rule as the
-        // pathfinder. If the two disagreed, smoothing would happily straighten a
-        // route into a shortcut A* had deliberately refused, and units would walk
-        // through wall corners that the pathfinder had carefully routed around.
-        public bool HasLineOfSight(int x0, int y0, int x1, int y1)
+        // Integer Bresenham, applying the SAME strict corner rule as the
+        // pathfinder — a diagonal needs both flanking tiles clear. If the two
+        // disagreed, a straightened route could clip a wall corner the
+        // pathfinder had deliberately routed around.
+        public bool HasLineOfSight(int x0, int y0, int x1, int y1) =>
+            TraceLine(x0, y0, x1, y1, groundOnly: false);
+
+        // A straight run that a smoother may collapse onto: unobstructed AND
+        // crossing nothing costlier than plain ground.
+        //
+        // This is the fix for the obvious trap: line of sight alone ignores
+        // terrain COST. Marsh is passable, so plain LOS would happily straighten
+        // a detour A* computed to AVOID the marsh right back through it — the
+        // shortcut is shorter in tiles but more expensive to walk. Restricting
+        // shortcuts to ground keeps cost-optimal detours intact, while uniform
+        // open ground still collapses to a single leg (which is what keeps
+        // straight-line movement, and 0xB1A7A676, unchanged).
+        public bool HasClearRun(int x0, int y0, int x1, int y1) =>
+            TraceLine(x0, y0, x1, y1, groundOnly: true);
+
+        bool TraceLine(int x0, int y0, int x1, int y1, bool groundOnly)
         {
             if (!Passable(x0, y0) || !Passable(x1, y1)) return false;
 
@@ -134,6 +150,10 @@ namespace Sim
 
                 if (stepX && stepY)
                 {
+                    // Clip prevention always keys on passability, never cost: a
+                    // diagonal does not enter the flanking tiles, so their cost
+                    // is irrelevant — only whether they would let the line
+                    // squeeze through a shut corner.
                     if (!Passable(x + sx, y) || !Passable(x, y + sy)) return false;
                     err += dx - dy;
                     x += sx;
@@ -142,7 +162,8 @@ namespace Sim
                 else if (stepX) { err -= dy; x += sx; }
                 else { err += dx; y += sy; }
 
-                if (!Passable(x, y)) return false;
+                if (groundOnly) { if (At(x, y) != Terrain.Ground) return false; }
+                else if (!Passable(x, y)) return false;
             }
             return true;
         }

@@ -112,7 +112,7 @@ namespace Sim
         const int HistoryTicks = 256;
 
         public readonly int PlayerId;
-        public readonly Simulation Sim = new();
+        public readonly Simulation Sim;
 
         readonly ITransport _net;
         readonly List<Command> _pending = new();                     // issued, not yet sent
@@ -132,7 +132,18 @@ namespace Sim
         // and everything downstream is noise.
         public DesyncReport Desync { get; private set; }
 
-        public Client(int playerId, ITransport net) { PlayerId = playerId; _net = net; }
+        public Client(int playerId, ITransport net) : this(playerId, net, null) { }
+
+        // Start the client's simulation on a specific map. Every client in a
+        // match must be given the identical map — StateChecksum mixes in the
+        // map's fingerprint, so two clients handed different terrain are caught
+        // on the first comparison rather than when their units first diverge.
+        public Client(int playerId, ITransport net, TileMap map)
+        {
+            PlayerId = playerId;
+            _net = net;
+            Sim = map != null ? new Simulation(map) : new Simulation();
+        }
 
         // Player intent now; runs InputDelay ticks in the future on all machines.
         // The command is not published until the next SendInput, which is what

@@ -170,8 +170,11 @@ namespace Sim
 
         // String-pulling. A* returns a route tile by tile, which makes units
         // zigzag across open ground following corners no one asked for. Walk
-        // forward to the FARTHEST tile still in line of sight, keep that, and
-        // discard everything in between.
+        // forward to the FARTHEST tile still reachable by a clear run — straight,
+        // unobstructed, and over nothing costlier than ground — keep that, and
+        // discard everything in between. The "over ground only" part is what
+        // stops smoothing from straightening a marsh detour back through the
+        // marsh; see TileMap.HasClearRun.
         //
         // This is also what protects the parity constant: on open ground the very
         // first check sees the destination directly, so the whole route collapses
@@ -186,7 +189,7 @@ namespace Sim
             while (i < raw.Count)
             {
                 int j = raw.Count - 1;
-                while (j > i && !Map.HasLineOfSight(cx, cy, raw[j].X, raw[j].Y)) j--;
+                while (j > i && !Map.HasClearRun(cx, cy, raw[j].X, raw[j].Y)) j--;
 
                 smoothed.Add(raw[j]);
                 cx = raw[j].X;

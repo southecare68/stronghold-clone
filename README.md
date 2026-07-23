@@ -32,7 +32,8 @@ stronghold-clone/
 │  ├─ InputSlice/       the mouse flow, headless
 │  ├─ CommandOrder/     command ordering is total (no arrival-order dependence)
 │  ├─ Netcode/          wire format, join codes, stalling, desync detection
-│  └─ Pathfinding/      map, RNG, deterministic grid A*
+│  ├─ Pathfinding/      map, RNG, deterministic grid A*
+│  └─ PathFollowing/    units follow smoothed routes, two-client sync
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```

@@ -1,0 +1,26 @@
+<!-- PathFollowing — units actually follow routes, and doing so stays deterministic.
+
+     The other tests prove the pathfinder is correct and that adding it did not
+     move 0xB1A7A676. This one proves the thing that was actually built: a Move
+     command turns into a route, the unit walks that route around obstacles, the
+     route smooths so open ground behaves exactly as before, and two clients
+     running the same orders agree on StateChecksum every tick — path state
+     included.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>PathFollowingTests</RootNamespace>
+    <AssemblyName>PathFollowingTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>
