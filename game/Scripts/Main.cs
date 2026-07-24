@@ -342,7 +342,8 @@ public partial class Main : Node2D
         int stone = _me.Sim.Stockpile(_myPlayer, ResourceType.Stone);
         int food = _me.Sim.Stockpile(_myPlayer, ResourceType.Food);
         return $"\nwood {wood}   stone {stone}   food {food}" +
-               "\n[B] barracks  [K] keep at cursor   right-click barracks to train";
+               "\n[B]arracks [K]eep [W]all [G]atehouse at cursor" +
+               "\nright-click your barracks to train, your gate to open/close";
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -410,12 +411,16 @@ public partial class Main : Node2D
             else if (mb.ButtonIndex == MouseButton.Right)
             {
                 // Right-click resolves to the most specific thing under the
-                // cursor. Training at your own barracks needs no unit selected;
-                // orders to units do.
-                var barracks = OwnBarracksAt(mb.Position);
-                if (barracks != null)
+                // cursor. Acting on your own building (train / work the gate)
+                // needs no unit selected; orders to units do.
+                var mine = OwnBuildingAt(mb.Position);
+                if (mine != null && mine.Type == BuildingType.Barracks)
                 {
-                    _me.Issue(new Command { Type = CommandType.Train, TargetId = barracks.Id });
+                    _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id });
+                }
+                else if (mine != null && mine.Type == BuildingType.Gatehouse)
+                {
+                    _me.Issue(new Command { Type = CommandType.ToggleGate, TargetId = mine.Id });
                 }
                 else if (_selected.Count > 0)
                 {
@@ -440,9 +445,11 @@ public partial class Main : Node2D
         }
         else if (e is InputEventKey k && k.Pressed && !k.Echo)
         {
-            // B / K place a building with its top-left at the cursor tile.
+            // B / K / W / G place a building with its top-left at the cursor tile.
             if (k.Keycode == Key.B) PlaceAtCursor(BuildingType.Barracks);
             else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
+            else if (k.Keycode == Key.W) PlaceAtCursor(BuildingType.Wall);
+            else if (k.Keycode == Key.G) PlaceAtCursor(BuildingType.Gatehouse);
         }
         else if (e is InputEventMouseButton up && !up.Pressed &&
                  up.ButtonIndex == MouseButton.Left && _boxing)
@@ -467,14 +474,14 @@ public partial class Main : Node2D
         return best;
     }
 
-    // One of your own barracks whose footprint is under the cursor, or null.
-    Building OwnBarracksAt(Vector2 screen)
+    // One of your own buildings whose footprint is under the cursor, or null.
+    Building OwnBuildingAt(Vector2 screen)
     {
         var w = ScreenToWorld(screen);
         int tx = Mathf.RoundToInt(w.X), ty = Mathf.RoundToInt(w.Y);
         foreach (var b in _me.Sim.Buildings)
         {
-            if (b.Owner != _myPlayer || b.Type != BuildingType.Barracks) continue;
+            if (b.Owner != _myPlayer) continue;
             if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) return b;
         }
         return null;
@@ -627,14 +634,44 @@ public partial class Main : Node2D
     // walled, barracks lighter with a production bar when a unit is queued.
     void DrawBuildings()
     {
+        var stone = new Color(0.55f, 0.55f, 0.58f);
         foreach (var b in _me.Sim.Buildings)
         {
             var owner = b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
-            var fill = b.Type == BuildingType.Keep ? owner.Darkened(0.35f) : owner.Darkened(0.15f);
             var rect = new Rect2(TileCorner(b.X, b.Y),
                                  new Vector2(b.W * PxPerUnit, b.H * PxPerUnit));
-            DrawRect(rect, fill);
-            DrawRect(rect, owner, false, 2f);
+
+            switch (b.Type)
+            {
+                case BuildingType.Wall:
+                    // Stone masonry with a thin tint of the owner's colour.
+                    DrawRect(rect, stone.Lerp(owner, 0.2f));
+                    DrawRect(rect, stone.Darkened(0.3f), false, 1f);
+                    break;
+
+                case BuildingType.Gatehouse:
+                    // Closed: filled stone. Open: just the jambs, so the gap reads
+                    // as walkable.
+                    if (b.Open)
+                    {
+                        DrawRect(rect, owner, false, 2f);
+                        var jamb = new Vector2(3f, rect.Size.Y);
+                        DrawRect(new Rect2(rect.Position, jamb), stone);
+                        DrawRect(new Rect2(rect.Position + new Vector2(rect.Size.X - 3f, 0), jamb), stone);
+                    }
+                    else
+                    {
+                        DrawRect(rect, stone.Lerp(owner, 0.3f));
+                        DrawRect(rect, owner, false, 2f);
+                    }
+                    break;
+
+                default:  // Keep, Barracks
+                    var fill = b.Type == BuildingType.Keep ? owner.Darkened(0.35f) : owner.Darkened(0.15f);
+                    DrawRect(rect, fill);
+                    DrawRect(rect, owner, false, 2f);
+                    break;
+            }
 
             // Production progress (BuildTimer counts DOWN from TrainTime=60).
             if (b.Type == BuildingType.Barracks && b.Queue > 0)

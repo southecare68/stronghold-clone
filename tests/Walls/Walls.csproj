@@ -1,0 +1,26 @@
+<!-- Walls — curtain walls and gatehouses, deterministically.
+
+     The Phase 3 castle mechanic: 1x1 walls block movement like any building, and
+     a gatehouse's gate toggles its tile between walkable (open) and blocking
+     (closed). This test proves a wall line seals a route, that a gate opens and
+     closes a gap in it, that toggling is deterministic across two clients, and
+     that a rejoin restores gate state AND the map occupancy it implies (an open
+     gate must not come back as a solid wall).
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>WallsTests</RootNamespace>
+    <AssemblyName>WallsTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

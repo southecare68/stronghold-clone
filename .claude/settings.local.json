@@ -99,7 +99,8 @@
       "Bash(screencapture -x -o sep1.png)",
       "Bash(sips -c 200 200 --cropOffset 340 340 sep1.png --out sep1-crop.png)",
       "Bash(screencapture -x -o sep2.png)",
-      "Bash(sips -c 170 170 --cropOffset 300 240 sep2.png --out sep2-crop.png)"
+      "Bash(sips -c 170 170 --cropOffset 300 240 sep2.png --out sep2-crop.png)",
+      "Bash(pkill -f \"MacOS/Godot --path\")"
     ]
   }
 }

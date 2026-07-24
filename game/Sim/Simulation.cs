@@ -15,9 +15,9 @@ using System.Collections.Generic;
 
 namespace Sim
 {
-    public enum CommandType { Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4 }
+    public enum CommandType { Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5 }
 
-    public enum BuildingType { Keep = 0, Barracks = 1 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3 }
 
     public enum ResourceType { Wood = 0, Stone = 1, Food = 2 }
 
@@ -62,13 +62,17 @@ namespace Sim
         public int Queue;
         public int BuildTimer;
 
+        // A gatehouse's gate. Open lets units cross its tile; closed blocks it
+        // like a wall. Ignored by every other building type.
+        public bool Open;
+
         public int CenterX => X + W / 2;
         public int CenterY => Y + H / 2;
 
         public Building Clone() => new Building
         {
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
-            Queue = Queue, BuildTimer = BuildTimer,
+            Queue = Queue, BuildTimer = BuildTimer, Open = Open,
         };
     }
 
@@ -188,13 +192,16 @@ namespace Sim
         const int TrainCostWood = 15;                           // per unit trained at a Barracks
 
         // Footprint size and placement cost per building type, indexed by
-        // (int)BuildingType. Cost is [wood, stone, food].
-        static readonly int[] FootW = { 3, 2 };                 // Keep 3x3, Barracks 2x2
-        static readonly int[] FootH = { 3, 2 };
+        // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
+        // are 1x1 so a player lays them out tile by tile into a curtain wall.
+        static readonly int[] FootW = { 3, 2, 1, 1 };           // Keep, Barracks, Wall, Gatehouse
+        static readonly int[] FootH = { 3, 2, 1, 1 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
             new[] { 40, 0, 0 },    // Barracks
+            new[] { 0, 5, 0 },     // Wall — cheap stone, meant to be spammed
+            new[] { 10, 10, 0 },   // Gatehouse
         };
 
         // The default match seed. Both machines must seed identically, so this is
@@ -271,7 +278,10 @@ namespace Sim
             {
                 var copy = b.Clone();
                 Buildings.Add(copy);
-                BlockFootprint(copy, true);
+                // Re-block, EXCEPT an open gate, whose tile stays walkable — get
+                // this wrong and the rejoiner's pathfinder would treat an open
+                // gateway as a solid wall.
+                BlockFootprint(copy, !(copy.Type == BuildingType.Gatehouse && copy.Open));
             }
         }
 
@@ -451,6 +461,17 @@ namespace Sim
                     if (!CanAfford(cmd.Owner, trainCost)) break;
                     Pay(cmd.Owner, trainCost);
                     barracks.Queue++;
+                    break;
+
+                case CommandType.ToggleGate:
+                    // TargetId carries the gatehouse id. Flipping the gate flips
+                    // its tile's passability: an open gate is walkable, a closed
+                    // one blocks like a wall.
+                    var gate = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (gate == null || gate.Owner != cmd.Owner ||
+                        gate.Type != BuildingType.Gatehouse) break;
+                    gate.Open = !gate.Open;
+                    BlockFootprint(gate, !gate.Open);
                     break;
             }
         }
@@ -893,6 +914,7 @@ namespace Sim
                 Mix(b.Id); Mix(b.Owner); Mix((int)b.Type);
                 Mix(b.X); Mix(b.Y); Mix(b.W); Mix(b.H);
                 Mix(b.Queue); Mix(b.BuildTimer);
+                Mix(b.Open ? 1 : 0);
             }
             return h;
         }

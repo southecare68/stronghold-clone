@@ -50,6 +50,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Combat/` — deterministic fighting, RNG in sync, rejoin mid-fight, win/lose
   - `Economy/` — gather/haul/deposit, conservation, two-client sync, rejoin
   - `Buildings/` — placement/cost, footprint blocking, keep drop-off, production
+  - `Walls/` — curtain walls, gatehouse open/close, two-client sync, rejoin
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -405,10 +406,43 @@ unit point-buy, your own mechanics).
    blocking, and chokepoint behaviour would need sim-level collision, which is a
    deliberate re-derive-the-constant decision for later (or for Phase 3).
 
+13. ✅ **Phase 3 begins — walls & gatehouses.** Two new building types: **Wall**
+   (1×1, cheap stone, meant to be laid tile by tile into a curtain wall) and
+   **Gatehouse** (1×1) with an **open/close gate** — the new mechanic. A gate's
+   `Open` flag toggles its tile between walkable and blocking, via a `ToggleGate`
+   command (owner-only). Built on the existing footprint-occupancy overlay, so
+   walls block the pathfinder for free; the gate just flips its own tile's block.
+
+   Same discipline: `Open` into `StateChecksum()` and the snapshot; Build/Toggle
+   reuse `Command.TargetId`, so the turn wire is unchanged; `0xB1A7A676` intact
+   (buildings are opt-in). The one subtlety, handled: `Restore` re-blocks every
+   footprint EXCEPT an open gate, so a rejoiner doesn't rebuild an open gateway
+   as a solid wall.
+
+   `tests/Walls`: a wall seals a corridor, a gate opens/closes the gap (path
+   appears/disappears and runs through the gate tile), enemies can't work your
+   gate, cost/validation, two-client build+toggle sync, and a rejoin that
+   restores gate state AND occupancy. Verified live: laid a wall line with a
+   gatehouse (`W`/`G` keys), right-clicked the gate to open it — the render
+   switched from a solid block to open jambs.
+
+   In-game: `[W]` wall, `[G]` gatehouse at the cursor; right-click your own gate
+   to open/close it.
+
+   ⚠️ **Walls are currently indestructible** (like all buildings). That makes them
+   a turtling tool with no counterplay — fine as a first slice, but the next task
+   fixes it.
+
 ## Immediate next tasks (in order)
-13. **Phase 3** (ARCHITECTURE.md): walls & gatehouses, the custom unit point-buy,
-   and the mechanics that make this its own game. Buildings + footprint blocking
-   already lay the groundwork for walls.
+14. **Siege — destructible buildings.** Give buildings HP and let soldiers attack
+   them (an AttackBuilding order + a unit TargetBuildingId; on 0 HP the footprint
+   unblocks and the building is removed). This is what makes walls a real
+   mechanic rather than a permanent barrier, and it's the other half of the
+   castle identity. New state into `StateChecksum()`/snapshot as always.
+15. **Custom unit point-buy** — the distinctive roster mechanic from the original
+   brief: compose unit stats (hp/damage/speed/cost) from a point budget instead
+   of the single hardcoded unit type. Touches the unit model and match setup.
+16. More Phase 3 (ARCHITECTURE.md): whatever mechanics make this its own game.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

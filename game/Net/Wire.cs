@@ -150,6 +150,7 @@ namespace Netcode
                 PutInt(buf, b.H);
                 PutInt(buf, b.Queue);
                 PutInt(buf, b.BuildTimer);
+                PutInt(buf, b.Open ? 1 : 0);
             }
 
             // Stockpiles and drop-offs, each written in the snapshot's iteration
@@ -280,6 +281,7 @@ namespace Netcode
                         H = GetInt(data, ref p),
                         Queue = GetInt(data, ref p),
                         BuildTimer = GetInt(data, ref p),
+                        Open = GetInt(data, ref p) != 0,
                     };
                 }
                 snap.Buildings = buildings;
