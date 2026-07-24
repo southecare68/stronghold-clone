@@ -106,9 +106,10 @@ node test/float-hazard.test.js  # why the sim forbids floating point
 Netcode proven in Node, ported to C# (bit-identical), and running over real ENet
 between two processes: commands cross both ways, checksums match, killing a peer
 freezes the match instead of desyncing it, and a fresh process can rejoin a match
-in progress. **Cross-architecture determinism is confirmed:** the parity test
-produces the identical checksum (`0xB1A7A676`) on an ARM Mac and an x86 Linux
-box. Units path around terrain with smoothing, fight deterministically (seeded
+in progress. **Cross-architecture determinism is confirmed both headlessly and
+live:** the parity test produces the identical checksum (`0xB1A7A676`) on an ARM
+Mac and an x86 Linux box, and a real windowed ENet match between the two machines
+plays in sync. Units path around terrain with smoothing, fight deterministically (seeded
 RNG, in sync across clients and across a mid-fight rejoin), gather resources into
 per-player stockpiles, put up buildings whose footprints block movement, train
 soldiers from a barracks, raise curtain walls with working gatehouses, and win by

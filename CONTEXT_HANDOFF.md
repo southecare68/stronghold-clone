@@ -286,10 +286,16 @@ than mod the closed 2006 engine, which was too limiting.
    to make two different CPU architectures agree exactly, and now they provably
    do. The riskiest unknown in the project is retired.
 
-   Still worth doing eventually, but no longer load-bearing: a **live** ARM↔x86
-   match over ENet (`--host` on one, `--join=<LAN IP>` on the other), watching
-   for `DESYNC`. The headless proof means that if a live match ever desyncs, the
-   sim is innocent and the fault is in the transport.
+   ✅ **And the live match is now done too** (2026-07-23). A real windowed game
+   over ENet between the ARM Mac (host) and the x86 Ubuntu box (join,
+   `--join=192.168.0.209`) ran and stayed **in sync** — the full game (economy,
+   buildings, combat, siege, point-buy designs), not just the headless sim,
+   bit-identical across two CPU architectures over the wire. This is the
+   end-to-end validation the whole project was built for; there is no more
+   fundamental unknown to retire. (Getting Ubuntu ready needed .NET via
+   `apt install dotnet-sdk-8.0` and a manual `dotnet build` in `game/` before the
+   first Godot launch — the class-not-found error means the C# assembly wasn't
+   compiled yet.)
 
 9. ✅ **Combat + win condition** — the first actual game loop. An Attack command
    targets an enemy unit; the unit chases (re-pathing periodically), strikes in
@@ -530,15 +536,23 @@ RTS is feature-complete against the original brief.
    In-game: `F5` saves the match so far (also auto-saved on exit);
    `--replay=user://last.shrep` watches it back (passive — no input).
 
+## Where it stands
+**Feature-complete against the original brief, and validated end to end.** A
+deterministic, cross-architecture multiplayer castle RTS: economy, buildings,
+combat, siege, working gatehouses, a custom point-buy roster, rejoin, desync
+detection, and replays — proven bit-identical on ARM and x86 both headlessly
+(SimParity) and in a **live windowed ENet match** between the two machines. 13
+Godot-free test suites guard it all; `0xB1A7A676` still holds.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
    RangeStat already works — a design with a long reach hits from afar, no
    projectile needed, but visuals/balance want attention); a real map/level
    beyond `TileMap.Demo`; camera/scroll for bigger maps; sound; menus.
-17. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking,
-   the live ARM↔x86 match over ENet (headless parity is proven; the live game
-   isn't), a replay system (falls out of lockstep almost for free — record the
-   command stream), lag tolerance.
+18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
+   replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
+   out of the replay format), reconnect polish. The live cross-arch match and the
+   replay system are already done.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy
