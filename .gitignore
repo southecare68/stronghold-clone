@@ -18,3 +18,19 @@ Thumbs.db
 
 # Node prototype
 node_modules/
+
+# Downloaded asset packs. Kept OUT of the repo on purpose: these are ~1 GB of
+# third-party binaries, which would bloat every clone forever (git keeps history
+# even after a delete) and push some files past GitHub's size limits.
+#
+# They live in the working folder so the editor can see them; anyone else setting
+# this project up downloads their own copy. If a pack ever becomes load-bearing,
+# the fix is Git LFS or a checked-in manifest of where each one came from — not
+# committing it directly.
+#
+# Paths are anchored with a leading / so they only match at the repo root, and
+# spaces in a name need no quoting here.
+/Source Files/
+/Source_Files/
+/particle-fx/
+/polygon-fantasy-kingdom/
