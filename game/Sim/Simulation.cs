@@ -199,10 +199,23 @@ namespace Sim
         }
     }
 
+    // A blow that landed this tick, from an attacker to what it hit. Transient
+    // render candy — the renderer turns a long-range one into a flying
+    // projectile. NOT game state: cleared every tick, never hashed, never
+    // snapshotted, never read back by the sim, so it cannot affect determinism.
+    public struct Shot
+    {
+        public int FromX, FromY, ToX, ToY;   // fixed-point
+    }
+
     public sealed class Simulation
     {
         public int TickNumber;
         public readonly List<Unit> Units = new(); // always iterated in id order
+
+        // Blows that landed this tick (see Shot). Working memory for rendering,
+        // not part of the simulation's state.
+        public readonly List<Shot> ShotsThisTick = new();
         public readonly List<ResourceNode> Nodes = new(); // id order
         public readonly List<Building> Buildings = new(); // id order
         public readonly TileMap Map;
@@ -718,6 +731,8 @@ namespace Sim
         // Advance exactly one tick using the full agreed command set for it.
         public void Tick(IReadOnlyList<Command> commands)
         {
+            ShotsThisTick.Clear();   // transient render log; nothing here is game state
+
             var ordered = new List<Command>(commands);
             ordered.Sort(CanonicalOrder); // same order on every machine
             foreach (var c in ordered) Apply(c);
@@ -917,6 +932,7 @@ namespace Sim
                     {
                         target.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
                         u.AttackTimer = d.Cooldown;
+                        ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = target.X, ToY = target.Y });
                     }
                 }
                 else
@@ -948,6 +964,11 @@ namespace Sim
                 {
                     b.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
                     u.AttackTimer = d.Cooldown;
+                    ShotsThisTick.Add(new Shot
+                    {
+                        FromX = u.X, FromY = u.Y,
+                        ToX = Fixed.FromInt(b.CenterX), ToY = Fixed.FromInt(b.CenterY),
+                    });
                 }
             }
             else if (!u.HasPath || TickNumber % ChaseRepathEvery == 0)

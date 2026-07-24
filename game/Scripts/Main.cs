@@ -62,7 +62,7 @@ public partial class Main : Node2D
     string _joinHint = "";
 
     // Which design a barracks trains when right-clicked. Chosen with number keys.
-    static readonly string[] DesignNames = { "Soldier", "Runner", "Brute" };
+    static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer" };
     int _trainDesign;
 
     public Client LocalClient => _me;
@@ -122,6 +122,15 @@ public partial class Main : Node2D
     bool _panning;
     const float MinZoom = 0.35f, MaxZoom = 3.5f;
 
+    // ---- Projectiles (render-only) -----------------------------------------
+    // A ranged blow becomes an arrow flying from shooter to target. Driven off
+    // the sim's transient ShotsThisTick, so it's purely cosmetic — no sim state,
+    // and it replays for free. Only long-range shots get an arrow; melee blows
+    // are adjacent and show nothing.
+    sealed class Projectile { public Vector2 From, To; public float Age; public float Life; }
+    readonly List<Projectile> _projectiles = new();
+    static readonly int RangedShotDist = Fixed.FromInt(2);   // shots longer than this get an arrow
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -167,10 +176,13 @@ public partial class Main : Node2D
             c.Sim.SpawnNode(ResourceType.Stone, 51, 36, 300);
 
             // The point-buy roster, registered identically on every machine so
-            // design ids line up: 0 default Soldier, 1 Runner, 2 Brute. Each
-            // spends the same budget, allocated differently.
+            // design ids line up: 0 Soldier, 1 Runner, 2 Brute, 3 Archer. Each
+            // spends the same budget, allocated differently — the Archer trades
+            // HP and speed for reach (RangeStat 8 = 4 tiles), so it softens the
+            // enemy on approach but folds fast if it gets caught.
             c.Sim.RegisterDesign(new UnitDesign { Hp = 60, Damage = 9, SpeedStat = 10, RangeStat = 3, Cooldown = 10 });
             c.Sim.RegisterDesign(new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 });
+            c.Sim.RegisterDesign(new UnitDesign { Hp = 55, Damage = 9, SpeedStat = 6, RangeStat = 8, Cooldown = 13 });
         }
 
         _shown = _me.Sim;
@@ -333,12 +345,14 @@ public partial class Main : Node2D
         {
             SnapshotPositions();
             _shown.Tick(_replay.Commands[_replayIndex++]);
+            CaptureShots();
             _accum -= Step;
             ran++;
         }
         _alpha = _replayIndex < _replay.Commands.Count
             ? (float)Mathf.Clamp(_accum / Step, 0.0, 1.0) : 1f;
 
+        AgeProjectiles(delta);
         ComputeSeparation();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -383,6 +397,7 @@ public partial class Main : Node2D
 
             bool advanced = _me.TryStep();
             foreach (var c in Clients()) if (c != _me) c.TryStep();
+            if (advanced) CaptureShots();
 
             if (!advanced)
             {
@@ -403,6 +418,7 @@ public partial class Main : Node2D
         // units beyond where the simulation has actually placed them.
         _alpha = (float)Mathf.Clamp(_accum / Step, 0.0, 1.0);
 
+        AgeProjectiles(delta);
         ComputeSeparation();
         LogDesyncOnce();
         _hud.Text = BuildHud();
@@ -480,8 +496,8 @@ public partial class Main : Node2D
         var d = _shown.DesignOf(_trainDesign);
         string name = _trainDesign < DesignNames.Length ? DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
-               $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
+               $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
+               "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack";
     }
 
@@ -619,10 +635,11 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
             else if (k.Keycode == Key.W) PlaceAtCursor(BuildingType.Wall);
             else if (k.Keycode == Key.G) PlaceAtCursor(BuildingType.Gatehouse);
-            // 1 / 2 / 3 choose which design a barracks trains.
+            // 1 / 2 / 3 / 4 choose which design a barracks trains.
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
             else if (k.Keycode == Key.Key2) _trainDesign = 1;
             else if (k.Keycode == Key.Key3) _trainDesign = 2;
+            else if (k.Keycode == Key.Key4) _trainDesign = 3;
             // F5 saves the match so far as a replay.
             else if (k.Keycode == Key.F5) SaveReplay();
         }
@@ -718,6 +735,7 @@ public partial class Main : Node2D
         DrawBuildings();
         DrawDropOffs();
         DrawPaths();
+        DrawProjectiles();
 
         foreach (var u in _shown.Units)
         {
@@ -953,6 +971,48 @@ public partial class Main : Node2D
     void CenterCamera()
     {
         _camCenter = new Vector2(_shown.Map.Width, _shown.Map.Height) * (PxPerUnit / 2f);
+    }
+
+    // Turn this tick's long-range blows into flying arrows. Short (melee) blows
+    // are skipped — the attacker is already next to the target.
+    void CaptureShots()
+    {
+        foreach (var s in _shown.ShotsThisTick)
+        {
+            int dist = Fixed.VLen(s.ToX - s.FromX, s.ToY - s.FromY);
+            if (dist < RangedShotDist) continue;
+            _projectiles.Add(new Projectile
+            {
+                From = new Vector2(s.FromX, s.FromY) / (float)Fixed.One * PxPerUnit,
+                To = new Vector2(s.ToX, s.ToY) / (float)Fixed.One * PxPerUnit,
+                Age = 0f,
+                Life = 0.14f,          // fast — an arrow, not a lob
+            });
+        }
+    }
+
+    void AgeProjectiles(double delta)
+    {
+        for (int i = _projectiles.Count - 1; i >= 0; i--)
+        {
+            _projectiles[i].Age += (float)delta;
+            if (_projectiles[i].Age >= _projectiles[i].Life) _projectiles.RemoveAt(i);
+        }
+    }
+
+    // Drawn in world-pixel space (under the camera transform): a small head with a
+    // short tail, moving from shooter to target.
+    void DrawProjectiles()
+    {
+        var color = new Color(1f, 0.95f, 0.6f);
+        foreach (var p in _projectiles)
+        {
+            float t = Mathf.Clamp(p.Age / p.Life, 0f, 1f);
+            var pos = p.From.Lerp(p.To, t);
+            var tail = p.From.Lerp(p.To, Mathf.Max(0f, t - 0.12f));
+            DrawLine(tail, pos, color, 1.5f);
+            DrawCircle(pos, 2f, color);
+        }
     }
 
     // Zoom keeping the world point under the cursor fixed — the expected feel.

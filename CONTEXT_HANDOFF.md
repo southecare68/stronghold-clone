@@ -552,12 +552,22 @@ node, so rendering and hit-testing share ONE formula — box-select and orders l
 correctly at any zoom — and the HUD Label, a separate node, stays screen-fixed
 for free. Works while watching a replay too. No sim/test changes.
 
+✅ **Ranged units.** The `RangeStat` already drove attack distance; this made it a
+real, legible feature. A **Shot** stream (`Simulation.ShotsThisTick`) records each
+blow's from/to — **transient render candy**: cleared every tick, never hashed,
+never snapshotted, never read back, so it's checksum-neutral (`0xB1A7A676`
+holds). `Main.cs` turns long-range shots into flying arrows (render-only, replays
+for free). Added an **Archer** design to the demo roster (RangeStat 8 = 4 tiles,
+low HP; key `4`), and the HUD shows the range stat. `tests/PointBuy` proves a
+ranged design damages a target from beyond melee reach without closing, while a
+melee unit must move in. Verified live: archers loosed yellow arrows at the enemy
+from range and killed a unit. (Range's point WEIGHT is unchanged — 1 pt/half-tile
+— so if archers prove too strong, bump the weight in `UnitDesign.PointCost`.)
+
 ## Immediate next tasks (choose by taste — the core is done)
-17. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
-   RangeStat already works — a design with a long reach hits from afar, no
-   projectile needed, but visuals/balance want attention); a real map/level
+17. **Polish & depth:** an interactive point-buy/roster UI; a real map/level
    beyond `TileMap.Demo` (now that there's a camera, maps can be bigger than the
-   window); sound; menus.
+   window); sound; menus; minimap.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

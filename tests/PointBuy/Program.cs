@@ -17,6 +17,7 @@ static class Program
         AFastDesignOutrunsASlowOne();
         ATankyDesignOutlastsAFragileOne();
         HighDamageKillsFaster();
+        ARangedDesignHitsFromAfar();
         TwoClientsAgreeWithMixedDesigns();
         DesignsSurviveARejoin();
 
@@ -128,6 +129,42 @@ static class Program
         Check("both dummies died", sharpKill > 0 && gruntKill > 0);
         Check($"the high-damage unit killed faster (sharp @ {sharpKill}, default @ {gruntKill})",
               sharpKill < gruntKill);
+    }
+
+    static void ARangedDesignHitsFromAfar()
+    {
+        Console.WriteLine("\na ranged design attacks without closing to melee:");
+        var sim = new Simulation(TileMap.Open(48));
+        // RangeStat 8 == 4 tiles of reach.
+        int archer = sim.RegisterDesign(new UnitDesign { Hp = 55, Damage = 9, SpeedStat = 6, RangeStat = 8, Cooldown = 12 });
+        Check("the archer fits the budget", archer == 1);
+
+        var shooter = sim.SpawnUnit(1, 20, 20, archer);
+        var dummy = sim.SpawnUnit(2, 24, 20);        // 4 tiles away, does not fight back
+        int startX = shooter.X;
+
+        sim.Tick(new List<Command>
+        {
+            new Command { Owner = 1, Type = CommandType.Attack, UnitIds = new[] { shooter.Id }, TargetId = dummy.Id },
+        });
+        for (int i = 0; i < 60; i++) sim.Tick(Array.Empty<Command>());
+
+        Check("the target is taking damage", dummy.Hp < 100);
+        Check("the archer stayed put (never closed to melee)", shooter.X == startX);
+        int gap = Fixed.VLen(dummy.X - shooter.X, dummy.Y - shooter.Y);
+        Check($"and it is firing from beyond melee reach ({gap / (double)Fixed.One:0.#} tiles)",
+              gap > Fixed.One * 3 / 2);
+
+        // Contrast: a default (melee) unit must close the distance to fight.
+        var melee = sim.SpawnUnit(1, 30, 30);
+        var dummy2 = sim.SpawnUnit(2, 34, 30);
+        int meleeStartX = melee.X;
+        sim.Tick(new List<Command>
+        {
+            new Command { Owner = 1, Type = CommandType.Attack, UnitIds = new[] { melee.Id }, TargetId = dummy2.Id },
+        });
+        for (int i = 0; i < 60; i++) sim.Tick(Array.Empty<Command>());
+        Check("a melee unit, by contrast, moved in to attack", melee.X > meleeStartX);
     }
 
     static void TwoClientsAgreeWithMixedDesigns()

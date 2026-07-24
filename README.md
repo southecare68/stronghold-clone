@@ -60,7 +60,8 @@ and drop a `G`atehouse in the gap, then right-click your gate to open or close i
 Buildings have HP — right-click an enemy structure with soldiers selected to
 besiege it, and a breached wall becomes passable rubble. Press `1`/`2`/`3` to
 choose which unit design a barracks trains — units are composed from a point
-budget, so a fast Runner and a tanky Brute cost the same but play differently.
+budget, so a fast Runner, a tanky Brute, and a long-range Archer cost the same but
+play differently. Ranged units loose arrows at their targets from a distance.
 Units that pile onto the same spot fan out on screen (a render-only effect; the
 simulation is untouched).
 

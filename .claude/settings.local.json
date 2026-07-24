@@ -120,7 +120,9 @@
       "Bash(sed -i '' 's#  - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin#  - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin\\\\n  - `Replay/` — record a match, replay it bit-for-bit, save/load#' CONTEXT_HANDOFF.md)",
       "Bash(sed -i '' 's#│  └─ PointBuy/         data-driven unit designs within a point budget#│  ├─ PointBuy/         data-driven unit designs within a point budget\\\\n│  └─ Replay/           record a match and replay it bit-for-bit#' README.md)",
       "Bash(screencapture -x -o cam-default.png)",
-      "Bash(sips -c 720 720 --cropOffset 80 80 cam-default.png --out cam-default-crop.png)"
+      "Bash(sips -c 720 720 --cropOffset 80 80 cam-default.png --out cam-default-crop.png)",
+      "Bash(screencapture -x -o full.png)",
+      "Bash(sips -c 720 720 --cropOffset 80 80 full.png --out full-crop.png)"
     ]
   }
 }
