@@ -386,14 +386,29 @@ economy, and buildings, all deterministic and cross-architecture-verified. What
 remains is polish and Phase 3 (the castle identity: walls/gatehouses, the custom
 unit point-buy, your own mechanics).
 
+12. ✅ **Unit separation — render-only.** Units that share a tile now fan out on
+   screen instead of drawing on one pixel. **Decision (2026-07-23): render-only**,
+   the same class as interpolation — the sim is untouched, so `0xB1A7A676` and
+   every test stay exactly as they were. (Sim-level separation would change plain
+   movement, which the parity scenario exercises by sending units to a shared
+   target, so it would have forced a re-derive of the constant; that trade wasn't
+   worth it for a cosmetic fix.)
+
+   In `Main.cs` only: each frame, units are grouped by the tile their sim position
+   rounds to, and a group of more than one is laid out in a stable **sunflower
+   (phyllotaxis)** pattern ranked by id — a stable function of sim state, so no
+   per-frame jitter. The offset goes through the single `WorldToScreen`, so clicks
+   and box-select land on the unit drawn under the cursor.
+
+   ⚠️ Consequence to remember: units still share a tile for **pathfinding,
+   combat, and gathering** — separation is purely visual. Formations, space-
+   blocking, and chokepoint behaviour would need sim-level collision, which is a
+   deliberate re-derive-the-constant decision for later (or for Phase 3).
+
 ## Immediate next tasks (in order)
-12. **Unit collision / separation** — the one rough edge that keeps recurring:
-   units stack on the same pixel when they converge (a move target, an enemy, a
-   node, a barracks spawn point). A deterministic separation/local-avoidance step
-   would make crowds read correctly. Integer-only, into the movement phase.
 13. **Phase 3** (ARCHITECTURE.md): walls & gatehouses, the custom unit point-buy,
-   and the mechanics that make this its own game. Buildings + blocking already
-   lay the groundwork for walls.
+   and the mechanics that make this its own game. Buildings + footprint blocking
+   already lay the groundwork for walls.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

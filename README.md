@@ -51,7 +51,8 @@ wiped out. Right-click a resource node to send workers to gather it — they hau
 loads back to the drop-off and your stockpile (shown in the HUD) grows. The HUD
 also shows the tick, state checksum, and sync state. Press `B`/`K` to place a
 barracks/keep at the cursor; right-click your own barracks to train soldiers.
-Buildings block movement, so units path around them.
+Buildings block movement, so units path around them. Units that pile onto the
+same spot fan out on screen (a render-only effect; the simulation is untouched).
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That

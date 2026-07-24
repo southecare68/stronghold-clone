@@ -83,6 +83,19 @@ public partial class Main : Node2D
     float _alpha;
     bool _debugInterp;
 
+    // ---- Render-only unit separation ---------------------------------------
+    // The simulation lets units share a tile (no collision — a deliberate scope
+    // choice), so a clump of units would otherwise draw on one pixel. This
+    // spreads them for display ONLY: the sim positions are untouched, nothing
+    // here feeds back, and no checksum can change — exactly like interpolation.
+    //
+    // The layout is a stable function of the sim state, not a per-frame physics
+    // relaxation, so it never jitters: units on the same tile are ranked by id
+    // and placed at fixed sunflower offsets around the shared point. A stack of N
+    // fans into a tight, steady cluster.
+    readonly Dictionary<int, Vector2> _sepOffset = new();
+    const float SepSpacing = 13f;      // ~ unit diameter, so circles just clear
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -270,9 +283,46 @@ public partial class Main : Node2D
         // units beyond where the simulation has actually placed them.
         _alpha = (float)Mathf.Clamp(_accum / Step, 0.0, 1.0);
 
+        ComputeSeparation();
         LogDesyncOnce();
         _hud.Text = BuildHud();
         QueueRedraw();
+    }
+
+    // Recompute the display offsets. Group units by the tile their sim position
+    // rounds to; each group of more than one fans out. Done once per frame so
+    // both drawing and hit-testing (which share WorldToScreen) see the same
+    // layout. Computed from sim state each frame, so it needs no history and
+    // cannot drift.
+    void ComputeSeparation()
+    {
+        _sepOffset.Clear();
+        var groups = new Dictionary<(int, int), List<int>>();
+        foreach (var u in _me.Sim.Units)
+        {
+            var cell = (Mathf.RoundToInt(u.X / (float)Fixed.One), Mathf.RoundToInt(u.Y / (float)Fixed.One));
+            if (!groups.TryGetValue(cell, out var list)) { list = new List<int>(); groups[cell] = list; }
+            list.Add(u.Id);
+        }
+
+        foreach (var list in groups.Values)
+        {
+            if (list.Count < 2) continue;      // a lone unit needs no offset
+            list.Sort();                       // rank by id so the layout is stable
+            for (int i = 0; i < list.Count; i++) _sepOffset[list[i]] = Sunflower(i);
+        }
+    }
+
+    // The i-th point of a sunflower (phyllotaxis) packing: rank 0 at the centre,
+    // the rest spiralling out with roughly even spacing. Stable per rank, so the
+    // cluster holds still.
+    static Vector2 Sunflower(int i)
+    {
+        if (i == 0) return Vector2.Zero;
+        const float golden = 2.399963f;        // golden angle, radians
+        float a = i * golden;
+        float r = SepSpacing * Mathf.Sqrt(i);
+        return new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
     }
 
     void LogDesyncOnce()
@@ -646,7 +696,10 @@ public partial class Main : Node2D
     // Everything on screen goes through here, hit-testing included, so a
     // box-select catches the units the player can actually see rather than the
     // invisible positions the sim is holding up to a tick ahead of the picture.
-    Vector2 WorldToScreen(Unit u) => DrawWorld(u) * PxPerUnit;
+    // The separation offset is added here too, so clicks land on the unit drawn
+    // under the cursor, not the stacked sim position it was spread from.
+    Vector2 WorldToScreen(Unit u) =>
+        DrawWorld(u) * PxPerUnit + (_sepOffset.TryGetValue(u.Id, out var o) ? o : Vector2.Zero);
 
     Vector2 ScreenToWorld(Vector2 screen) => screen / PxPerUnit;
 }
