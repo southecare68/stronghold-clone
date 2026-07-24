@@ -15,7 +15,35 @@ using System.Collections.Generic;
 
 namespace Sim
 {
-    public enum CommandType { Move = 0, Attack = 1 }
+    public enum CommandType { Move = 0, Attack = 1, Gather = 2 }
+
+    public enum ResourceType { Wood = 0, Stone = 1, Food = 2 }
+
+    // What a unit is currently doing beyond just moving/fighting.
+    public enum Job { None = 0, Gathering = 1 }
+
+    // A harvestable deposit sitting on a tile. Depletes as it is gathered and is
+    // removed when empty. Position is in whole tiles (a node occupies a cell),
+    // never fixed-point — mixing the two is how something ends up a fraction of a
+    // tile off from where the worker walks.
+    public sealed class ResourceNode
+    {
+        public int Id;
+        public ResourceType Type;
+        public int X, Y;
+        public int Amount;
+
+        public ResourceNode Clone() => new ResourceNode
+        {
+            Id = Id, Type = Type, X = X, Y = Y, Amount = Amount,
+        };
+    }
+
+    // Number of resource kinds, so a stockpile is a fixed-width int[].
+    public static class Resources
+    {
+        public const int Count = 3;   // Wood, Stone, Food
+    }
 
     public sealed class Command
     {
@@ -55,6 +83,15 @@ namespace Sim
         public int TargetId;
         public int AttackTimer;
 
+        // Economy. A unit gathering carries up to a full load from a node back to
+        // its owner's drop-off, then repeats. GatherNodeId is the assignment;
+        // CarryType/CarryAmount is what it is hauling right now.
+        public Job Job;
+        public int GatherNodeId;
+        public ResourceType CarryType;
+        public int CarryAmount;
+        public int GatherTimer;
+
         public bool Alive => Hp > 0;
 
         // The route still to walk, and how far along it we are. Tx/Ty always
@@ -71,6 +108,8 @@ namespace Sim
             {
                 Id = Id, Owner = Owner, X = X, Y = Y, Tx = Tx, Ty = Ty,
                 Hp = Hp, MaxHp = MaxHp, TargetId = TargetId, AttackTimer = AttackTimer,
+                Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
+                CarryAmount = CarryAmount, GatherTimer = GatherTimer,
                 PathIndex = PathIndex,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
@@ -82,8 +121,16 @@ namespace Sim
     {
         public int TickNumber;
         public readonly List<Unit> Units = new(); // always iterated in id order
+        public readonly List<ResourceNode> Nodes = new(); // id order
         public readonly TileMap Map;
         int _nextId = 1;
+        int _nextNodeId = 1;
+
+        // Per-owner stockpiles and drop-off points. SortedDictionary so every
+        // machine hashes owners in the same order — a plain Dictionary iterates in
+        // insertion order, which two machines could reach differently.
+        readonly SortedDictionary<int, int[]> _stock = new();
+        readonly SortedDictionary<int, Tile> _dropOff = new();
 
         readonly int _speed = Fixed.One / 8;    // fixed-point units per tick
         readonly int _arriveEps = Fixed.One / 4;
@@ -96,6 +143,11 @@ namespace Sim
         const int DamageMin = 8;
         const int DamageMax = 13;
         const int ChaseRepathEvery = 6;                         // ticks between chase re-paths
+
+        // --- Economy tuning ---------------------------------------------------
+        static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
+        const int CarryCapacity = 10;                           // load a worker hauls
+        const int GatherInterval = 5;                           // ticks per 1 unit gathered
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -138,14 +190,33 @@ namespace Sim
         // The unit ORDER is part of the state, not a detail: Tick and Checksum
         // both walk the list in place, so a restored list in a different order is
         // a different world with the same contents.
-        public void Restore(int tickNumber, int nextUnitId, uint rngState, IReadOnlyList<Unit> units)
+        public void Restore(int tickNumber, int nextUnitId, uint rngState, IReadOnlyList<Unit> units,
+                            int nextNodeId, IReadOnlyList<ResourceNode> nodes,
+                            IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
+            _nextNodeId = nextNodeId;
             _rng.Restore(rngState);
+
             Units.Clear();
             foreach (var u in units) Units.Add(u.Clone());
+
+            Nodes.Clear();
+            foreach (var n in nodes) Nodes.Add(n.Clone());
+
+            _stock.Clear();
+            foreach (var kv in stock) _stock[kv.Key] = (int[])kv.Value.Clone();
+
+            _dropOff.Clear();
+            foreach (var kv in dropOff) _dropOff[kv.Key] = kv.Value;
         }
+
+        // Read-only views for snapshotting. Sorted iteration is preserved, so a
+        // snapshot serialises owners in a fixed order on every machine.
+        public IReadOnlyList<ResourceNode> NodeList => Nodes;
+        public IReadOnlyDictionary<int, int[]> Stockpiles => _stock;
+        public IReadOnlyDictionary<int, Tile> DropOffs => _dropOff;
 
         public Unit SpawnUnit(int owner, int xInt, int yInt)
         {
@@ -164,6 +235,30 @@ namespace Sim
             return u;
         }
 
+        // ---- Economy setup & queries -----------------------------------------
+
+        public ResourceNode SpawnNode(ResourceType type, int x, int y, int amount)
+        {
+            var n = new ResourceNode { Id = _nextNodeId++, Type = type, X = x, Y = y, Amount = amount };
+            Nodes.Add(n);
+            return n;
+        }
+
+        // Where an owner's gatherers deposit. Until there are buildings this
+        // stands in for a keep/town-centre; set it identically on every machine.
+        public void SetDropOff(int owner, int x, int y) => _dropOff[owner] = new Tile(x, y);
+
+        public int Stockpile(int owner, ResourceType type) =>
+            _stock.TryGetValue(owner, out var s) ? s[(int)type] : 0;
+
+        public int NextNodeId => _nextNodeId;
+
+        int[] StockOf(int owner)
+        {
+            if (!_stock.TryGetValue(owner, out var s)) { s = new int[Resources.Count]; _stock[owner] = s; }
+            return s;
+        }
+
         void Apply(Command cmd)
         {
             switch (cmd.Type)
@@ -174,7 +269,7 @@ namespace Sim
                         var u = Units.Find(v => v.Id == id);
                         if (u != null && u.Owner == cmd.Owner)
                         {
-                            u.TargetId = 0;          // a plain move breaks off any fight
+                            StopWork(u);             // a plain move breaks off fighting AND gathering
                             Order(u, cmd.X, cmd.Y);
                         }
                     }
@@ -189,10 +284,42 @@ namespace Sim
                     {
                         var u = Units.Find(v => v.Id == id);
                         if (u != null && u.Owner == cmd.Owner && u.Id != target.Id)
+                        {
+                            u.Job = Job.None;         // stop gathering to go fight
                             u.TargetId = target.Id;   // the combat phase does the chasing/hitting
+                        }
+                    }
+                    break;
+
+                case CommandType.Gather:
+                    // TargetId carries the node id for a Gather order. A worker can
+                    // only be sent to a node the owner has a drop-off for, or the
+                    // load it hauls would have nowhere to go.
+                    var node = Nodes.Find(n => n.Id == cmd.TargetId);
+                    if (node == null || !_dropOff.ContainsKey(cmd.Owner)) break;
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u != null && u.Owner == cmd.Owner)
+                        {
+                            u.TargetId = 0;           // stop fighting to go work
+                            u.Job = Job.Gathering;
+                            u.GatherNodeId = node.Id;
+                            u.GatherTimer = 0;
+                        }
                     }
                     break;
             }
+        }
+
+        // Cancel whatever task a unit was on. Called before a plain Move so an
+        // order to reposition always wins over a standing job.
+        static void StopWork(Unit u)
+        {
+            u.TargetId = 0;
+            u.Job = Job.None;
+            u.GatherNodeId = 0;
+            u.GatherTimer = 0;
         }
 
         // Turn "go there" into a route. A click outside the world is clamped to
@@ -307,8 +434,74 @@ namespace Sim
 
             ResolveCombat();
             RemoveDead();
+            ResolveEconomy();
             TickNumber++;
         }
+
+        // The gathering loop, iterated in id order (no RNG, pure integer state).
+        // A worker cycles: walk to its node, gather to a full load, walk to its
+        // owner's drop-off, deposit, repeat — until the node is empty. Only a unit
+        // with Job.Gathering runs the body, so a match with no Gather orders (the
+        // parity scenario) is untouched.
+        void ResolveEconomy()
+        {
+            foreach (var u in Units)
+            {
+                if (u.Job != Job.Gathering) continue;
+
+                var node = Nodes.Find(n => n.Id == u.GatherNodeId);
+                bool nodeGone = node == null || node.Amount <= 0;
+                bool full = u.CarryAmount >= CarryCapacity;
+
+                if (full || (nodeGone && u.CarryAmount > 0))
+                {
+                    // Haul the load home.
+                    var drop = _dropOff[u.Owner];
+                    if (WithinRange(u, drop.X, drop.Y, GatherRange))
+                    {
+                        StockOf(u.Owner)[(int)u.CarryType] += u.CarryAmount;
+                        u.CarryAmount = 0;
+                        if (nodeGone) EndJob(u);
+                        else Order(u, node.X, node.Y);      // back for another load
+                    }
+                    else ChaseTo(u, drop.X, drop.Y);
+                }
+                else if (!nodeGone)
+                {
+                    // Fill up at the node.
+                    if (WithinRange(u, node.X, node.Y, GatherRange))
+                    {
+                        u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;   // stand and work
+                        if (++u.GatherTimer >= GatherInterval)
+                        {
+                            u.GatherTimer = 0;
+                            u.CarryType = node.Type;
+                            u.CarryAmount++;
+                            node.Amount--;
+                        }
+                    }
+                    else ChaseTo(u, node.X, node.Y);
+                }
+                else
+                {
+                    EndJob(u);   // node gone and empty-handed
+                }
+            }
+
+            Nodes.RemoveAll(n => n.Amount <= 0);
+        }
+
+        bool WithinRange(Unit u, int tileX, int tileY, int range) =>
+            Fixed.VLen(Fixed.FromInt(tileX) - u.X, Fixed.FromInt(tileY) - u.Y) <= range;
+
+        // Re-path toward a tile, but not every tick — same restraint as the combat
+        // chase, so a dozen workers don't each run A* on every frame.
+        void ChaseTo(Unit u, int tileX, int tileY)
+        {
+            if (!u.HasPath || TickNumber % ChaseRepathEvery == 0) Order(u, tileX, tileY);
+        }
+
+        static void EndJob(Unit u) { u.Job = Job.None; u.GatherNodeId = 0; u.GatherTimer = 0; }
 
         // The combat phase. Iterated in id order so RNG draws (damage rolls)
         // happen in a fixed sequence on every machine — the same discipline that
@@ -457,6 +650,7 @@ namespace Sim
             Mix(unchecked((int)Map.Fingerprint));
             Mix(TickNumber);
             Mix(_nextId);
+            Mix(_nextNodeId);
             Mix(unchecked((int)_rng.State));   // the dice must be in the same place
 
             foreach (var u in Units)
@@ -465,6 +659,8 @@ namespace Sim
                 Mix(u.Hp); Mix(u.MaxHp);
                 Mix(u.Tx); Mix(u.Ty);
                 Mix(u.TargetId); Mix(u.AttackTimer);
+                Mix((int)u.Job); Mix(u.GatherNodeId);
+                Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
 
                 // The route still to walk. Two units in identical positions with
                 // different plans are not in the same world.
@@ -475,6 +671,22 @@ namespace Sim
                     Mix(u.Path[i].X);
                     Mix(u.Path[i].Y);
                 }
+            }
+
+            foreach (var n in Nodes)                 // id order
+            {
+                Mix(n.Id); Mix((int)n.Type); Mix(n.X); Mix(n.Y); Mix(n.Amount);
+            }
+
+            foreach (var kv in _stock)               // SortedDictionary -> owner order
+            {
+                Mix(kv.Key);
+                foreach (int amt in kv.Value) Mix(amt);
+            }
+
+            foreach (var kv in _dropOff)             // owner order
+            {
+                Mix(kv.Key); Mix(kv.Value.X); Mix(kv.Value.Y);
             }
             return h;
         }

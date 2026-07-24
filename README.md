@@ -34,7 +34,8 @@ stronghold-clone/
 │  ├─ Netcode/          wire format, join codes, stalling, desync detection
 │  ├─ Pathfinding/      map, RNG, deterministic grid A*
 │  ├─ PathFollowing/    units follow smoothed routes, two-client sync
-│  └─ Combat/           deterministic fighting, RNG sync, win/lose
+│  ├─ Combat/           deterministic fighting, RNG sync, win/lose
+│  └─ Economy/          gather/haul/deposit, conservation, two-client sync
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -45,7 +46,9 @@ Play. Left-drag to box-select your units; right-click empty ground to move them
 (they route around the terrain — a walled gate, a lake, marsh — and the selected
 path is drawn) or right-click an enemy to attack. Units fight in melee, health
 bars show over the wounded, and the HUD announces the winner when a side is
-wiped out. The HUD also shows the tick, state checksum, and sync state.
+wiped out. Right-click a resource node to send workers to gather it — they haul
+loads back to the drop-off and your stockpile (shown in the HUD) grows. The HUD
+also shows the tick, state checksum, and sync state.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
@@ -92,6 +95,6 @@ freezes the match instead of desyncing it, and a fresh process can rejoin a matc
 in progress. **Cross-architecture determinism is confirmed:** the parity test
 produces the identical checksum (`0xB1A7A676`) on an ARM Mac and an x86 Linux
 box. Units path around terrain with smoothing, fight deterministically (seeded
-RNG, in sync across clients and across a mid-fight rejoin), and a side that is
-wiped out loses. Next up in Phase 2: economy and buildings. See
-`CONTEXT_HANDOFF.md`.
+RNG, in sync across clients and across a mid-fight rejoin), gather resources into
+per-player stockpiles, and a side that is wiped out loses. Next up in Phase 2:
+buildings. See `CONTEXT_HANDOFF.md`.

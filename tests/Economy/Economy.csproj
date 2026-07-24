@@ -1,0 +1,25 @@
+<!-- Economy — gathering, hauling, depositing, all deterministic.
+
+     Workers walk to a node, fill a load, carry it to their owner's drop-off, and
+     add it to the stockpile. This test proves the loop works, that the node
+     depletes and the stockpile grows by exactly what left it, and — the part
+     that matters for lockstep — that two clients running the same gather orders
+     agree on every tick, and a rejoiner rebuilds the whole economy.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>EconomyTests</RootNamespace>
+    <AssemblyName>EconomyTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

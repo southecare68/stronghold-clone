@@ -48,6 +48,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Pathfinding/` — map, RNG, and deterministic grid A* (Phase 2 foundations)
   - `PathFollowing/` — units follow smoothed routes; two-client StateChecksum sync
   - `Combat/` — deterministic fighting, RNG in sync, rejoin mid-fight, win/lose
+  - `Economy/` — gather/haul/deposit, conservation, two-client sync, rejoin
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -316,12 +317,43 @@ than mod the closed 2006 engine, which was too limiting.
    units stack when converging), no attack-move (Move ignores enemies; only
    Attack engages), one unit type. All fair game to extend.
 
+10. ✅ **Economy — gather / haul / deposit.** Resource nodes (Wood/Stone/Food)
+   sit on tiles and deplete; a Gather order sends a worker to cycle node → full
+   load → owner's drop-off → deposit → repeat, until the node is empty. Per-owner
+   stockpiles; a Move order calls a worker off the job. Right-click a node in-game
+   to gather; nodes shrink as they deplete, workers show a coloured dot when
+   hauling, and the HUD shows your stockpile.
+
+   Followed the same discipline as combat, no new surprises: all integer, no RNG
+   (gathering is not random), id-ordered iteration, stockpiles/drop-offs kept in
+   `SortedDictionary` so every machine hashes owners in the same order. New state
+   (nodes, stockpiles, drop-offs, per-unit worker fields) went into
+   `StateChecksum()` and `MatchSnapshot` — never `Checksum()`, so `SimParity`
+   still prints 0xB1A7A676 (a Gather-free match makes no economy changes). The
+   Gather order reuses `Command.TargetId` for the node id, so the turn wire format
+   was unchanged.
+
+   `tests/Economy` proves it: a worker banks a load with **conservation checked**
+   (what leaves the node = banked + carried, nothing created or lost), a small
+   node is emptied to the last unit, a Move breaks off the job, a gather with no
+   drop-off is refused, **two clients run the identical economy for 800 ticks in
+   sync**, and a **rejoin rebuilds the whole economy** (nodes, stockpiles,
+   drop-offs) and stays locked. Verified live too: three workers gathered wood to
+   a stockpile of 150, `IN SYNC ✓`.
+
+   Deliberately minimal: no unit collision (workers stack on a node), drop-off is
+   a bare tile (a stand-in for a keep/town-centre until buildings exist), no
+   worker/soldier distinction (any unit can gather or fight).
+
 ## Immediate next tasks (in order)
-10. **Phase 2 gameplay, remaining:** economy (resource nodes, workers, stockpiles)
-   and buildings (placement on the tile grid, footprints that block movement, a
-   keep + production). Same discipline: new state into `StateChecksum()` and
-   `MatchSnapshot`, never into `Checksum()`. Buildings want economy first
-   (something to cost/produce); economy is the natural next piece.
+11. **Buildings** — the last core Phase 2 system. Placement validated on the tile
+   grid, footprints that block movement (and become real drop-offs, replacing the
+   bare-tile stand-in), a keep, and production that costs from the stockpile.
+   Now unblocked: economy gives buildings something to cost and produce. Same
+   discipline — new state into `StateChecksum()`/`MatchSnapshot`, never
+   `Checksum()`.
+12. Optional polish that keeps coming up: **unit collision/separation** (units
+   currently stack when converging — on a move target, an enemy, or a node).
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

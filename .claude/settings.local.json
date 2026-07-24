@@ -86,7 +86,10 @@
       "Bash(sips -c 720 720 --cropOffset 80 80 route2.png --out route2-crop.png)",
       "Bash(perl -e 'select\\(undef,undef,undef,20\\)')",
       "Bash(screencapture -x -o combat1.png)",
-      "Bash(sips -c 720 720 --cropOffset 80 80 combat1.png --out combat1-crop.png)"
+      "Bash(sips -c 720 720 --cropOffset 80 80 combat1.png --out combat1-crop.png)",
+      "Bash(perl -e 'select\\(undef,undef,undef,25\\)')",
+      "Bash(screencapture -x -o econ1.png)",
+      "Bash(sips -c 400 400 --cropOffset 80 80 econ1.png --out econ1-crop.png)"
     ]
   }
 }

@@ -92,6 +92,7 @@ namespace Netcode
 
             PutInt(buf, snap.Tick);
             PutInt(buf, snap.NextUnitId);
+            PutInt(buf, snap.NextNodeId);
             PutUInt(buf, snap.RngState);
             PutUInt(buf, snap.Checksum);
 
@@ -108,6 +109,11 @@ namespace Netcode
                 PutInt(buf, u.MaxHp);
                 PutInt(buf, u.TargetId);
                 PutInt(buf, u.AttackTimer);
+                PutInt(buf, (int)u.Job);
+                PutInt(buf, u.GatherNodeId);
+                PutInt(buf, (int)u.CarryType);
+                PutInt(buf, u.CarryAmount);
+                PutInt(buf, u.GatherTimer);
 
                 // The remaining route. StateChecksum hashes it, so a snapshot that
                 // dropped it would fail its own checksum verification on arrival —
@@ -119,6 +125,33 @@ namespace Netcode
                     PutInt(buf, u.Path[i].X);
                     PutInt(buf, u.Path[i].Y);
                 }
+            }
+
+            PutInt(buf, snap.Nodes.Length);
+            foreach (var n in snap.Nodes)
+            {
+                PutInt(buf, n.Id);
+                PutInt(buf, (int)n.Type);
+                PutInt(buf, n.X);
+                PutInt(buf, n.Y);
+                PutInt(buf, n.Amount);
+            }
+
+            // Stockpiles and drop-offs, each written in the snapshot's iteration
+            // order (a SortedDictionary in the sim, so owner order everywhere).
+            PutInt(buf, snap.Stock.Count);
+            foreach (var kv in snap.Stock)
+            {
+                PutInt(buf, kv.Key);
+                PutInt(buf, kv.Value.Length);
+                foreach (int amt in kv.Value) PutInt(buf, amt);
+            }
+            PutInt(buf, snap.DropOffs.Count);
+            foreach (var kv in snap.DropOffs)
+            {
+                PutInt(buf, kv.Key);
+                PutInt(buf, kv.Value.X);
+                PutInt(buf, kv.Value.Y);
             }
 
             PutInt(buf, snap.PendingTurns.Length);
@@ -156,6 +189,7 @@ namespace Netcode
                 {
                     Tick = GetInt(data, ref p),
                     NextUnitId = GetInt(data, ref p),
+                    NextNodeId = GetInt(data, ref p),
                     RngState = GetUInt(data, ref p),
                     Checksum = GetUInt(data, ref p),
                 };
@@ -177,6 +211,11 @@ namespace Netcode
                         MaxHp = GetInt(data, ref p),
                         TargetId = GetInt(data, ref p),
                         AttackTimer = GetInt(data, ref p),
+                        Job = (Job)GetInt(data, ref p),
+                        GatherNodeId = GetInt(data, ref p),
+                        CarryType = (ResourceType)GetInt(data, ref p),
+                        CarryAmount = GetInt(data, ref p),
+                        GatherTimer = GetInt(data, ref p),
                     };
 
                     int remaining = GetInt(data, ref p);
@@ -192,6 +231,46 @@ namespace Netcode
                     units[i] = u;
                 }
                 snap.Units = units;
+
+                int nodeCount = GetInt(data, ref p);
+                if (nodeCount < 0 || nodeCount > MaxUnits) return null;
+                var nodes = new ResourceNode[nodeCount];
+                for (int i = 0; i < nodeCount; i++)
+                {
+                    nodes[i] = new ResourceNode
+                    {
+                        Id = GetInt(data, ref p),
+                        Type = (ResourceType)GetInt(data, ref p),
+                        X = GetInt(data, ref p),
+                        Y = GetInt(data, ref p),
+                        Amount = GetInt(data, ref p),
+                    };
+                }
+                snap.Nodes = nodes;
+
+                int stockCount = GetInt(data, ref p);
+                if (stockCount < 0 || stockCount > MaxUnits) return null;
+                var stock = new Dictionary<int, int[]>();
+                for (int i = 0; i < stockCount; i++)
+                {
+                    int owner = GetInt(data, ref p);
+                    int len = GetInt(data, ref p);
+                    if (len < 0 || len > MaxUnitsPerCommand) return null;
+                    var amts = new int[len];
+                    for (int j = 0; j < len; j++) amts[j] = GetInt(data, ref p);
+                    stock[owner] = amts;
+                }
+                snap.Stock = stock;
+
+                int dropCount = GetInt(data, ref p);
+                if (dropCount < 0 || dropCount > MaxUnits) return null;
+                var drops = new Dictionary<int, Tile>();
+                for (int i = 0; i < dropCount; i++)
+                {
+                    int owner = GetInt(data, ref p);
+                    drops[owner] = new Tile(GetInt(data, ref p), GetInt(data, ref p));
+                }
+                snap.DropOffs = drops;
 
                 int turnCount = GetInt(data, ref p);
                 if (turnCount < 0 || turnCount > MaxPendingTurns) return null;

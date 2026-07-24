@@ -91,7 +91,8 @@ public partial class Main : Node2D
         _debugInterp = HasFlag("--debug-interp");
         SetUpTransport();
 
-        // Identical starting armies on EVERY machine (determinism starts here).
+        // Identical starting state on EVERY machine (determinism starts here):
+        // same armies, same drop-offs, same resource nodes in the same order.
         foreach (var c in Clients())
         {
             c.Sim.SpawnUnit(1, 8, 8);
@@ -99,6 +100,14 @@ public partial class Main : Node2D
             c.Sim.SpawnUnit(1, 8, 11);
             c.Sim.SpawnUnit(2, 44, 40);
             c.Sim.SpawnUnit(2, 47, 40);
+
+            c.Sim.SetDropOff(1, 8, 8);          // each side banks near its start
+            c.Sim.SetDropOff(2, 47, 40);
+
+            c.Sim.SpawnNode(ResourceType.Wood, 14, 14, 300);   // player 1's side
+            c.Sim.SpawnNode(ResourceType.Stone, 5, 16, 300);
+            c.Sim.SpawnNode(ResourceType.Wood, 50, 44, 300);   // player 2's side
+            c.Sim.SpawnNode(ResourceType.Stone, 51, 36, 300);
         }
 
         _hud = new Label { Position = new Vector2(8, 8) };
@@ -267,7 +276,16 @@ public partial class Main : Node2D
         GD.PrintErr("[sim] the two machines no longer agree — everything after this tick is meaningless");
     }
 
-    string BuildHud() => Head() + WinnerLine() + InterpLine();
+    string BuildHud() => Head() + StockLine() + WinnerLine() + InterpLine();
+
+    // Your own stockpile. Reads straight from the sim each frame.
+    string StockLine()
+    {
+        int wood = _me.Sim.Stockpile(_myPlayer, ResourceType.Wood);
+        int stone = _me.Sim.Stockpile(_myPlayer, ResourceType.Stone);
+        int food = _me.Sim.Stockpile(_myPlayer, ResourceType.Food);
+        return $"\nwood {wood}   stone {stone}   food {food}";
+    }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
     // nobody is fighting), so this just reads the current verdict each frame.
@@ -333,26 +351,23 @@ public partial class Main : Node2D
             }
             else if (mb.ButtonIndex == MouseButton.Right && _selected.Count > 0)
             {
-                // Right-click an enemy to attack it, empty ground to move there.
+                // Right-click resolves to the most specific thing under the
+                // cursor: an enemy is an attack, a resource node is a gather,
+                // bare ground is a move.
+                var ids = new List<int>(_selected).ToArray();
                 var enemy = EnemyUnitAt(mb.Position);
+                var node = NodeAt(mb.Position);
                 if (enemy != null)
-                {
-                    _me.Issue(new Command
-                    {
-                        Type = CommandType.Attack,
-                        UnitIds = new List<int>(_selected).ToArray(),
-                        TargetId = enemy.Id,
-                    });
-                }
+                    _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+                else if (node != null)
+                    _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
                 else
                 {
                     var w = ScreenToWorld(mb.Position);
                     _me.Issue(new Command
                     {
-                        Type = CommandType.Move,
-                        UnitIds = new List<int>(_selected).ToArray(),
-                        X = Mathf.RoundToInt(w.X),
-                        Y = Mathf.RoundToInt(w.Y),
+                        Type = CommandType.Move, UnitIds = ids,
+                        X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
                     });
                 }
             }
@@ -380,6 +395,19 @@ public partial class Main : Node2D
         return best;
     }
 
+    // The resource node under the cursor, or null.
+    ResourceNode NodeAt(Vector2 screen)
+    {
+        ResourceNode best = null;
+        float bestD2 = 12f * 12f;
+        foreach (var n in _me.Sim.Nodes)
+        {
+            float d2 = (new Vector2(n.X, n.Y) * PxPerUnit).DistanceSquaredTo(screen);
+            if (d2 < bestD2) { bestD2 = d2; best = n; }
+        }
+        return best;
+    }
+
     void SelectInBox(Vector2 p0, Vector2 p1)
     {
         _selected.Clear();
@@ -399,9 +427,15 @@ public partial class Main : Node2D
     static readonly Color RockColor = new(0.34f, 0.33f, 0.31f);
     static readonly Color MarshColor = new(0.24f, 0.25f, 0.11f);
 
+    static readonly Color WoodColor = new(0.45f, 0.32f, 0.16f);
+    static readonly Color StoneColor = new(0.62f, 0.62f, 0.66f);
+    static readonly Color FoodColor = new(0.85f, 0.75f, 0.25f);
+
     public override void _Draw()
     {
         DrawTerrain();
+        DrawNodes();
+        DrawDropOffs();
         DrawPaths();
 
         foreach (var u in _me.Sim.Units)
@@ -413,6 +447,9 @@ public partial class Main : Node2D
                 DrawArc(p, 9f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
             if (u.MaxHp > 0 && u.Hp < u.MaxHp)
                 DrawHealthBar(p, u.Hp, u.MaxHp);
+            // A worker hauling a load shows a small dot of the resource's colour.
+            if (u.CarryAmount > 0)
+                DrawCircle(p + new Vector2(0, -8f), 2f, ResourceColor(u.CarryType));
         }
         if (_boxing)
         {
@@ -465,6 +502,37 @@ public partial class Main : Node2D
                 DrawCircle(wp, 2.5f, line);
                 prev = wp;
             }
+        }
+    }
+
+    static Color ResourceColor(ResourceType t) => t switch
+    {
+        ResourceType.Wood => WoodColor,
+        ResourceType.Stone => StoneColor,
+        _ => FoodColor,
+    };
+
+    // Resource nodes: a square coloured by type, sized by how much is left, so a
+    // depleting node visibly shrinks.
+    void DrawNodes()
+    {
+        foreach (var n in _me.Sim.Nodes)
+        {
+            var center = new Vector2(n.X, n.Y) * PxPerUnit;
+            float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
+            DrawRect(new Rect2(center - new Vector2(s / 2f, s / 2f), new Vector2(s, s)),
+                     ResourceColor(n.Type));
+        }
+    }
+
+    // A ring at each player's drop-off, in that player's colour.
+    void DrawDropOffs()
+    {
+        foreach (var kv in _me.Sim.DropOffs)
+        {
+            var p = new Vector2(kv.Value.X, kv.Value.Y) * PxPerUnit;
+            var c = kv.Key == 1 ? new Color(0.3f, 0.7f, 1f, 0.8f) : new Color(1f, 0.45f, 0.35f, 0.8f);
+            DrawArc(p, 13f, 0, Mathf.Tau, 28, c, 2f);
         }
     }
 
