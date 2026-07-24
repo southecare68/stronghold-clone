@@ -51,6 +51,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Economy/` — gather/haul/deposit, conservation, two-client sync, rejoin
   - `Buildings/` — placement/cost, footprint blocking, keep drop-off, production
   - `Walls/` — curtain walls, gatehouse open/close, two-client sync, rejoin
+  - `Siege/` — destructible buildings, breaching, two-client sync, rejoin
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -433,12 +434,36 @@ unit point-buy, your own mechanics).
    a turtling tool with no counterplay — fine as a first slice, but the next task
    fixes it.
 
+14. ✅ **Siege — destructible buildings.** Buildings now have HP (Keep 600,
+   Barracks 250, Wall 200, Gatehouse 250). An `AttackBuilding` order sets a unit's
+   `TargetBuildingId`; the combat phase closes to the wall and batters it with the
+   same RNG damage as unit combat. At 0 HP the building is destroyed: its footprint
+   becomes walkable rubble, a razed keep stops being a drop-off, and it leaves the
+   list. Only enemy buildings can be targeted; besiegers clear a destroyed target
+   the next tick. Distance is measured to the nearest footprint tile, so a unit
+   against any face of a big keep is in range.
+
+   Same discipline: `TargetBuildingId` and building HP into `StateChecksum()` and
+   the snapshot; `AttackBuilding` reuses `Command.TargetId` (building id), turn
+   wire unchanged; `0xB1A7A676` intact (opt-in). Guard added: the economy deposit
+   handles a drop-off vanishing mid-haul (its keep razed) by standing the worker
+   down instead of throwing.
+
+   `tests/Siege`: a wall is battered down, breaching it re-opens the sealed
+   corridor (rubble is passable), you can't besiege your own buildings, razing a
+   keep drops its drop-off, move-only leaves buildings alone, **two clients batter
+   in sync for 700 ticks**, and a **rejoin carries building HP and the siege
+   through the breach**. Verified live: sent three units across the demo map to
+   right-click the enemy keep — they crossed, besieged, and **razed it**, then
+   stood on the cleared site, `IN SYNC ✓`.
+
+   In-game: right-click an enemy building with units selected to besiege it;
+   building HP bars show once a structure is hit.
+
+   **Walls are now a real mechanic** — build them to buy time, breach them to get
+   through. The castle-siege loop is complete.
+
 ## Immediate next tasks (in order)
-14. **Siege — destructible buildings.** Give buildings HP and let soldiers attack
-   them (an AttackBuilding order + a unit TargetBuildingId; on 0 HP the footprint
-   unblocks and the building is removed). This is what makes walls a real
-   mechanic rather than a permanent barrier, and it's the other half of the
-   castle identity. New state into `StateChecksum()`/snapshot as always.
 15. **Custom unit point-buy** — the distinctive roster mechanic from the original
    brief: compose unit stats (hp/damage/speed/cost) from a point budget instead
    of the single hardcoded unit type. Touches the unit model and match setup.

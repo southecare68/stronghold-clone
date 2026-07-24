@@ -109,6 +109,7 @@ namespace Netcode
                 PutInt(buf, u.Hp);
                 PutInt(buf, u.MaxHp);
                 PutInt(buf, u.TargetId);
+                PutInt(buf, u.TargetBuildingId);
                 PutInt(buf, u.AttackTimer);
                 PutInt(buf, (int)u.Job);
                 PutInt(buf, u.GatherNodeId);
@@ -148,6 +149,8 @@ namespace Netcode
                 PutInt(buf, b.Y);
                 PutInt(buf, b.W);
                 PutInt(buf, b.H);
+                PutInt(buf, b.Hp);
+                PutInt(buf, b.MaxHp);
                 PutInt(buf, b.Queue);
                 PutInt(buf, b.BuildTimer);
                 PutInt(buf, b.Open ? 1 : 0);
@@ -227,6 +230,7 @@ namespace Netcode
                         Hp = GetInt(data, ref p),
                         MaxHp = GetInt(data, ref p),
                         TargetId = GetInt(data, ref p),
+                        TargetBuildingId = GetInt(data, ref p),
                         AttackTimer = GetInt(data, ref p),
                         Job = (Job)GetInt(data, ref p),
                         GatherNodeId = GetInt(data, ref p),
@@ -279,6 +283,8 @@ namespace Netcode
                         Y = GetInt(data, ref p),
                         W = GetInt(data, ref p),
                         H = GetInt(data, ref p),
+                        Hp = GetInt(data, ref p),
+                        MaxHp = GetInt(data, ref p),
                         Queue = GetInt(data, ref p),
                         BuildTimer = GetInt(data, ref p),
                         Open = GetInt(data, ref p) != 0,

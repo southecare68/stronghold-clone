@@ -100,7 +100,15 @@
       "Bash(sips -c 200 200 --cropOffset 340 340 sep1.png --out sep1-crop.png)",
       "Bash(screencapture -x -o sep2.png)",
       "Bash(sips -c 170 170 --cropOffset 300 240 sep2.png --out sep2-crop.png)",
-      "Bash(pkill -f \"MacOS/Godot --path\")"
+      "Bash(pkill -f \"MacOS/Godot --path\")",
+      "Bash(perl -e 'select\\(undef,undef,undef,40\\)')",
+      "Bash(screencapture -x -o siege1.png)",
+      "Bash(sips -c 260 260 --cropOffset 480 480 siege1.png --out siege1-crop.png)",
+      "Bash(perl -e 'select\\(undef,undef,undef,30\\)')",
+      "Bash(screencapture -x -o siege2.png)",
+      "Bash(sips -c 200 240 --cropOffset 540 560 siege2.png --out siege2-crop.png)",
+      "Bash(screencapture -x -o siege3.png)",
+      "Bash(sips -c 640 640 --cropOffset 80 80 siege3.png --out siege3-crop.png)"
     ]
   }
 }

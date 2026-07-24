@@ -15,7 +15,10 @@ using System.Collections.Generic;
 
 namespace Sim
 {
-    public enum CommandType { Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5 }
+    public enum CommandType
+    {
+        Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6,
+    }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3 }
 
@@ -56,6 +59,7 @@ namespace Sim
         public int Owner;
         public BuildingType Type;
         public int X, Y, W, H;
+        public int Hp, MaxHp;
 
         // Production: how many units are queued, and ticks left on the one being
         // built. Only Barracks use these.
@@ -66,13 +70,14 @@ namespace Sim
         // like a wall. Ignored by every other building type.
         public bool Open;
 
+        public bool Alive => Hp > 0;
         public int CenterX => X + W / 2;
         public int CenterY => Y + H / 2;
 
         public Building Clone() => new Building
         {
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
-            Queue = Queue, BuildTimer = BuildTimer, Open = Open,
+            Hp = Hp, MaxHp = MaxHp, Queue = Queue, BuildTimer = BuildTimer, Open = Open,
         };
     }
 
@@ -107,11 +112,13 @@ namespace Sim
         public int Hp;
         public int MaxHp;
 
-        // Combat. TargetId is the enemy this unit is engaging (0 = none); a unit
-        // only fights once it has been given an Attack order, which is what keeps
-        // Move-only scenarios (like the parity test) entirely out of combat.
+        // Combat. TargetId is the enemy UNIT this is engaging; TargetBuildingId is
+        // an enemy BUILDING being besieged. At most one is non-zero — issuing one
+        // target clears the other. A unit only fights once given an order, which
+        // keeps Move-only scenarios (the parity test) entirely out of combat.
         // AttackTimer counts ticks until the next blow may land.
         public int TargetId;
+        public int TargetBuildingId;
         public int AttackTimer;
 
         // Economy. A unit gathering carries up to a full load from a node back to
@@ -138,7 +145,8 @@ namespace Sim
             var copy = new Unit
             {
                 Id = Id, Owner = Owner, X = X, Y = Y, Tx = Tx, Ty = Ty,
-                Hp = Hp, MaxHp = MaxHp, TargetId = TargetId, AttackTimer = AttackTimer,
+                Hp = Hp, MaxHp = MaxHp, TargetId = TargetId,
+                TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer,
                 PathIndex = PathIndex,
@@ -203,6 +211,9 @@ namespace Sim
             new[] { 0, 5, 0 },     // Wall — cheap stone, meant to be spammed
             new[] { 10, 10, 0 },   // Gatehouse
         };
+        // Structural hit points per type. A wall is tough enough to buy time but
+        // not permanent — a handful of soldiers breach it in well under a minute.
+        static readonly int[] BuildHp = { 600, 250, 200, 250 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -365,6 +376,7 @@ namespace Sim
             {
                 Id = _nextBuildingId++, Owner = owner, Type = type,
                 X = x, Y = y, W = FootW[(int)type], H = FootH[(int)type],
+                Hp = BuildHp[(int)type], MaxHp = BuildHp[(int)type],
             };
             Buildings.Add(b);
             BlockFootprint(b, true);
@@ -416,7 +428,25 @@ namespace Sim
                         if (u != null && u.Owner == cmd.Owner && u.Id != target.Id)
                         {
                             u.Job = Job.None;         // stop gathering to go fight
+                            u.TargetBuildingId = 0;   // a unit target replaces a siege target
                             u.TargetId = target.Id;   // the combat phase does the chasing/hitting
+                        }
+                    }
+                    break;
+
+                case CommandType.AttackBuilding:
+                    // TargetId carries the building id. Only an ENEMY building can
+                    // be besieged; your own (and a bad id) is ignored.
+                    var wall = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (wall == null || !wall.Alive || wall.Owner == cmd.Owner) break;
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u != null && u.Owner == cmd.Owner)
+                        {
+                            u.Job = Job.None;
+                            u.TargetId = 0;
+                            u.TargetBuildingId = wall.Id;
                         }
                     }
                     break;
@@ -433,6 +463,7 @@ namespace Sim
                         if (u != null && u.Owner == cmd.Owner)
                         {
                             u.TargetId = 0;           // stop fighting to go work
+                            u.TargetBuildingId = 0;
                             u.Job = Job.Gathering;
                             u.GatherNodeId = node.Id;
                             u.GatherTimer = 0;
@@ -494,6 +525,7 @@ namespace Sim
         static void StopWork(Unit u)
         {
             u.TargetId = 0;
+            u.TargetBuildingId = 0;
             u.Job = Job.None;
             u.GatherNodeId = 0;
             u.GatherTimer = 0;
@@ -611,6 +643,7 @@ namespace Sim
 
             ResolveCombat();
             RemoveDead();
+            RemoveDestroyedBuildings();
             ResolveEconomy();
             ResolveProduction();
             TickNumber++;
@@ -674,8 +707,9 @@ namespace Sim
 
                 if (full || (nodeGone && u.CarryAmount > 0))
                 {
-                    // Haul the load home.
-                    var drop = _dropOff[u.Owner];
+                    // Haul the load home. If the drop-off is gone (its keep was
+                    // razed mid-haul), there is nowhere to bank — stand down.
+                    if (!_dropOff.TryGetValue(u.Owner, out var drop)) { EndJob(u); continue; }
                     if (WithinRange(u, drop.X, drop.Y, DropOffRange))
                     {
                         StockOf(u.Owner)[(int)u.CarryType] += u.CarryAmount;
@@ -735,6 +769,8 @@ namespace Sim
             foreach (var u in Units)
             {
                 if (u.AttackTimer > 0) u.AttackTimer--;
+
+                if (u.TargetBuildingId != 0) { SiegeBuilding(u); continue; }
                 if (u.TargetId == 0) continue;
 
                 var target = Units.Find(v => v.Id == u.TargetId);
@@ -772,6 +808,59 @@ namespace Sim
                     if (needsPath)
                         Order(u, Fixed.ToInt(target.X), Fixed.ToInt(target.Y));
                 }
+            }
+        }
+
+        // Besiege a building: close to its wall, then batter it on cooldown.
+        // Damage comes from the same RNG as unit combat, drawn in the same
+        // id-ordered sequence, so it stays deterministic. A destroyed target
+        // clears itself here; the rubble is cleared in RemoveDestroyedBuildings.
+        void SiegeBuilding(Unit u)
+        {
+            var b = Buildings.Find(x => x.Id == u.TargetBuildingId);
+            if (b == null || !b.Alive) { u.TargetBuildingId = 0; return; }
+
+            if (DistToBuilding(u, b) <= AttackRange)
+            {
+                u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
+                if (u.AttackTimer == 0)
+                {
+                    b.Hp -= _rng.NextInt(DamageMin, DamageMax);
+                    u.AttackTimer = AttackCooldown;
+                }
+            }
+            else if (!u.HasPath || TickNumber % ChaseRepathEvery == 0)
+            {
+                // Walk to a tile touching the footprint. If none is reachable
+                // (fully walled in), the unit simply can't get to it.
+                var spot = SpawnPointAround(b);
+                if (spot.HasValue) Order(u, spot.Value.X, spot.Value.Y);
+            }
+        }
+
+        // Distance from a unit to the nearest tile of a building's footprint, in
+        // fixed-point — so a unit standing against any face of a big keep is "in
+        // range", not just one near its centre.
+        int DistToBuilding(Unit u, Building b)
+        {
+            int cx = Clamp(u.X, Fixed.FromInt(b.X), Fixed.FromInt(b.X + b.W - 1));
+            int cy = Clamp(u.Y, Fixed.FromInt(b.Y), Fixed.FromInt(b.Y + b.H - 1));
+            return Fixed.VLen(cx - u.X, cy - u.Y);
+        }
+
+        // Clear destroyed buildings: their footprint becomes walkable rubble, a
+        // razed keep stops being a drop-off, and the building leaves the list
+        // (surviving order preserved). Besiegers whose target is now gone clear
+        // themselves next tick.
+        void RemoveDestroyedBuildings()
+        {
+            for (int i = Buildings.Count - 1; i >= 0; i--)
+            {
+                var b = Buildings[i];
+                if (b.Alive) continue;
+                BlockFootprint(b, false);
+                if (b.Type == BuildingType.Keep) _dropOff.Remove(b.Owner);
+                Buildings.RemoveAt(i);
             }
         }
 
@@ -878,7 +967,7 @@ namespace Sim
                 Mix(u.Id); Mix(u.Owner); Mix(u.X); Mix(u.Y);
                 Mix(u.Hp); Mix(u.MaxHp);
                 Mix(u.Tx); Mix(u.Ty);
-                Mix(u.TargetId); Mix(u.AttackTimer);
+                Mix(u.TargetId); Mix(u.TargetBuildingId); Mix(u.AttackTimer);
                 Mix((int)u.Job); Mix(u.GatherNodeId);
                 Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
 
@@ -913,6 +1002,7 @@ namespace Sim
             {
                 Mix(b.Id); Mix(b.Owner); Mix((int)b.Type);
                 Mix(b.X); Mix(b.Y); Mix(b.W); Mix(b.H);
+                Mix(b.Hp); Mix(b.MaxHp);
                 Mix(b.Queue); Mix(b.BuildTimer);
                 Mix(b.Open ? 1 : 0);
             }

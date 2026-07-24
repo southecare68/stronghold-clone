@@ -1,0 +1,26 @@
+<!-- Siege — soldiers batter down buildings, deterministically.
+
+     The other half of the castle identity: buildings have HP, and an
+     AttackBuilding order sends soldiers to besiege one until it falls, at which
+     point its footprint stops blocking. This test proves a wall is breached and
+     becomes passable, that a razed keep stops being a drop-off, that only enemy
+     buildings can be targeted, and that two clients batter in sync and a rejoin
+     carries building HP and the siege target.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SiegeTests</RootNamespace>
+    <AssemblyName>SiegeTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

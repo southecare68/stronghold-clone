@@ -426,9 +426,12 @@ public partial class Main : Node2D
                 {
                     var ids = new List<int>(_selected).ToArray();
                     var enemy = EnemyUnitAt(mb.Position);
+                    var enemyBuilding = EnemyBuildingAt(mb.Position);
                     var node = NodeAt(mb.Position);
                     if (enemy != null)
                         _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+                    else if (enemyBuilding != null)
+                        _me.Issue(new Command { Type = CommandType.AttackBuilding, UnitIds = ids, TargetId = enemyBuilding.Id });
                     else if (node != null)
                         _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
                     else
@@ -475,13 +478,18 @@ public partial class Main : Node2D
     }
 
     // One of your own buildings whose footprint is under the cursor, or null.
-    Building OwnBuildingAt(Vector2 screen)
+    Building OwnBuildingAt(Vector2 screen) => BuildingAt(screen, mine: true);
+
+    // An ENEMY building under the cursor, or null — a siege target.
+    Building EnemyBuildingAt(Vector2 screen) => BuildingAt(screen, mine: false);
+
+    Building BuildingAt(Vector2 screen, bool mine)
     {
         var w = ScreenToWorld(screen);
         int tx = Mathf.RoundToInt(w.X), ty = Mathf.RoundToInt(w.Y);
         foreach (var b in _me.Sim.Buildings)
         {
-            if (b.Owner != _myPlayer) continue;
+            if ((b.Owner == _myPlayer) != mine) continue;
             if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) return b;
         }
         return null;
@@ -673,11 +681,21 @@ public partial class Main : Node2D
                     break;
             }
 
-            // Production progress (BuildTimer counts DOWN from TrainTime=60).
+            // Damage bar (only once a building has been hit).
+            if (b.MaxHp > 0 && b.Hp < b.MaxHp)
+            {
+                float frac = Mathf.Clamp((float)b.Hp / b.MaxHp, 0f, 1f);
+                var barTop = rect.Position + new Vector2(0, -4f);
+                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0.5f, 0.1f, 0.1f));
+                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.3f, 0.85f, 0.35f));
+            }
+
+            // Production progress (BuildTimer counts DOWN from TrainTime=60),
+            // above the damage bar so both are visible.
             if (b.Type == BuildingType.Barracks && b.Queue > 0)
             {
                 float frac = 1f - Mathf.Clamp(b.BuildTimer / 60f, 0f, 1f);
-                var barTop = rect.Position + new Vector2(0, -5f);
+                var barTop = rect.Position + new Vector2(0, -8f);
                 DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0, 0, 0, 0.5f));
                 DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.9f, 0.8f, 0.3f));
             }
