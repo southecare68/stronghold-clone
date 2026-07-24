@@ -844,10 +844,18 @@ isometric-RTS approach, and the one that keeps everything already built.
   a facing sprite over a team-coloured disc (which doubles as the shadow). The
   facing is picked from the unit's heading and held stable so it does not strobe
   at octant boundaries.
-- **The one honest limitation:** the Synty base packs ship no animation clips, so
-  units are static bind-pose (a slight T-pose) rather than walking. Flagged to the
-  user up front. At RTS zoom it reads fine; adding a Synty animation pack or Mixamo
-  later is the fix, and the bake tool already renders whatever pose the model is in.
+- ✅ **Animation** (added next). The packs ship no clips, but the characters are
+  rigged (one shared humanoid Skeleton3D). So the animation is AUTHORED: the bake
+  tool poses the bones directly and bakes a frame per pose. Per facing it now bakes
+  an `idle` (arms lowered out of the models' T-pose — which also fixes the static
+  pose that looked broken) and a 6-frame `walk` cycle (hips and arms swinging in
+  opposition, a knee bend on the swinging leg). The pitch/raise axes were found by
+  a calibration bake (documented in bake.gd's header). SpriteBank loads idle+walk
+  with a fallback chain (missing walk -> idle -> old un-suffixed sprite). Main.cs
+  advances a per-unit walk phase by frame time WHILE MOVING and freezes it at rest
+  — render-only, like interpolation. 231 sprites, 2.1 MB. Verified live: soldiers
+  walk with cycling legs when moving, face their heading, and stand in the idle
+  pose when stopped; no T-pose anywhere; IN SYNC throughout.
 - Two bugs the work shook out, both in the bake tool: type-inference errors on
   `PREFABS + ...` and a transform expression (GDScript `:=` cannot infer those),
   and the FIRST entity baking blank because its camera `look_at` fired before the
@@ -862,9 +870,10 @@ isometric-RTS approach, and the one that keeps everything already built.
   before the bake can load prefabs; the character FBX is the slow part.
 
 ## Immediate next tasks (choose by taste — the core is done)
-17. **Polish & depth:** unit ANIMATION (the packs have none — a Synty anim pack or
-   Mixamo retarget would replace the static T-pose, and the bake tool already
-   renders whatever pose the rig holds); the particle-fx pack (fire on burning
+17. **Polish & depth:** more authored animation (attack swing, death topple — the
+   bake tool poses the rig, so an attack pose is a few more bone rotations; the sim
+   already emits the hit/death events the renderer would trigger on); the
+   particle-fx pack (fire on burning
    buildings, dust under marching units) if the renderer ever goes 3D; more baked
    entities (siege engines, resource-node props); an interactive point-buy UI;
    more maps; menus; selection panels.

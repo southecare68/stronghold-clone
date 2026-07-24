@@ -153,6 +153,11 @@ public partial class Main : Node2D
     // Baked units face this screen direction at facing 0. Calibrated once against
     // the actual sprites; a wrong value just rotates every unit by a constant.
     const int FacingOffset = 0;
+    // Per-unit walk-cycle phase, advanced by wall time while a unit is moving and
+    // frozen while it stands. Render-only: it is a float driven by frame delta and
+    // never touches the simulation, exactly like interpolation.
+    readonly Dictionary<int, float> _animPhase = new();
+    const float WalkCadence = 9f;      // walk frames per second at full stride
 
     // ---- Fog of war (the DRAWING half) --------------------------------------
     // The rule lives in the simulation (Sim/Vision.cs) — what you may attack,
@@ -664,6 +669,7 @@ public partial class Main : Node2D
 
         AgeProjectiles(delta);
         ComputeSeparation();
+        AdvanceAnimation(delta);
         UpdateMinimapFog();
         UpdateListener();
         UpdateMood();
@@ -1064,7 +1070,7 @@ public partial class Main : Node2D
             // a Runner at a glance.
             float r = Mathf.Clamp(4f + u.MaxHp * 0.03f, 4f, 9f);
 
-            var sprite = _art?.Unit(u.DesignId, UnitFacing(u));
+            var sprite = _art?.Unit(u.DesignId, UnitFacing(u), UnitWalkFrame(u));
             if (sprite != null)
             {
                 // A team-coloured disc UNDER the feet — the sprite carries no
@@ -1376,6 +1382,33 @@ public partial class Main : Node2D
             var c = kv.Key == 1 ? new Color(0.3f, 0.7f, 1f, 0.8f) : new Color(1f, 0.45f, 0.35f, 0.8f);
             DrawArc(p, 13f, 0, Mathf.Tau, 28, c, 2f);
         }
+    }
+
+    // Advance each unit's walk phase while it is moving, hold it while it stands.
+    // A unit at rest keeps a small non-zero phase so it does not snap to a jarring
+    // mid-stride pose the instant it stops — the renderer shows idle then anyway.
+    void AdvanceAnimation(double delta)
+    {
+        if (_art == null || !_art.AnyLoaded) return;
+        foreach (var u in _shown.Units)
+            if (Moving(u)) _animPhase[u.Id] = _animPhase.GetValueOrDefault(u.Id) + (float)delta * WalkCadence;
+    }
+
+    // Is the unit travelling toward a waypoint (as opposed to standing)? The sim
+    // sets Tx=X, Ty=Y on arrival, so a gap means motion.
+    static bool Moving(Unit u)
+    {
+        int dx = u.Tx - u.X, dy = u.Ty - u.Y;
+        return dx * dx + dy * dy > (Fixed.One / 8) * (Fixed.One / 8);
+    }
+
+    // The walk frame to draw for a unit, or -1 for its idle pose.
+    int UnitWalkFrame(Unit u)
+    {
+        if (!Moving(u)) return -1;
+        int frames = _art.WalkFrames(u.DesignId);
+        if (frames <= 0) return -1;
+        return Mathf.PosMod((int)_animPhase.GetValueOrDefault(u.Id), frames);
     }
 
     // Which of the eight baked facings to show for a unit, from the direction it

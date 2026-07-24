@@ -43,29 +43,61 @@ public sealed class SpriteBank
     // How many facings the bake produced per unit. Must match UNIT_FACINGS in
     // tools/bake/bake.gd.
     public const int Facings = 8;
+    // Walk-cycle frames per facing. Must match WALK_FRAMES in bake.gd. Discovered
+    // at load time (below) so a re-bake with a different count needs no code
+    // change; this is just the ceiling we probe up to.
+    const int MaxWalkFrames = 16;
 
     readonly Dictionary<string, Texture2D> _cache = new();
+    // Per design, how many walk frames actually loaded — so the renderer knows
+    // the cycle length without probing the dictionary every draw.
+    readonly int[] _walkFrames;
     public bool AnyLoaded { get; private set; }
 
     public SpriteBank()
     {
-        foreach (var name in UnitArt)
+        _walkFrames = new int[UnitArt.Length];
+
+        for (int d = 0; d < UnitArt.Length; d++)
+        {
+            var name = UnitArt[d];
             for (int f = 0; f < Facings; f++)
+            {
+                // Idle, and the un-suffixed name the pre-animation bake produced,
+                // so an old Art/ folder still works.
+                TryLoad($"units/{name}_{f}_idle");
                 TryLoad($"units/{name}_{f}");
+                for (int w = 0; w < MaxWalkFrames; w++)
+                    if (!TryLoad($"units/{name}_{f}_walk{w}")) break;
+            }
+            // How many walk frames facing 0 has is the cycle length for the design.
+            int wf = 0;
+            while (_cache.ContainsKey($"units/{name}_0_walk{wf}")) wf++;
+            _walkFrames[d] = wf;
+        }
+
         foreach (var name in BuildingArt.Values)
             TryLoad($"buildings/{name}");
         foreach (var t in new[] { "ground", "rock", "marsh", "water" })
             TryLoad($"terrain/{t}");
 
         GD.Print(AnyLoaded
-            ? $"[art] {_cache.Count} sprites loaded from res://Art"
+            ? $"[art] {_cache.Count} sprites loaded from res://Art " +
+              $"(walk frames: {string.Join("/", _walkFrames)})"
             : "[art] no baked sprites found — drawing shapes (run tools/bake/run.sh to add art)");
     }
 
-    void TryLoad(string key)
+    public int WalkFrames(int designId) =>
+        designId >= 0 && designId < _walkFrames.Length ? _walkFrames[designId] : 0;
+
+    bool TryLoad(string key)
     {
+        if (_cache.ContainsKey(key)) return true;
         var tex = LoadPng($"res://Art/{key}.png");
-        if (tex != null) { _cache[key] = tex; AnyLoaded = true; }
+        if (tex == null) return false;
+        _cache[key] = tex;
+        AnyLoaded = true;
+        return true;
     }
 
     // Runtime PNG load. Image.Load reads the raw file when running from source,
@@ -85,13 +117,18 @@ public sealed class SpriteBank
 
     public Texture2D Terrain(string name) => _cache.TryGetValue($"terrain/{name}", out var t) ? t : null;
 
-    // The sprite for a unit design facing a given screen direction. `facing` is a
-    // whole number of eighths, already resolved by the renderer from the unit's
-    // heading; this only maps (design, facing) to a texture.
-    public Texture2D Unit(int designId, int facing)
+    // The sprite for a unit design, facing a screen direction, at an animation
+    // frame. walkFrame < 0 means standing (idle). The lookup degrades gracefully:
+    // a missing walk frame falls back to idle, and idle falls back to the old
+    // un-suffixed sprite, so a partially-baked or pre-animation Art/ still draws.
+    public Texture2D Unit(int designId, int facing, int walkFrame)
     {
         if (designId < 0 || designId >= UnitArt.Length) designId = 0;
         facing = ((facing % Facings) + Facings) % Facings;
-        return _cache.TryGetValue($"units/{UnitArt[designId]}_{facing}", out var t) ? t : null;
+        string b = $"units/{UnitArt[designId]}_{facing}";
+
+        if (walkFrame >= 0 && _cache.TryGetValue($"{b}_walk{walkFrame}", out var w)) return w;
+        if (_cache.TryGetValue($"{b}_idle", out var idle)) return idle;
+        return _cache.TryGetValue(b, out var t) ? t : null;
     }
 }
