@@ -762,11 +762,61 @@ and expensive to store as binary blobs nobody can diff, review or retune. The
   the timing, the positions and the mix levels are checked; the aesthetics are
   yours to judge — run the game, or `tests/Audio -- --write` and play the files.
 
+✅ **Music — composed, not sourced.** Same premise as the effects, one step
+further: the score is generated too. The design decision that matters is the
+**split between composing and rendering**.
+
+- `game/Audio/Music.cs` — `Compose(mood)` returns a list of `Note`s (start,
+  length, pitch, voice, gain); `Render(mood)` turns those into PCM. Effects did
+  not need this, but music does, because **the interesting mistakes in music are
+  musical**. "Is every pitch in the mode?" and "does the harmony change on the
+  bar line?" can only be asked of notes — by the time it is a waveform, a wrong
+  note is just a number. So `tests/Audio` asserts against `Compose` and never has
+  to guess from a spectrum.
+- **D Dorian**, the medieval mode; its raised sixth is the whole character and is
+  why it does not sound like generic film minor. Battle drops to Aeolian — one
+  flattened note, and the brightness goes straight out. Progression is
+  i–VII–III–IV with no leading tone anywhere, so it turns over forever without
+  asking to resolve, which is what background music for a strategy game has to do.
+- **Instruments:** Karplus-Strong for the melody and bass (a delay line of noise,
+  averaged as it circulates — ten lines for a convincing plucked lute), detuned
+  partials for the pad, a low fifth for the drone, pitch-swept sine for the kick,
+  filtered noise for the snare.
+- **Seamless looping**, bought two ways. Tempos (72/100/140) are chosen so
+  `SampleRate*60/BPM` is an EXACT integer — a tempo like 132 leaves a fractional
+  sample per beat that accumulates into an audible stumble once a cycle. And
+  notes running past the end **wrap round to the start** rather than being cut,
+  so a phrase finishes over the top of the repeat. The drone's envelope is one
+  full sine cycle over the loop, periodic by construction.
+- `Scripts/MusicPlayer.cs` — two `AudioStreamPlayer`s cross-fading over 2.2 s with
+  an **equal-power** curve (linear cross-fades dip in loudness through the middle,
+  because power goes as the square). Non-positional, and mixed under the effects:
+  a soundtrack that buries the sound of your own army dying is worse than silence.
+- **Adaptive, off the same observations everything else uses** — no new hooks in
+  the sim, so a replay scores itself. Battle while blows land or your units are
+  committed; Tension when anything of theirs is visible; Calm otherwise. The mood
+  is sticky on the way down (6 s hold) so a lull does not make the score stutter.
+  And because Tension reads YOUR visibility, the music can never reveal an enemy
+  before the fog would have.
+- Tests: every pitch is in the mode (49/73/121 notes, none stray), Battle uses the
+  flat sixth Calm never touches, pads are exactly one bar long on a bar line,
+  every note starts inside the loop, the moods differ in tempo/density/kit in the
+  right direction, every tempo divides the sample rate exactly, music peaks below
+  the effects, and — the one that matters most — **the step across each loop point
+  is no larger than the largest step inside the track**, which is what "no click"
+  actually means for this material.
+- Verified live: `[music] 3 tracks composed: Calm 26.7s@72bpm, Tension 19.2s@100bpm,
+  Battle 13.7s@140bpm`, and the HUD walked the full cycle — `calm` at the start,
+  `tension` the moment the enemy came into sight, `battle` during the fight, and
+  back to `calm` once they were dead and the hold expired. `N` toggles it.
+- **Still not verified by me: whether any of it sounds good.** I cannot listen.
+  All 13 effects and all 3 tracks are dumped to `~/Desktop/stronghold-sfx/`.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; more maps (the
-   `Skirmish` pattern generalises — it takes a size and uses no RNG); music and
-   ambience (the synth has the building blocks); menus; unit/building selection
-   panels.
+   `Skirmish` pattern generalises — it takes a size and uses no RNG); ambience and
+   victory/defeat stingers (the synth and the composer have the building blocks);
+   menus; unit/building selection panels.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

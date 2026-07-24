@@ -27,10 +27,12 @@ stronghold-clone/
 │  │  ├─ Wire.cs        turn serialization, explicit little-endian
 │  │  └─ MatchCode.cs   endpoint <-> XXXXX-XXXXX join code
 │  ├─ Audio/            engine-agnostic sound synthesis (no audio files at all)
-│  │  └─ Synth.cs       every effect generated from noise and envelopes
+│  │  ├─ Synth.cs       every effect generated from noise and envelopes
+│  │  └─ Music.cs       the score: Compose() writes notes, Render() plays them
 │  └─ Scripts/          the Godot layer
 │     ├─ Main.cs        renders the sim, mouse -> commands
 │     ├─ Sound.cs       voices, positional playback, mix levels
+│     ├─ MusicPlayer.cs seamless loops, cross-fading between moods
 │     └─ EnetTransport.cs   ITransport over a real ENet socket
 ├─ tests/               console tests; no Godot, so they run anywhere dotnet does
 │  ├─ SimParity/        C# sim reproduces the Node reference exactly
@@ -47,7 +49,7 @@ stronghold-clone/
 │  ├─ PointBuy/         data-driven unit designs within a point budget
 │  ├─ Replay/           record a match and replay it bit-for-bit
 │  ├─ Fog/              fog of war: sight, memory, and the orders it gates
-│  └─ Audio/            the synthesizer, checked numerically (no speakers needed)
+│  └─ Audio/            synth and score, checked numerically (no speakers needed)
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -105,6 +107,16 @@ across the map, and one you cannot see makes no sound at all, because audible
 fog would hand back exactly what the fog was there to withhold. `M` mutes, `-`
 and `=` set the volume.
 
+**Music** is generated too, and adapts. Three tracks in D Dorian — the medieval
+mode — cross-fade with the situation: calm while you build, tension the moment
+something of theirs is in sight, and a faster, drum-driven battle track (dropping
+to Aeolian, one flattened note darker) while blows are landing. It settles back a
+few seconds after a fight rather than snapping, so a lull in a skirmish doesn't
+make the score stutter. Because the mood is read from what *you* can see, it never
+tells you about an enemy before the fog would have. Every track loops without a
+seam: notes that run past the end wrap around to the beginning, so a phrase
+finishes over the top of the repeat. `N` turns it off.
+
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
 is a rendering concern only — nothing interpolated ever reaches the sim. Run
@@ -138,7 +150,7 @@ address, not NAT traversal. Same-LAN or forwarded ports only.
 ## Run the tests (no engine needed)
 ```
 dotnet run --project tests/SimParity     # and InputSlice, CommandOrder, Netcode
-dotnet run --project tests/Audio -- --write ./sfx    # also dump every sound as .wav
+dotnet run --project tests/Audio -- --write ./sfx    # dump every effect AND track as .wav
 cd prototype-node
 node test/sync.test.js          # two clients identical for 300 ticks
 node test/float-hazard.test.js  # why the sim forbids floating point

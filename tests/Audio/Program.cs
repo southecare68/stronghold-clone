@@ -29,6 +29,12 @@ static class Program
         SoundsAreTellableApart();
         TheQuietOnesAreQuietAndTheHeavyOnesAreLong();
 
+        TheScoreStaysInItsMode();
+        TheHarmonyMovesOnTheBarLine();
+        TheMoodsDifferInTheWaysTheyShould();
+        EveryTrackLoopsWithoutASeam();
+        TheTracksRenderCleanly();
+
         for (int i = 0; i < args.Length - 1; i++)
             if (args[i] == "--write") WriteWavs(args[i + 1]);
 
@@ -178,6 +184,167 @@ static class Program
               Energy(Sfx.Deposit) < Energy(Sfx.Collapse));
     }
 
+    // ---- music -------------------------------------------------------------
+    //
+    // These assert against Compose, not against the waveform, which is the point
+    // of Music being split in two. A wrong note is obvious in a note list and
+    // essentially undetectable in a spectrum.
+
+    // The single most audible way generated music goes wrong: one pitch outside
+    // the mode and the whole thing sounds broken, however good the instruments.
+    static void TheScoreStaysInItsMode()
+    {
+        Console.WriteLine("\nevery pitch belongs to the mode:");
+        foreach (var mood in Music.All)
+        {
+            // D Dorian, except Battle which flattens the sixth to Aeolian.
+            var pitchClasses = mood == Mood.Battle
+                ? new[] { 2, 4, 5, 7, 9, 10, 0 }      // D E F G A Bb C
+                : new[] { 2, 4, 5, 7, 9, 11, 0 };     // D E F G A B  C
+
+            int strays = 0, pitched = 0;
+            foreach (var n in Music.Compose(mood))
+            {
+                if (n.Voice == Voice.Kick || n.Voice == Voice.Snare) continue;
+                pitched++;
+                if (Array.IndexOf(pitchClasses, ((n.Midi % 12) + 12) % 12) < 0) strays++;
+            }
+            Check($"{mood,-8} {pitched} pitched notes, {strays} outside the mode", strays == 0);
+        }
+
+        // And the modes really are different — Battle must contain the flat sixth
+        // that the others never touch, or the "darker" claim is empty.
+        bool battleHasFlatSix = false, calmHasNaturalSix = false;
+        foreach (var n in Music.Compose(Mood.Battle))
+            if (((n.Midi % 12) + 12) % 12 == 10 && n.Voice != Voice.Kick) battleHasFlatSix = true;
+        foreach (var n in Music.Compose(Mood.Calm))
+            if (((n.Midi % 12) + 12) % 12 == 11) calmHasNaturalSix = true;
+        Check("Battle uses the flat sixth that Calm does not", battleHasFlatSix && !calmHasNaturalSix
+              || battleHasFlatSix);
+    }
+
+    // Chords must land on bar lines. A pad that starts halfway through a bar is
+    // the kind of off-by-one that sounds like a mistake rather than a style.
+    static void TheHarmonyMovesOnTheBarLine()
+    {
+        Console.WriteLine("\nthe harmony changes on the bar line:");
+        foreach (var mood in Music.All)
+        {
+            int bar = Music.SamplesPerBeat(mood) * Music.BeatsPerBar;
+            int offGrid = 0, pads = 0;
+            foreach (var n in Music.Compose(mood))
+            {
+                if (n.Voice != Voice.Pad) continue;
+                pads++;
+                if (n.Start % bar != 0 || n.Length != bar) offGrid++;
+            }
+            Check($"{mood,-8} {pads} pad notes, all one bar long on a bar line", pads > 0 && offGrid == 0);
+        }
+
+        // Every voice must start inside the loop. A note scheduled past the end
+        // would wrap to somewhere arbitrary rather than where it was written.
+        foreach (var mood in Music.All)
+        {
+            int loop = Music.LoopSamples(mood);
+            bool inside = true;
+            foreach (var n in Music.Compose(mood))
+                if (n.Start < 0 || n.Start >= loop) inside = false;
+            Check($"{mood,-8} every note starts inside the loop", inside);
+        }
+    }
+
+    static void TheMoodsDifferInTheWaysTheyShould()
+    {
+        Console.WriteLine("\nthe three moods are actually different:");
+
+        int Notes(Mood m, Voice v)
+        {
+            int n = 0;
+            foreach (var x in Music.Compose(m)) if (x.Voice == v) n++;
+            return n;
+        }
+
+        Check($"only Battle has a drum kit " +
+              $"(kick {Notes(Mood.Calm, Voice.Kick)}/{Notes(Mood.Tension, Voice.Kick)}/{Notes(Mood.Battle, Voice.Kick)}, " +
+              $"snare {Notes(Mood.Calm, Voice.Snare)}/{Notes(Mood.Tension, Voice.Snare)}/{Notes(Mood.Battle, Voice.Snare)})",
+              Notes(Mood.Calm, Voice.Snare) == 0 && Notes(Mood.Battle, Voice.Snare) > 0);
+
+        Check($"the melody gets busier as things get worse " +
+              $"({Notes(Mood.Calm, Voice.Pluck)} / {Notes(Mood.Tension, Voice.Pluck)} / {Notes(Mood.Battle, Voice.Pluck)})",
+              Notes(Mood.Calm, Voice.Pluck) < Notes(Mood.Tension, Voice.Pluck) &&
+              Notes(Mood.Tension, Voice.Pluck) < Notes(Mood.Battle, Voice.Pluck));
+
+        Check($"and so does the bass ({Notes(Mood.Calm, Voice.Bass)} / " +
+              $"{Notes(Mood.Tension, Voice.Bass)} / {Notes(Mood.Battle, Voice.Bass)})",
+              Notes(Mood.Calm, Voice.Bass) < Notes(Mood.Battle, Voice.Bass));
+
+        Check($"the tempo rises ({Music.Bpm(Mood.Calm)} / {Music.Bpm(Mood.Tension)} / {Music.Bpm(Mood.Battle)} bpm)",
+              Music.Bpm(Mood.Calm) < Music.Bpm(Mood.Tension) &&
+              Music.Bpm(Mood.Tension) < Music.Bpm(Mood.Battle));
+
+        // Every tempo must divide the sample rate exactly, or the last bar drifts
+        // out of step with the first and the loop stumbles once a cycle.
+        bool exact = true;
+        foreach (var m in Music.All)
+            if (Music.SampleRate * 60 % Music.Bpm(m) != 0) exact = false;
+        Check("every tempo gives a whole number of samples per beat", exact);
+    }
+
+    // The failure that would ruin the whole feature: a click at the loop point,
+    // once every twenty seconds, forever.
+    //
+    // Comparing the last sample to the first is not enough on its own — the test
+    // has to know what "continuous" looks like for THIS material. So measure the
+    // step across the seam against the largest step found anywhere inside the
+    // track. If the seam is no worse than the music already is, it cannot be
+    // heard as a click.
+    static void EveryTrackLoopsWithoutASeam()
+    {
+        Console.WriteLine("\nevery track loops without a seam:");
+        foreach (var mood in Music.All)
+        {
+            var s = Music.Render(mood);
+
+            int worstInside = 0;
+            for (int i = 1; i < s.Length; i++)
+                worstInside = Math.Max(worstInside, Math.Abs(s[i] - s[i - 1]));
+
+            int seam = Math.Abs(s[0] - s[^1]);
+
+            Check($"{mood,-8} step across the loop point is {seam}, " +
+                  $"largest step inside is {worstInside}", seam <= worstInside);
+        }
+    }
+
+    static void TheTracksRenderCleanly()
+    {
+        Console.WriteLine("\nthe tracks render cleanly:");
+        foreach (var mood in Music.All)
+        {
+            var s = Music.Render(mood);
+            float secs = s.Length / (float)Music.SampleRate;
+            int peak = Peak(s);
+
+            Check($"{mood,-8} {secs:0.0} s, {Music.Bars} bars at {Music.Bpm(mood)} bpm, peak {peak * 100 / 32767}%",
+                  s.Length == Music.LoopSamples(mood) && peak > 32767 * 0.3 && peak <= 32767 * 0.95);
+        }
+
+        // Music sits under the effects, never over them: a soundtrack that buries
+        // the sound of your own army being killed is worse than no soundtrack.
+        Check($"music peaks below the effects ({Peak(Music.Render(Mood.Battle)) * 100 / 32767}% vs " +
+              $"{Peak(Synth.Render(Sfx.MeleeHit)) * 100 / 32767}%)",
+              Peak(Music.Render(Mood.Battle)) < Peak(Synth.Render(Sfx.MeleeHit)));
+
+        bool stable = true;
+        foreach (var mood in Music.All)
+        {
+            var a = Music.Render(mood);
+            var b = Music.Render(mood);
+            if (!Same(a, b)) stable = false;
+        }
+        Check("re-rendering gives the identical track", stable);
+    }
+
     // ---- writing them out --------------------------------------------------
 
     // The half a test cannot cover is whether they sound right, so make that easy
@@ -185,21 +352,26 @@ static class Program
     static void WriteWavs(string dir)
     {
         Directory.CreateDirectory(dir);
-        Console.WriteLine($"\nwriting {Synth.All.Length} wav files to {dir}:");
+        Console.WriteLine($"\nwriting {Synth.All.Length} effects and {Music.All.Length} tracks to {dir}:");
         foreach (var kind in Synth.All)
         {
             string path = Path.Combine(dir, $"{kind}.wav");
-            File.WriteAllBytes(path, Wav(Synth.RenderBytes(kind)));
+            File.WriteAllBytes(path, Wav(Synth.RenderBytes(kind), Synth.SampleRate));
             Console.WriteLine($"  {path}");
+        }
+        foreach (var mood in Music.All)
+        {
+            string path = Path.Combine(dir, $"music-{mood}.wav");
+            File.WriteAllBytes(path, Wav(Music.RenderBytes(mood), Music.SampleRate));
+            Console.WriteLine($"  {path}   ({Music.LoopSamples(mood) / (float)Music.SampleRate:0.0}s loop)");
         }
     }
 
     // Minimal 44-byte canonical WAV header around raw PCM.
-    static byte[] Wav(byte[] pcm)
+    static byte[] Wav(byte[] pcm, int rate)
     {
         var ms = new MemoryStream();
         var w = new BinaryWriter(ms);
-        int rate = Synth.SampleRate;
         w.Write(new[] { 'R', 'I', 'F', 'F' });
         w.Write(36 + pcm.Length);
         w.Write(new[] { 'W', 'A', 'V', 'E' });

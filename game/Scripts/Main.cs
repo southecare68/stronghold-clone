@@ -185,6 +185,18 @@ public partial class Main : Node2D
     // it means a REPLAY makes exactly the same noises for free, because a replay
     // produces the same state transitions.
     Sound _sound;
+
+    // ---- Music --------------------------------------------------------------
+    // Adaptive, and driven off exactly the same observations the sound effects
+    // use — no new hooks in the simulation. Three states: Calm while you build,
+    // Tension the moment something of theirs is in sight, Battle while blows are
+    // landing. The mood is deliberately STICKY on the way down (see
+    // BattleHoldSeconds): flicking back to calm the instant a fight pauses makes
+    // the music sound broken, and a skirmish with a lull in it is still a fight.
+    MusicPlayer _music;
+    double _lastCombatAt = -999;
+    const double BattleHoldSeconds = 6.0;
+
     readonly HashSet<int> _prevUnitIds = new();
     readonly HashSet<int> _prevBuildingIds = new();
     readonly Dictionary<int, bool> _prevGateOpen = new();
@@ -239,6 +251,8 @@ public partial class Main : Node2D
     {
         _sound = new Sound { LogPlays = HasFlag("--audio-log") };
         AddChild(_sound);
+        _music = new MusicPlayer();
+        AddChild(_music);
         PrimeSoundObserver();
     }
 
@@ -261,6 +275,36 @@ public partial class Main : Node2D
         _prevStockTotal = StockTotal();
     }
 
+    // Pick the track from what is actually happening. Read straight off the same
+    // simulation state everything else observes — the sim is not told that music
+    // exists, and a replay therefore scores itself.
+    void UpdateMood()
+    {
+        if (_music == null) return;
+        _music.SetMood(DecideMood());
+    }
+
+    Mood DecideMood()
+    {
+        // Blows landing, or still ringing. The hold is what stops the score
+        // lurching between battle and calm through a pause in the melee.
+        if (Time.GetTicksMsec() / 1000.0 - _lastCombatAt < BattleHoldSeconds) return Mood.Battle;
+
+        // Committed to a fight but not yet in contact — the march up is Battle
+        // too, because that is when it is about to matter.
+        foreach (var u in _shown.Units)
+            if (u.Owner == _myPlayer && (u.TargetId != 0 || u.TargetBuildingId != 0))
+                return Mood.Battle;
+
+        // Anything of theirs in sight. Under fog this is genuinely informative:
+        // the music tells you something is out there at the same moment you could
+        // have seen it, and never before — it can only read what you can see.
+        foreach (var u in _shown.Units)
+            if (u.Owner != _myPlayer && LitUnit(u)) return Mood.Tension;
+
+        return Mood.Calm;
+    }
+
     void SetVolume(float delta)
     {
         if (_sound == null) return;
@@ -271,6 +315,9 @@ public partial class Main : Node2D
 
     string SoundLine() =>
         _sound == null ? "off" : _sound.Muted ? "MUTED" : $"{Mathf.RoundToInt(_sound.Volume * 100)}%";
+
+    string MusicLine() =>
+        _music == null || !_music.Enabled ? "off" : _music.Current.ToString().ToLower();
 
     // Keep the ears where the eyes are. The audible radius is tied to what is on
     // screen rather than being a fixed number of world pixels: zoomed out you are
@@ -551,6 +598,7 @@ public partial class Main : Node2D
             LogDesyncOnce();
             UpdateMinimapFog();
             UpdateListener();
+            UpdateMood();
             _hud.Text = BuildHud();
             QueueRedraw();
             return;
@@ -598,6 +646,7 @@ public partial class Main : Node2D
         ComputeSeparation();
         UpdateMinimapFog();
         UpdateListener();
+        UpdateMood();
         LogDesyncOnce();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -680,7 +729,7 @@ public partial class Main : Node2D
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
                                   : "") +
-               $"\nsound {SoundLine()}  [M] mute  [-/=] volume";
+               $"\nsound {SoundLine()}  [M] mute  [-/=] volume   music {MusicLine()}  [N] on/off";
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -844,6 +893,7 @@ public partial class Main : Node2D
                 case Key.F: _fogView = !_fogView; _fogBakedTick = -1; QueueRedraw(); return;
                 // Mute, and volume by steps. All modes, replay included.
                 case Key.M: if (_sound != null) _sound.Muted = !_sound.Muted; return;
+                case Key.N: _music?.SetEnabled(!_music.Enabled); return;
                 case Key.Minus: SetVolume(-0.1f); return;
                 case Key.Equal: SetVolume(0.1f); return;
             }
@@ -1303,6 +1353,8 @@ public partial class Main : Node2D
             if (!sawShooter && !sawTarget) continue;
 
             var to = new Vector2(s.ToX, s.ToY) / (float)Fixed.One * PxPerUnit;
+
+            _lastCombatAt = Time.GetTicksMsec() / 1000.0;
 
             if (dist < RangedShotDist)
             {
