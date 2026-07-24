@@ -38,7 +38,8 @@ stronghold-clone/
 │  ├─ Economy/          gather/haul/deposit, conservation, two-client sync
 │  ├─ Buildings/        placement, footprint blocking, keep drop-off, production
 │  ├─ Walls/            curtain walls, gatehouse open/close, sync, rejoin
-│  └─ Siege/            destructible buildings, breaching, sync, rejoin
+│  ├─ Siege/            destructible buildings, breaching, sync, rejoin
+│  └─ PointBuy/         data-driven unit designs within a point budget
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -56,8 +57,11 @@ barracks/keep at the cursor; right-click your own barracks to train soldiers.
 Buildings block movement, so units path around them; lay `W`alls into a curtain
 and drop a `G`atehouse in the gap, then right-click your gate to open or close it.
 Buildings have HP — right-click an enemy structure with soldiers selected to
-besiege it, and a breached wall becomes passable rubble. Units that pile onto the
-same spot fan out on screen (a render-only effect; the simulation is untouched).
+besiege it, and a breached wall becomes passable rubble. Press `1`/`2`/`3` to
+choose which unit design a barracks trains — units are composed from a point
+budget, so a fast Runner and a tanky Brute cost the same but play differently.
+Units that pile onto the same spot fan out on screen (a render-only effect; the
+simulation is untouched).
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
@@ -108,5 +112,5 @@ RNG, in sync across clients and across a mid-fight rejoin), gather resources int
 per-player stockpiles, put up buildings whose footprints block movement, train
 soldiers from a barracks, raise curtain walls with working gatehouses, and win by
 wiping out the other side — all deterministic and cross-architecture-verified.
-Phase 2 (the full RTS core) is complete; Phase 3 (the castle identity) is
-underway. See `CONTEXT_HANDOFF.md`.
+Phase 2 (the full RTS core) and Phase 3's pillars (walls, gatehouses, siege, and
+the custom point-buy unit roster) are complete. See `CONTEXT_HANDOFF.md`.

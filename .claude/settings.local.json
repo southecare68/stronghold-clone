@@ -108,7 +108,10 @@
       "Bash(screencapture -x -o siege2.png)",
       "Bash(sips -c 200 240 --cropOffset 540 560 siege2.png --out siege2-crop.png)",
       "Bash(screencapture -x -o siege3.png)",
-      "Bash(sips -c 640 640 --cropOffset 80 80 siege3.png --out siege3-crop.png)"
+      "Bash(sips -c 640 640 --cropOffset 80 80 siege3.png --out siege3-crop.png)",
+      "Bash(perl -e 'select\\(undef,undef,undef,12\\)')",
+      "Bash(screencapture -x -o pb1.png)",
+      "Bash(sips -c 240 480 --cropOffset 100 100 pb1.png --out pb1-crop.png)"
     ]
   }
 }

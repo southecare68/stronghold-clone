@@ -1,0 +1,26 @@
+<!-- PointBuy — unit designs drive stats, within a point budget.
+
+     The distinctive roster mechanic: units are built from designs, each spending
+     a fixed point budget across hp/damage/speed/range/cooldown. This test proves
+     the budget is enforced, that a design actually changes how its units behave
+     (a fast design outruns a slow one, a tanky one outlasts a fragile one, a
+     hard-hitting one wins the exchange), and that two clients agree with mixed
+     designs in play and a rejoin carries the roster.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>PointBuyTests</RootNamespace>
+    <AssemblyName>PointBuyTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

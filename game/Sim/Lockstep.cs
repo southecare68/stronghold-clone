@@ -66,6 +66,7 @@ namespace Sim
         public Unit[] Units = Array.Empty<Unit>();
         public ResourceNode[] Nodes = Array.Empty<ResourceNode>();
         public Building[] Buildings = Array.Empty<Building>();
+        public UnitDesign[] Designs = Array.Empty<UnitDesign>();
         public Dictionary<int, int[]> Stock = new();       // owner -> per-resource amounts
         public Dictionary<int, Tile> DropOffs = new();     // owner -> drop-off tile
 
@@ -251,6 +252,9 @@ namespace Sim
             var buildings = new Building[Sim.BuildingList.Count];
             for (int i = 0; i < buildings.Length; i++) buildings[i] = Sim.BuildingList[i].Clone();
 
+            var designs = new UnitDesign[Sim.Designs.Count];
+            for (int i = 0; i < designs.Length; i++) designs[i] = Sim.Designs[i].Clone();
+
             // Our own turns from the current tick onward. We published these
             // already and will never publish them again — _sentThrough has moved
             // past them — so if we don't hand them over now, nobody ever will.
@@ -272,6 +276,7 @@ namespace Sim
                 Units = units,
                 Nodes = nodes,
                 Buildings = buildings,
+                Designs = designs,
                 Stock = stock,
                 DropOffs = drops,
                 PendingTurns = pending.ToArray(),
@@ -287,7 +292,7 @@ namespace Sim
         {
             Sim.Restore(snap.Tick, snap.NextUnitId, snap.RngState, snap.Units,
                         snap.NextNodeId, snap.Nodes, snap.Stock, snap.DropOffs,
-                        snap.NextBuildingId, snap.Buildings);
+                        snap.NextBuildingId, snap.Buildings, snap.Designs);
 
             // Everything from before the join is meaningless now: turns for ticks
             // we will never run, checksums for a world we were not in, and any

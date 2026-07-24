@@ -49,6 +49,10 @@ public partial class Main : Node2D
     string _mode = "LOCAL";
     string _joinHint = "";
 
+    // Which design a barracks trains when right-clicked. Chosen with number keys.
+    static readonly string[] DesignNames = { "Soldier", "Runner", "Brute" };
+    int _trainDesign;
+
     public Client LocalClient => _me;
     public Client RemoteClient => _other;
 
@@ -128,6 +132,12 @@ public partial class Main : Node2D
             c.Sim.SpawnNode(ResourceType.Stone, 8, 16, 300);
             c.Sim.SpawnNode(ResourceType.Wood, 50, 40, 300);   // player 2's side
             c.Sim.SpawnNode(ResourceType.Stone, 51, 36, 300);
+
+            // The point-buy roster, registered identically on every machine so
+            // design ids line up: 0 default Soldier, 1 Runner, 2 Brute. Each
+            // spends the same budget, allocated differently.
+            c.Sim.RegisterDesign(new UnitDesign { Hp = 60, Damage = 9, SpeedStat = 10, RangeStat = 3, Cooldown = 10 });
+            c.Sim.RegisterDesign(new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 });
         }
 
         _hud = new Label { Position = new Vector2(8, 8) };
@@ -341,9 +351,12 @@ public partial class Main : Node2D
         int wood = _me.Sim.Stockpile(_myPlayer, ResourceType.Wood);
         int stone = _me.Sim.Stockpile(_myPlayer, ResourceType.Stone);
         int food = _me.Sim.Stockpile(_myPlayer, ResourceType.Food);
+        var d = _me.Sim.DesignOf(_trainDesign);
+        string name = _trainDesign < DesignNames.Length ? DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
-               "\n[B]arracks [K]eep [W]all [G]atehouse at cursor" +
-               "\nright-click your barracks to train, your gate to open/close";
+               $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
+               "\n[1/2/3] pick design  [B/K/W/G] build at cursor" +
+               "\nright-click your barracks to train, gate to open/close, enemy to attack";
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -416,7 +429,7 @@ public partial class Main : Node2D
                 var mine = OwnBuildingAt(mb.Position);
                 if (mine != null && mine.Type == BuildingType.Barracks)
                 {
-                    _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id });
+                    _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id, X = _trainDesign });
                 }
                 else if (mine != null && mine.Type == BuildingType.Gatehouse)
                 {
@@ -453,6 +466,10 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
             else if (k.Keycode == Key.W) PlaceAtCursor(BuildingType.Wall);
             else if (k.Keycode == Key.G) PlaceAtCursor(BuildingType.Gatehouse);
+            // 1 / 2 / 3 choose which design a barracks trains.
+            else if (k.Keycode == Key.Key1) _trainDesign = 0;
+            else if (k.Keycode == Key.Key2) _trainDesign = 1;
+            else if (k.Keycode == Key.Key3) _trainDesign = 2;
         }
         else if (e is InputEventMouseButton up && !up.Pressed &&
                  up.ButtonIndex == MouseButton.Left && _boxing)
@@ -555,9 +572,12 @@ public partial class Main : Node2D
         {
             var p = WorldToScreen(u);
             var color = u.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
-            DrawCircle(p, 6f, color);
+            // Radius scales with the design's HP, so a Brute reads as bigger than
+            // a Runner at a glance.
+            float r = Mathf.Clamp(4f + u.MaxHp * 0.03f, 4f, 9f);
+            DrawCircle(p, r, color);
             if (_selected.Contains(u.Id))
-                DrawArc(p, 9f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+                DrawArc(p, r + 3f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
             if (u.MaxHp > 0 && u.Hp < u.MaxHp)
                 DrawHealthBar(p, u.Hp, u.MaxHp);
             // A worker hauling a load shows a small dot of the resource's colour.
@@ -692,7 +712,7 @@ public partial class Main : Node2D
 
             // Production progress (BuildTimer counts DOWN from TrainTime=60),
             // above the damage bar so both are visible.
-            if (b.Type == BuildingType.Barracks && b.Queue > 0)
+            if (b.Type == BuildingType.Barracks && b.TrainQueue.Count > 0)
             {
                 float frac = 1f - Mathf.Clamp(b.BuildTimer / 60f, 0f, 1f);
                 var barTop = rect.Position + new Vector2(0, -8f);

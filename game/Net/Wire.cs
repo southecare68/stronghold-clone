@@ -102,6 +102,7 @@ namespace Netcode
             {
                 PutInt(buf, u.Id);
                 PutInt(buf, u.Owner);
+                PutInt(buf, u.DesignId);
                 PutInt(buf, u.X);
                 PutInt(buf, u.Y);
                 PutInt(buf, u.Tx);    // the target travels too — a unit restored
@@ -151,9 +152,20 @@ namespace Netcode
                 PutInt(buf, b.H);
                 PutInt(buf, b.Hp);
                 PutInt(buf, b.MaxHp);
-                PutInt(buf, b.Queue);
+                PutInt(buf, b.TrainQueue.Count);
+                foreach (int did in b.TrainQueue) PutInt(buf, did);
                 PutInt(buf, b.BuildTimer);
                 PutInt(buf, b.Open ? 1 : 0);
+            }
+
+            PutInt(buf, snap.Designs.Length);
+            foreach (var d in snap.Designs)
+            {
+                PutInt(buf, d.Hp);
+                PutInt(buf, d.Damage);
+                PutInt(buf, d.SpeedStat);
+                PutInt(buf, d.RangeStat);
+                PutInt(buf, d.Cooldown);
             }
 
             // Stockpiles and drop-offs, each written in the snapshot's iteration
@@ -223,6 +235,7 @@ namespace Netcode
                     {
                         Id = GetInt(data, ref p),
                         Owner = GetInt(data, ref p),
+                        DesignId = GetInt(data, ref p),
                         X = GetInt(data, ref p),
                         Y = GetInt(data, ref p),
                         Tx = GetInt(data, ref p),
@@ -285,12 +298,30 @@ namespace Netcode
                         H = GetInt(data, ref p),
                         Hp = GetInt(data, ref p),
                         MaxHp = GetInt(data, ref p),
-                        Queue = GetInt(data, ref p),
-                        BuildTimer = GetInt(data, ref p),
-                        Open = GetInt(data, ref p) != 0,
                     };
+                    int qn = GetInt(data, ref p);
+                    if (qn < 0 || qn > MaxUnits) return null;
+                    for (int j = 0; j < qn; j++) buildings[i].TrainQueue.Add(GetInt(data, ref p));
+                    buildings[i].BuildTimer = GetInt(data, ref p);
+                    buildings[i].Open = GetInt(data, ref p) != 0;
                 }
                 snap.Buildings = buildings;
+
+                int designCount = GetInt(data, ref p);
+                if (designCount < 0 || designCount > MaxUnits) return null;
+                var designs = new UnitDesign[designCount];
+                for (int i = 0; i < designCount; i++)
+                {
+                    designs[i] = new UnitDesign
+                    {
+                        Hp = GetInt(data, ref p),
+                        Damage = GetInt(data, ref p),
+                        SpeedStat = GetInt(data, ref p),
+                        RangeStat = GetInt(data, ref p),
+                        Cooldown = GetInt(data, ref p),
+                    };
+                }
+                snap.Designs = designs;
 
                 int stockCount = GetInt(data, ref p);
                 if (stockCount < 0 || stockCount > MaxUnits) return null;

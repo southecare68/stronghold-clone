@@ -52,6 +52,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Buildings/` — placement/cost, footprint blocking, keep drop-off, production
   - `Walls/` — curtain walls, gatehouse open/close, two-client sync, rejoin
   - `Siege/` — destructible buildings, breaching, two-client sync, rejoin
+  - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -463,11 +464,51 @@ unit point-buy, your own mechanics).
    **Walls are now a real mechanic** — build them to buy time, breach them to get
    through. The castle-siege loop is complete.
 
-## Immediate next tasks (in order)
-15. **Custom unit point-buy** — the distinctive roster mechanic from the original
-   brief: compose unit stats (hp/damage/speed/cost) from a point budget instead
-   of the single hardcoded unit type. Touches the unit model and match setup.
-16. More Phase 3 (ARCHITECTURE.md): whatever mechanics make this its own game.
+15. ✅ **Custom unit point-buy** — the distinctive roster mechanic. Unit stats are
+   now DATA, not hardcoded: every unit is built from a `UnitDesign`
+   (Hp/Damage/SpeedStat/RangeStat/Cooldown), and movement, combat and siege all
+   read from the unit's design instead of shared constants. Players compose a
+   roster of designs, each spending a fixed **point budget** (`MaxDesignPoints`,
+   43 — exactly the default soldier's cost) allocated across stats; `RegisterDesign`
+   refuses anything over budget. So a glass cannon and a walking tank can cost the
+   same points, spent differently.
+
+   **The hard part was doing this WITHOUT breaking anything.** The refactor
+   touched the most-verified code (combat/movement), but design 0 — the default
+   soldier — reproduces the old constants EXACTLY (Damage 10 → `NextInt(8,13)`,
+   SpeedStat 5 → `One/8`, etc.), so all 11 prior test projects and `0xB1A7A676`
+   are unchanged. The barracks train-queue became a queue of design ids so
+   different designs can be produced; Train reuses `Command.X` for the design id
+   (turn wire unchanged). Designs + unit `DesignId` go into `StateChecksum()` and
+   the snapshot.
+
+   `tests/PointBuy`: the budget is enforced (over-budget refused), the default
+   soldier is provably unchanged, a fast design outruns a slow one, a tanky one
+   outlasts a fragile one, a high-damage one kills faster, **two clients agree
+   with mixed designs in a 600-tick battle**, and a **rejoin carries the roster**.
+   Verified live: a demo roster (Soldier/Runner/Brute), `1/2/3` picks the design,
+   the HUD shows its stats and point cost (43/43), and trained units render at
+   different sizes by HP — `IN SYNC`, wood charged exactly.
+
+   In-game: `1/2/3` choose the design a barracks trains; the HUD shows it.
+
+   ⚠️ The point WEIGHTS and example designs are placeholder balance — tune freely.
+   An interactive point-allocation UI (sliders, pre-match roster editor) is
+   deferred; designs are registered at match setup for now.
+
+**Phase 3's two big pillars are done** — the castle identity (walls, gatehouses,
+siege) and the custom point-buy roster. The deterministic, cross-architecture
+RTS is feature-complete against the original brief.
+
+## Immediate next tasks (choose by taste — the core is done)
+16. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
+   RangeStat already works — a design with a long reach hits from afar, no
+   projectile needed, but visuals/balance want attention); a real map/level
+   beyond `TileMap.Demo`; camera/scroll for bigger maps; sound; menus.
+17. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking,
+   the live ARM↔x86 match over ENet (headless parity is proven; the live game
+   isn't), a replay system (falls out of lockstep almost for free — record the
+   command stream), lag tolerance.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

@@ -50,6 +50,47 @@ namespace Sim
         public const int Count = 3;   // Wood, Stone, Food
     }
 
+    // A unit blueprint: the stats every unit built from it inherits. This is the
+    // point-buy mechanic — instead of one hardcoded soldier, players compose a
+    // roster of designs, each spending a fixed POINT BUDGET across stats. A
+    // glass cannon and a walking tank can cost the same points, spent differently.
+    //
+    // Stats are stored as small integers and converted to fixed-point on demand,
+    // so a design is trivially serialisable and hashable. The default soldier
+    // (registered as design 0) reproduces the pre-point-buy numbers exactly, so
+    // the parity constant and every existing test are unaffected.
+    public sealed class UnitDesign
+    {
+        public int Hp;          // hit points
+        public int Damage;      // average blow; a hit rolls NextInt(Damage-2, Damage+3)
+        public int SpeedStat;   // 5 == the classic 1/8-tile-per-tick; speed = One*Stat/40
+        public int RangeStat;   // reach in half-tiles; 3 == 1.5 tiles; range = One*Stat/2
+        public int Cooldown;    // ticks between blows
+
+        public int SpeedFixed => Fixed.One * SpeedStat / 40;
+        public int RangeFixed => Fixed.One * RangeStat / 2;
+
+        // What this design spends of the budget. A defensible, tunable weighting:
+        // hp is cheap per point, damage and a short cooldown are dear.
+        public int PointCost =>
+            Hp / 10 + Damage * 2 + SpeedStat + RangeStat + Max0(15 - Cooldown);
+
+        static int Max0(int v) => v > 0 ? v : 0;
+
+        public UnitDesign Clone() => new UnitDesign
+        {
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown,
+        };
+
+        // The classic soldier, and the ceiling every custom design is measured
+        // against — its cost is the budget, so a design may spend up to what the
+        // baseline soldier does, allocated however the player likes.
+        public static UnitDesign DefaultSoldier() => new UnitDesign
+        {
+            Hp = 100, Damage = 10, SpeedStat = 5, RangeStat = 3, Cooldown = 10,
+        };
+    }
+
     // A placed structure. Its footprint (X,Y top-left, W×H tiles) blocks the map
     // while it stands. Barracks carry a small production queue; a Keep anchors its
     // owner's drop-off. Position is whole tiles, never fixed-point.
@@ -61,9 +102,9 @@ namespace Sim
         public int X, Y, W, H;
         public int Hp, MaxHp;
 
-        // Production: how many units are queued, and ticks left on the one being
-        // built. Only Barracks use these.
-        public int Queue;
+        // Production: the design ids queued to build (FIFO), and ticks left on the
+        // one at the front. Only Barracks use these.
+        public List<int> TrainQueue = new();
         public int BuildTimer;
 
         // A gatehouse's gate. Open lets units cross its tile; closed blocks it
@@ -77,7 +118,8 @@ namespace Sim
         public Building Clone() => new Building
         {
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
-            Hp = Hp, MaxHp = MaxHp, Queue = Queue, BuildTimer = BuildTimer, Open = Open,
+            Hp = Hp, MaxHp = MaxHp, TrainQueue = new List<int>(TrainQueue),
+            BuildTimer = BuildTimer, Open = Open,
         };
     }
 
@@ -107,6 +149,7 @@ namespace Sim
     {
         public int Id;
         public int Owner;
+        public int DesignId;  // which UnitDesign this unit was built from
         public int X, Y;      // fixed-point position
         public int Tx, Ty;    // fixed-point position of the CURRENT waypoint
         public int Hp;
@@ -144,7 +187,7 @@ namespace Sim
         {
             var copy = new Unit
             {
-                Id = Id, Owner = Owner, X = X, Y = Y, Tx = Tx, Ty = Ty,
+                Id = Id, Owner = Owner, DesignId = DesignId, X = X, Y = Y, Tx = Tx, Ty = Ty,
                 Hp = Hp, MaxHp = MaxHp, TargetId = TargetId,
                 TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
@@ -173,16 +216,17 @@ namespace Sim
         readonly SortedDictionary<int, int[]> _stock = new();
         readonly SortedDictionary<int, Tile> _dropOff = new();
 
-        readonly int _speed = Fixed.One / 8;    // fixed-point units per tick
         readonly int _arriveEps = Fixed.One / 4;
 
-        // --- Combat tuning (fixed-point where it measures distance) ------------
-        const int SpawnHp = 100;
-        static readonly int AttackRange = Fixed.One * 3 / 2;    // 1.5 tiles of reach
+        // --- Unit designs (point-buy) -----------------------------------------
+        // Per-unit speed, damage, reach and cooldown now come from the unit's
+        // design rather than a shared constant. Design 0 is the default soldier,
+        // registered in the constructor, and reproduces the old constants exactly.
+        public const int MaxDesignPoints = 43;   // == the default soldier's cost
+        readonly List<UnitDesign> _designs = new();
+
+        // --- Combat tuning that is NOT per-design ------------------------------
         static readonly int AggroRange = Fixed.FromInt(7);      // acquire the next foe within this
-        const int AttackCooldown = 10;                          // ticks between blows (0.5s @ 20Hz)
-        const int DamageMin = 8;
-        const int DamageMax = 13;
         const int ChaseRepathEvery = 6;                         // ticks between chase re-paths
 
         // --- Economy tuning ---------------------------------------------------
@@ -198,6 +242,7 @@ namespace Sim
         // --- Buildings --------------------------------------------------------
         const int TrainTime = 60;                               // ticks to produce one unit (3s)
         const int TrainCostWood = 15;                           // per unit trained at a Barracks
+                                                                // (flat: the point budget balances power)
 
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
@@ -235,6 +280,23 @@ namespace Sim
             Map = map ?? TileMap.Open();
             _pathFinder = new PathFinder(Map);
             _rng = new Rng(seed);
+            _designs.Add(UnitDesign.DefaultSoldier());   // design 0, always present
+        }
+
+        // ---- Unit designs (point-buy) ----------------------------------------
+
+        public IReadOnlyList<UnitDesign> Designs => _designs;
+        public UnitDesign DesignOf(int designId) =>
+            designId >= 0 && designId < _designs.Count ? _designs[designId] : _designs[0];
+
+        // Register a custom design and return its id, or -1 if it busts the point
+        // budget. For match setup — call it identically on every machine before the
+        // match runs, like SpawnUnit. Designs don't change once the match is live.
+        public int RegisterDesign(UnitDesign design)
+        {
+            if (design == null || design.PointCost > MaxDesignPoints) return -1;
+            _designs.Add(design.Clone());
+            return _designs.Count - 1;
         }
 
         // The RNG state is game state: two machines whose generators are one draw
@@ -259,13 +321,17 @@ namespace Sim
         public void Restore(int tickNumber, int nextUnitId, uint rngState, IReadOnlyList<Unit> units,
                             int nextNodeId, IReadOnlyList<ResourceNode> nodes,
                             IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff,
-                            int nextBuildingId, IReadOnlyList<Building> buildings)
+                            int nextBuildingId, IReadOnlyList<Building> buildings,
+                            IReadOnlyList<UnitDesign> designs)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
             _nextNodeId = nextNodeId;
             _nextBuildingId = nextBuildingId;
             _rng.Restore(rngState);
+
+            _designs.Clear();
+            foreach (var d in designs) _designs.Add(d.Clone());
 
             Units.Clear();
             foreach (var u in units) Units.Add(u.Clone());
@@ -303,18 +369,22 @@ namespace Sim
         public IReadOnlyDictionary<int, int[]> Stockpiles => _stock;
         public IReadOnlyDictionary<int, Tile> DropOffs => _dropOff;
 
-        public Unit SpawnUnit(int owner, int xInt, int yInt)
+        public Unit SpawnUnit(int owner, int xInt, int yInt) => SpawnUnit(owner, xInt, yInt, 0);
+
+        public Unit SpawnUnit(int owner, int xInt, int yInt, int designId)
         {
+            var d = DesignOf(designId);
             var u = new Unit
             {
                 Id = _nextId++,
                 Owner = owner,
+                DesignId = designId >= 0 && designId < _designs.Count ? designId : 0,
                 X = Fixed.FromInt(xInt),
                 Y = Fixed.FromInt(yInt),
                 Tx = Fixed.FromInt(xInt),
                 Ty = Fixed.FromInt(yInt),
-                Hp = SpawnHp,
-                MaxHp = SpawnHp,
+                Hp = d.Hp,
+                MaxHp = d.Hp,
             };
             Units.Add(u);
             return u;
@@ -483,15 +553,17 @@ namespace Sim
                     break;
 
                 case CommandType.Train:
-                    // TargetId carries the barracks id. Costs wood and queues a
-                    // unit; the production phase spawns it when the timer elapses.
+                    // TargetId carries the barracks id; X the design to build.
+                    // Costs wood and queues that design; the production phase
+                    // spawns it when the timer elapses.
                     var barracks = Buildings.Find(x => x.Id == cmd.TargetId);
                     if (barracks == null || barracks.Owner != cmd.Owner ||
                         barracks.Type != BuildingType.Barracks) break;
+                    int designId = cmd.X >= 0 && cmd.X < _designs.Count ? cmd.X : 0;
                     var trainCost = new[] { TrainCostWood, 0, 0 };
                     if (!CanAfford(cmd.Owner, trainCost)) break;
                     Pay(cmd.Owner, trainCost);
-                    barracks.Queue++;
+                    barracks.TrainQueue.Add(designId);
                     break;
 
                 case CommandType.ToggleGate:
@@ -614,7 +686,8 @@ namespace Sim
                 int dist = Fixed.VLen(dx, dy);
                 if (dist > _arriveEps)
                 {
-                    int step = dist < _speed ? dist : _speed;
+                    int speed = DesignOf(u.DesignId).SpeedFixed;   // per-unit, from its design
+                    int step = dist < speed ? dist : speed;
                     u.X += Fixed.Div(Fixed.Mul(dx, step), dist);
                     u.Y += Fixed.Div(Fixed.Mul(dy, step), dist);
                 }
@@ -655,20 +728,23 @@ namespace Sim
         {
             foreach (var b in Buildings)
             {
-                if (b.Type != BuildingType.Barracks || b.Queue <= 0) continue;
+                if (b.Type != BuildingType.Barracks || b.TrainQueue.Count == 0) continue;
 
                 if (b.BuildTimer <= 0) b.BuildTimer = TrainTime;
                 b.BuildTimer--;
 
                 if (b.BuildTimer <= 0)
                 {
-                    b.Queue--;
                     b.BuildTimer = 0;
                     var spot = SpawnPointAround(b);
-                    if (spot.HasValue) SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y);
-                    // No free tile this tick: the unit stays queued and we try
-                    // again next tick, rather than dropping it.
-                    else b.Queue++;
+                    // No free tile this tick: leave the unit queued and try again
+                    // next tick, rather than dropping it.
+                    if (spot.HasValue)
+                    {
+                        int designId = b.TrainQueue[0];
+                        b.TrainQueue.RemoveAt(0);
+                        SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y, designId);
+                    }
                 }
             }
         }
@@ -783,9 +859,10 @@ namespace Sim
                     if (target == null) continue;
                 }
 
+                var d = DesignOf(u.DesignId);
                 int dist = Fixed.VLen(target.X - u.X, target.Y - u.Y);
 
-                if (dist <= AttackRange)
+                if (dist <= d.RangeFixed)
                 {
                     // In reach: hold position and strike on cooldown.
                     u.Path = null;
@@ -795,8 +872,8 @@ namespace Sim
 
                     if (u.AttackTimer == 0)
                     {
-                        target.Hp -= _rng.NextInt(DamageMin, DamageMax);
-                        u.AttackTimer = AttackCooldown;
+                        target.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
+                        u.AttackTimer = d.Cooldown;
                     }
                 }
                 else
@@ -820,13 +897,14 @@ namespace Sim
             var b = Buildings.Find(x => x.Id == u.TargetBuildingId);
             if (b == null || !b.Alive) { u.TargetBuildingId = 0; return; }
 
-            if (DistToBuilding(u, b) <= AttackRange)
+            var d = DesignOf(u.DesignId);
+            if (DistToBuilding(u, b) <= d.RangeFixed)
             {
                 u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
                 if (u.AttackTimer == 0)
                 {
-                    b.Hp -= _rng.NextInt(DamageMin, DamageMax);
-                    u.AttackTimer = AttackCooldown;
+                    b.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
+                    u.AttackTimer = d.Cooldown;
                 }
             }
             else if (!u.HasPath || TickNumber % ChaseRepathEvery == 0)
@@ -962,9 +1040,17 @@ namespace Sim
             Mix(_nextBuildingId);
             Mix(unchecked((int)_rng.State));   // the dice must be in the same place
 
+            // The design roster: two machines with different designs would build
+            // units with different stats from the same id and diverge.
+            Mix(_designs.Count);
+            foreach (var d in _designs)
+            {
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown);
+            }
+
             foreach (var u in Units)
             {
-                Mix(u.Id); Mix(u.Owner); Mix(u.X); Mix(u.Y);
+                Mix(u.Id); Mix(u.Owner); Mix(u.DesignId); Mix(u.X); Mix(u.Y);
                 Mix(u.Hp); Mix(u.MaxHp);
                 Mix(u.Tx); Mix(u.Ty);
                 Mix(u.TargetId); Mix(u.TargetBuildingId); Mix(u.AttackTimer);
@@ -1003,7 +1089,9 @@ namespace Sim
                 Mix(b.Id); Mix(b.Owner); Mix((int)b.Type);
                 Mix(b.X); Mix(b.Y); Mix(b.W); Mix(b.H);
                 Mix(b.Hp); Mix(b.MaxHp);
-                Mix(b.Queue); Mix(b.BuildTimer);
+                Mix(b.TrainQueue.Count);
+                foreach (int did in b.TrainQueue) Mix(did);
+                Mix(b.BuildTimer);
                 Mix(b.Open ? 1 : 0);
             }
             return h;

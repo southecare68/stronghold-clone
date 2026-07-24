@@ -123,13 +123,13 @@ static class Program
         Order(sim, Train(1, barracks.Id));
         Order(sim, Train(1, barracks.Id));
         Check("training charged wood (200 - 2*15 = 170)", sim.Stockpile(1, ResourceType.Wood) == 170);
-        Check("two units are queued", barracks.Queue == 2);
+        Check("two units are queued", barracks.TrainQueue.Count == 2);
 
         for (int i = 0; i < 200; i++) sim.Tick(Array.Empty<Command>());
 
         Check($"two soldiers were produced (had {before}, now {CountUnitsOf(sim, 1)})",
               CountUnitsOf(sim, 1) == before + 2);
-        Check("the queue has drained", barracks.Queue == 0);
+        Check("the queue has drained", barracks.TrainQueue.Count == 0);
         Check("training with too little wood is refused",
               RefusedTrain(sim, barracks));
     }
@@ -205,7 +205,7 @@ static class Program
         foreach (var u in host.Units) units.Add(u.Clone());
         rejoiner.Restore(host.TickNumber, host.NextUnitId, host.RngState, units,
                          host.NextNodeId, host.NodeList, host.Stockpiles, host.DropOffs,
-                         host.NextBuildingId, host.BuildingList);
+                         host.NextBuildingId, host.BuildingList, host.Designs);
 
         Check("the rebuilt sim hashes identically at the join",
               rejoiner.StateChecksum() == host.StateChecksum());
@@ -263,7 +263,7 @@ static class Program
     static bool RefusedTrain(Simulation sim, Building barracks)
     {
         // Drain wood below cost, then a train order should place nothing new.
-        int qBefore = barracks.Queue;
+        int qBefore = barracks.TrainQueue.Count;
         int woodBefore = sim.Stockpile(1, ResourceType.Wood);
         // Spend down to under 15 by training while we can, then assert a refusal.
         while (sim.Stockpile(1, ResourceType.Wood) >= 15) Order(sim, Train(1, barracks.Id));
