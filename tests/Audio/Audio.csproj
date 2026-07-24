@@ -1,0 +1,29 @@
+<!-- Audio — the sound synthesizer, tested without Godot and without speakers.
+
+     Sound is the one part of this project nobody can verify by looking at a
+     screenshot, which is exactly why it is worth testing numerically. The
+     failures that matter are not "it sounds wrong" but the mechanical ones: a
+     buffer that ends mid-waveform (a click), a recipe retuned into clipping, a
+     sound that came out silent, or two effects that are supposed to be
+     distinguishable and are not.
+
+     Only needs game/Audio — the synthesizer knows nothing about the simulation
+     or the engine, which is what makes this possible at all.
+
+     Run with `dotnet run` from this directory. Exit code 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>AudioTests</RootNamespace>
+    <AssemblyName>AudioTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Audio/*.cs" LinkBase="Audio" />
+  </ItemGroup>
+
+</Project>

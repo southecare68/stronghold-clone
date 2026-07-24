@@ -20,6 +20,7 @@ using Godot;
 using System.Collections.Generic;
 using Sim;
 using Netcode;
+using Audio;
 
 // Godot ships its own TileMap node; in this file the name always means ours.
 using TileMap = Sim.TileMap;
@@ -173,6 +174,23 @@ public partial class Main : Node2D
     byte[] _fogPixels;
     int _fogBakedTick = -1;
 
+    // ---- Sound ---------------------------------------------------------------
+    // Audio is a rendering concern in exactly the sense interpolation is: it
+    // OBSERVES the simulation and never feeds back, so nothing here can move a
+    // checksum. There are no sound files — every effect is generated from
+    // arithmetic at startup (Audio/Synth.cs).
+    //
+    // Most events are found by diffing the simulation between ticks rather than
+    // by the sim telling us. That keeps the sim free of presentation hooks, and
+    // it means a REPLAY makes exactly the same noises for free, because a replay
+    // produces the same state transitions.
+    Sound _sound;
+    readonly HashSet<int> _prevUnitIds = new();
+    readonly HashSet<int> _prevBuildingIds = new();
+    readonly Dictionary<int, bool> _prevGateOpen = new();
+    readonly Dictionary<int, Vector2> _prevBuildingWhere = new();
+    int _prevStockTotal;
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -185,6 +203,7 @@ public partial class Main : Node2D
         if (replayArg != null)
         {
             StartReplay(replayArg);
+            StartSound();
             _hud = new Label { Position = new Vector2(8, 8) };
             AddChild(_hud);
             return;
@@ -209,8 +228,147 @@ public partial class Main : Node2D
         _recorder = new ReplayRecorder(_me.Sim);
         _me.Recorder = _recorder;
 
+        StartSound();
         _hud = new Label { Position = new Vector2(8, 8) };
         AddChild(_hud);
+    }
+
+    // ---- Sound: setup and the observer --------------------------------------
+
+    void StartSound()
+    {
+        _sound = new Sound { LogPlays = HasFlag("--audio-log") };
+        AddChild(_sound);
+        PrimeSoundObserver();
+    }
+
+    // Record the world as it stands WITHOUT making any noise. Without this the
+    // first diff would see every starting unit and building as brand new and open
+    // the match with a fanfare of construction.
+    void PrimeSoundObserver()
+    {
+        _prevUnitIds.Clear();
+        _prevBuildingIds.Clear();
+        _prevGateOpen.Clear();
+        _prevBuildingWhere.Clear();
+        foreach (var u in _shown.Units) _prevUnitIds.Add(u.Id);
+        foreach (var b in _shown.Buildings)
+        {
+            _prevBuildingIds.Add(b.Id);
+            _prevGateOpen[b.Id] = b.Open;
+            _prevBuildingWhere[b.Id] = new Vector2(b.CenterX, b.CenterY);
+        }
+        _prevStockTotal = StockTotal();
+    }
+
+    void SetVolume(float delta)
+    {
+        if (_sound == null) return;
+        _sound.Volume = Mathf.Clamp(_sound.Volume + delta, 0f, 1f);
+        _sound.Muted = false;               // reaching for the volume means "let me hear it"
+        _sound.PlayUi(Sfx.Deposit);         // a tick at the new level, so you can judge it
+    }
+
+    string SoundLine() =>
+        _sound == null ? "off" : _sound.Muted ? "MUTED" : $"{Mathf.RoundToInt(_sound.Volume * 100)}%";
+
+    // Keep the ears where the eyes are. The audible radius is tied to what is on
+    // screen rather than being a fixed number of world pixels: zoomed out you are
+    // looking at the whole battlefield and should hear it, zoomed in on your own
+    // base a fight across the map should not be shouting in your ear.
+    void UpdateListener()
+    {
+        if (_sound == null) return;
+        float halfWidth = GetViewportRect().Size.X / (2f * _camZoom);
+        _sound.Listen(_camCenter, Mathf.Max(240f, halfWidth * 1.7f));
+    }
+
+    int StockTotal() =>
+        _shown.Stockpile(_myPlayer, ResourceType.Wood) +
+        _shown.Stockpile(_myPlayer, ResourceType.Stone) +
+        _shown.Stockpile(_myPlayer, ResourceType.Food);
+
+    // World units -> the pixel space the audio voices live in, which is the same
+    // space the renderer draws in before the camera transform is applied.
+    static Vector2 Aud(float tileX, float tileY) => new Vector2(tileX, tileY) * PxPerUnit;
+
+    // Should the player HEAR something happening there? The same rule as seeing
+    // it. Letting a fight on the far side of the ridge be audible would hand back
+    // exactly the information the fog was put in to withhold.
+    bool Audible(int tileX, int tileY) => Lit(tileX, tileY);
+
+    // Find this tick's events by comparing the world to how it was. Deliberately
+    // a diff rather than hooks inside the simulation: the sim stays free of
+    // presentation concerns, and a replay makes the same noises for nothing,
+    // because it reproduces the same transitions.
+    void ObserveForSound()
+    {
+        if (_sound == null) return;
+
+        // Units gone: someone fell. Their last drawn position is still in the
+        // interpolation history, which is the only place it survives.
+        foreach (int id in _prevUnitIds)
+        {
+            if (_shown.Units.Find(u => u.Id == id) != null) continue;
+            if (!_prevWorld.TryGetValue(id, out var where)) continue;
+            if (Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Y)))
+                _sound.Play(Sfx.UnitDeath, Aud(where.X, where.Y));
+        }
+
+        // Units arrived: a barracks finished one. Only your own — an enemy
+        // reinforcement is not something you would hear across the map.
+        foreach (var u in _shown.Units)
+        {
+            if (_prevUnitIds.Contains(u.Id)) continue;
+            if (u.Owner != _myPlayer) continue;
+            _sound.Play(Sfx.BuildDone, Aud(u.X / (float)Fixed.One, u.Y / (float)Fixed.One));
+        }
+
+        foreach (var b in _shown.Buildings)
+        {
+            if (_prevBuildingIds.Contains(b.Id)) continue;
+            if (Audible(b.CenterX, b.CenterY)) _sound.Play(Sfx.BuildPlace, Aud(b.CenterX, b.CenterY));
+        }
+
+        // Buildings gone: something was brought down. The position has to come
+        // from the remembered footprint, since the building itself is no longer
+        // in the list to ask.
+        foreach (int id in _prevBuildingIds)
+        {
+            if (_shown.Buildings.Find(x => x.Id == id) != null) continue;
+            if (!_prevBuildingWhere.TryGetValue(id, out var where)) continue;
+            if (Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Y)))
+                _sound.Play(Sfx.Collapse, Aud(where.X, where.Y));
+        }
+
+        foreach (var b in _shown.Buildings)
+        {
+            if (b.Type != BuildingType.Gatehouse) continue;
+            // No previous state means the gate was only just built — that is
+            // BuildPlace's event, not a gate moving. Reading "unknown" as
+            // "changed" made every new gatehouse groan open the moment it landed.
+            if (!_prevGateOpen.TryGetValue(b.Id, out bool was) || was == b.Open) continue;
+            if (Audible(b.CenterX, b.CenterY)) _sound.Play(Sfx.GateMove, Aud(b.CenterX, b.CenterY));
+        }
+
+        // A load banked. Heard at your own drop-off, which is where it happened.
+        int stock = StockTotal();
+        if (stock > _prevStockTotal && _shown.DropOffs.TryGetValue(_myPlayer, out var drop))
+            _sound.Play(Sfx.Deposit, Aud(drop.X, drop.Y));
+
+        // Roll the record forward for the next tick.
+        _prevUnitIds.Clear();
+        foreach (var u in _shown.Units) _prevUnitIds.Add(u.Id);
+        _prevBuildingIds.Clear();
+        _prevGateOpen.Clear();
+        _prevBuildingWhere.Clear();
+        foreach (var b in _shown.Buildings)
+        {
+            _prevBuildingIds.Add(b.Id);
+            _prevGateOpen[b.Id] = b.Open;
+            _prevBuildingWhere[b.Id] = new Vector2(b.CenterX, b.CenterY);
+        }
+        _prevStockTotal = stock;
     }
 
     // Load a replay file and stand up the playback simulation.
@@ -392,6 +550,7 @@ public partial class Main : Node2D
             _alpha = 0f;
             LogDesyncOnce();
             UpdateMinimapFog();
+            UpdateListener();
             _hud.Text = BuildHud();
             QueueRedraw();
             return;
@@ -414,7 +573,7 @@ public partial class Main : Node2D
 
             bool advanced = _me.TryStep();
             foreach (var c in Clients()) if (c != _me) c.TryStep();
-            if (advanced) CaptureShots();
+            if (advanced) { CaptureShots(); ObserveForSound(); }
 
             if (!advanced)
             {
@@ -438,6 +597,7 @@ public partial class Main : Node2D
         AgeProjectiles(delta);
         ComputeSeparation();
         UpdateMinimapFog();
+        UpdateListener();
         LogDesyncOnce();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -519,7 +679,8 @@ public partial class Main : Node2D
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
-                                  : "");
+                                  : "") +
+               $"\nsound {SoundLine()}  [M] mute  [-/=] volume";
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -617,7 +778,10 @@ public partial class Main : Node2D
                 // needs no unit selected; orders to units do.
                 var mine = OwnBuildingAt(at);
                 if (mine != null && mine.Type == BuildingType.Barracks)
+                {
                     _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id, X = _trainDesign });
+                    _sound?.PlayUi(CanAffordTraining() ? Sfx.MoveOrder : Sfx.Denied);
+                }
                 else if (mine != null && mine.Type == BuildingType.Gatehouse)
                     _me.Issue(new Command { Type = CommandType.ToggleGate, TargetId = mine.Id });
                 else if (_selected.Count > 0)
@@ -627,11 +791,23 @@ public partial class Main : Node2D
                     var enemyBuilding = EnemyBuildingAt(at);
                     var node = NodeAt(at);
                     if (enemy != null)
+                    {
                         _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+                        // With the map revealed by F you can click an enemy the
+                        // SIMULATION will refuse. Say so, rather than leaving the
+                        // order to vanish silently.
+                        _sound?.PlayUi(_shown.CanSeeUnit(_myPlayer, enemy) ? Sfx.AttackOrder : Sfx.Denied);
+                    }
                     else if (enemyBuilding != null)
+                    {
                         _me.Issue(new Command { Type = CommandType.AttackBuilding, UnitIds = ids, TargetId = enemyBuilding.Id });
+                        _sound?.PlayUi(Sfx.AttackOrder);
+                    }
                     else if (node != null)
+                    {
                         _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
+                        _sound?.PlayUi(Sfx.MoveOrder);
+                    }
                     else
                     {
                         var w = ScreenToWorld(at);
@@ -640,6 +816,7 @@ public partial class Main : Node2D
                             Type = CommandType.Move, UnitIds = ids,
                             X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
                         });
+                        _sound?.PlayUi(Sfx.MoveOrder);
                     }
                 }
             }
@@ -665,6 +842,10 @@ public partial class Main : Node2D
                 // you anything the simulation would let you act on, because the
                 // orders are gated in Sim/Vision.cs, not here.
                 case Key.F: _fogView = !_fogView; _fogBakedTick = -1; QueueRedraw(); return;
+                // Mute, and volume by steps. All modes, replay included.
+                case Key.M: if (_sound != null) _sound.Muted = !_sound.Muted; return;
+                case Key.Minus: SetVolume(-0.1f); return;
+                case Key.Equal: SetVolume(0.1f); return;
             }
 
             if (_replayMode) return;
@@ -722,12 +903,34 @@ public partial class Main : Node2D
     void PlaceAtCursor(BuildingType type)
     {
         var w = ScreenToWorld(_mouse);
+        int x = Mathf.RoundToInt(w.X), y = Mathf.RoundToInt(w.Y);
         _me.Issue(new Command
         {
-            Type = CommandType.Build, TargetId = (int)type,
-            X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
+            Type = CommandType.Build, TargetId = (int)type, X = x, Y = y,
         });
+
+        // A refused build is silent in the simulation — it simply places nothing
+        // and spends nothing — which from the outside is indistinguishable from
+        // the click not registering. Predict the common refusals and SAY so. The
+        // sound only for the acceptance case is left to the observer, so it lands
+        // when the structure actually appears rather than three ticks early.
+        if (!WouldBuild(type, x, y)) _sound?.PlayUi(Sfx.Denied);
     }
+
+    // The same three tests Simulation.Apply makes for a Build order. A local
+    // prediction, used ONLY to pick a sound — the simulation remains the sole
+    // authority on whether anything is actually placed.
+    bool WouldBuild(BuildingType type, int x, int y)
+    {
+        if (!_shown.CanPlace(type, x, y)) return false;
+        var cost = _shown.CostOf(type);
+        for (int i = 0; i < Sim.Resources.Count; i++)
+            if (_shown.Stockpile(_myPlayer, (ResourceType)i) < cost[i]) return false;
+        return Known(x, y);
+    }
+
+    bool CanAffordTraining() =>
+        _shown.Stockpile(_myPlayer, ResourceType.Wood) >= 15;
 
     // The resource node under the cursor, or null.
     ResourceNode NodeAt(Vector2 screen)
@@ -752,6 +955,7 @@ public partial class Main : Node2D
             if (u.Owner != _myPlayer) continue;
             if (rect.HasPoint(WorldToScreen(u))) _selected.Add(u.Id);
         }
+        if (_selected.Count > 0) _sound?.PlayUi(Sfx.Select);
         QueueRedraw();
     }
 
@@ -1089,16 +1293,36 @@ public partial class Main : Node2D
         foreach (var s in _shown.ShotsThisTick)
         {
             int dist = Fixed.VLen(s.ToX - s.FromX, s.ToY - s.FromY);
-            if (dist < RangedShotDist) continue;
-            // An arrow gives away a fight you cannot see. Show it only if either
-            // end of it is in sight — you do see the shaft land next to you even
-            // when whatever loosed it is still hidden.
-            if (!Lit(Fixed.ToInt(s.FromX), Fixed.ToInt(s.FromY)) &&
-                !Lit(Fixed.ToInt(s.ToX), Fixed.ToInt(s.ToY))) continue;
+            int fx = Fixed.ToInt(s.FromX), fy = Fixed.ToInt(s.FromY);
+            int tx = Fixed.ToInt(s.ToX), ty = Fixed.ToInt(s.ToY);
+
+            // An arrow gives away a fight you cannot see. Show and sound it only
+            // if an END of it is in sight — you do hear the shaft land next to
+            // you even when whatever loosed it is still hidden.
+            bool sawShooter = Lit(fx, fy), sawTarget = Lit(tx, ty);
+            if (!sawShooter && !sawTarget) continue;
+
+            var to = new Vector2(s.ToX, s.ToY) / (float)Fixed.One * PxPerUnit;
+
+            if (dist < RangedShotDist)
+            {
+                // Close quarters: no arrow to draw, but very much something to
+                // hear, and it belongs at the unit being hit.
+                _sound?.Play(Sfx.MeleeHit, to);
+                continue;
+            }
+
+            // A ranged exchange is two sounds in two places: the release where
+            // the archer stands, the impact where it arrives. Each is only heard
+            // if that END is visible.
+            if (sawShooter)
+                _sound?.Play(Sfx.BowShot, new Vector2(s.FromX, s.FromY) / (float)Fixed.One * PxPerUnit);
+            if (sawTarget) _sound?.Play(Sfx.ArrowHit, to);
+
             _projectiles.Add(new Projectile
             {
                 From = new Vector2(s.FromX, s.FromY) / (float)Fixed.One * PxPerUnit,
-                To = new Vector2(s.ToX, s.ToY) / (float)Fixed.One * PxPerUnit,
+                To = to,
                 Age = 0f,
                 Life = 0.14f,          // fast — an arrow, not a lob
             });

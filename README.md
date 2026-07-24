@@ -26,8 +26,11 @@ stronghold-clone/
 │  ├─ Net/              engine-agnostic protocol (Godot-free, so it's testable)
 │  │  ├─ Wire.cs        turn serialization, explicit little-endian
 │  │  └─ MatchCode.cs   endpoint <-> XXXXX-XXXXX join code
+│  ├─ Audio/            engine-agnostic sound synthesis (no audio files at all)
+│  │  └─ Synth.cs       every effect generated from noise and envelopes
 │  └─ Scripts/          the Godot layer
 │     ├─ Main.cs        renders the sim, mouse -> commands
+│     ├─ Sound.cs       voices, positional playback, mix levels
 │     └─ EnetTransport.cs   ITransport over a real ENet socket
 ├─ tests/               console tests; no Godot, so they run anywhere dotnet does
 │  ├─ SimParity/        C# sim reproduces the Node reference exactly
@@ -43,7 +46,8 @@ stronghold-clone/
 │  ├─ Siege/            destructible buildings, breaching, sync, rejoin
 │  ├─ PointBuy/         data-driven unit designs within a point budget
 │  ├─ Replay/           record a match and replay it bit-for-bit
-│  └─ Fog/              fog of war: sight, memory, and the orders it gates
+│  ├─ Fog/              fog of war: sight, memory, and the orders it gates
+│  └─ Audio/            the synthesizer, checked numerically (no speakers needed)
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -92,6 +96,15 @@ target through fog either, though one they are already fighting is still chased.
 Press `F` to reveal the whole map — a display switch only, which is worth trying
 precisely because the orders stay refused.
 
+**Sound.** There are no audio files in this repo: every effect is generated from
+arithmetic at startup (`game/Audio/Synth.cs`), so the "assets" are source code you
+can read and retune a number at a time. Orders and selections answer back
+immediately, blows and bowshots come from where they land, a refused order says
+so, and everything is positional — a fight across the map sounds like it is
+across the map, and one you cannot see makes no sound at all, because audible
+fog would hand back exactly what the fog was there to withhold. `M` mutes, `-`
+and `=` set the volume.
+
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
 is a rendering concern only — nothing interpolated ever reaches the sim. Run
@@ -125,6 +138,7 @@ address, not NAT traversal. Same-LAN or forwarded ports only.
 ## Run the tests (no engine needed)
 ```
 dotnet run --project tests/SimParity     # and InputSlice, CommandOrder, Netcode
+dotnet run --project tests/Audio -- --write ./sfx    # also dump every sound as .wav
 cd prototype-node
 node test/sync.test.js          # two clients identical for 300 ticks
 node test/float-hazard.test.js  # why the sim forbids floating point

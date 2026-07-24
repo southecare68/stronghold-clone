@@ -57,6 +57,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin
   - `Replay/` — record a match, replay it bit-for-bit, save/load
   - `Fog/` — fog of war: sight, explored memory, and the orders they gate
+  - `Audio/` — the sound synthesizer, checked numerically (no speakers needed)
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -544,7 +545,7 @@ RTS is feature-complete against the original brief.
 deterministic, cross-architecture multiplayer castle RTS: economy, buildings,
 combat, siege, working gatehouses, a custom point-buy roster, rejoin, desync
 detection, and replays — proven bit-identical on ARM and x86 both headlessly
-(SimParity) and in a **live windowed ENet match** between the two machines. 14
+(SimParity) and in a **live windowed ENet match** between the two machines. 15
 Godot-free test suites guard it all; `0xB1A7A676` still holds.
 
 ✅ **Camera (pan & zoom)** added, engine-layer only. Mouse wheel zooms toward the
@@ -686,10 +687,86 @@ simulation. **Sim-level with order gating was chosen.**
   — the units do not move; moving into unexplored dark still works. `IN SYNC ✓`
   at tick 5175, full 20 Hz throughout.
 
+✅ **Sound — generated, not sourced.** There are no audio files in the repo, and
+that was the design decision rather than a shortcut. The project's premise is its
+own art; a handful of short effects are cheap to describe as noise and envelopes
+and expensive to store as binary blobs nobody can diff, review or retune. The
+"assets" are source code.
+
+- `game/Audio/Synth.cs` — engine-agnostic, exactly like `Net/`. Produces plain
+  16-bit mono PCM at 22.05 kHz from oscillators, one-pole filters and percussive
+  envelopes. 13 effects: select, move/attack order, melee hit, bowshot, arrow
+  hit, death, build place, train complete, deposit, gate, collapse, denied. Each
+  reads as a recipe — a comment saying what it is trying to be, numbers saying
+  how — so retuning is a one-line change. Every sound is normalised to the same
+  peak and ramped to silence over its last 4 ms (a buffer that stops mid-waveform
+  ends on a step, and a step is a click — the commonest way synthesised audio
+  sounds cheap). A private xorshift, deliberately NOT `Sim.Rng`, so nobody ever
+  has to wonder whether generating a sound could nudge a damage roll.
+- `game/Scripts/Sound.cs` — the Godot half: wraps the buffers in `AudioStreamWav`,
+  runs a 24-voice pool (oldest stolen when full — a battle should sound like a
+  battle, not a queue), applies a per-effect dB trim (the deposit tick sits 13 dB
+  under a collapsing wall, because it fires constantly), and enforces a per-effect
+  minimum gap so twenty simultaneous blows do not stack into one crunch.
+- **Positional**, via an `AudioListener2D` parked at the camera centre. The game
+  draws through a manual transform rather than a `Camera2D`, so Godot has no
+  listener to infer and one has to be supplied. The audible radius is tied to the
+  visible half-width, so zooming out widens what you can hear.
+- **Fog gates hearing, not just seeing.** A fight you cannot see makes no sound;
+  a ranged exchange is two sounds in two places and each end is heard only if
+  THAT end is visible. Audible fog would hand back exactly the information the
+  fog exists to withhold.
+- **Events come from diffing the simulation between ticks**, not from hooks
+  inside it. The sim stays free of presentation concerns, and a replay makes the
+  same noises for nothing because it reproduces the same transitions. Order
+  acknowledgements are the exception — played on the CLICK, since the protocol
+  has three ticks of input delay and a late acknowledgement feels like being
+  ignored.
+- **A refused order now says so.** `Denied` fires when the client can predict the
+  simulation will refuse — an unaffordable or unplaceable building, or an attack
+  on a unit only visible because `F` revealed the map. Previously a refused order
+  was indistinguishable from a click that never registered.
+- `tests/Audio` (15th suite): every effect is audible, non-clipping and sanely
+  long; none begins or ends on a step; rendering twice is bit-identical; the PCM
+  encoding round-trips little-endian; and the sounds that must be told apart
+  measurably are — brightness (zero-crossing rate) separates bowshot from rumble
+  and move order from attack order, and ONSET brightness separates a sword crack
+  from timber, which whole-buffer brightness cannot because an impact is a bright
+  crack over a long low body. `--write <dir>` dumps all 13 as .wav files, which is
+  how a human checks the half a test cannot.
+- **Three things the work shook out**, the third a real pre-existing bug:
+  1. The build-place transient was bright enough (2.6 kHz) to be confusable with a
+     sword landing; rolled off to 1.2 kHz, which the onset test now pins.
+  2. A newly-built gatehouse groaned open the instant it landed — the observer
+     read "no previous state" as "changed". Caught in the live log, not by a test.
+  3. **`SiegeBuilding` recorded each blow as landing on the building's CENTRE**,
+     while reach is measured to the nearest footprint tile (`DistToBuilding`). So
+     a soldier standing against a 3x3 keep logged a 2.4-tile strike, which the
+     renderer classified as ranged: melee siege has been **drawing arrows** ever
+     since ranged units were added, and it made a battering ram sound like
+     archery. The shot now lands on the part of the structure the unit is actually
+     against — which is more accurate on screen too. Presentation only
+     (`ShotsThisTick` is transient and never hashed), so no checksum moved and all
+     15 suites still pass. Sound found a rendering bug that was invisible to the
+     eye for two features.
+- Verified in-engine with `--audio-log`: 13 effects synthesised and 24 voices
+  ready at startup; select, move order, train, gather, denied (twice — an
+  unaffordable build AND a build into unexplored dark), build place, gate toggle,
+  train complete and deposit all fired at the right world positions with the
+  right trims (deposit quietest at −14.4 dB, collapse loudest at −1.4 dB). A full
+  battle produced 11 melee hits and 3 deaths at the exact tiles the enemies stood
+  on, and a ranged exchange split correctly into two sounds in two places —
+  BowShot at the archer, ArrowHit where the arrow landed. All 13 effects observed
+  firing in-engine.
+- **Not verified by me: whether it sounds good.** I cannot listen. The numbers,
+  the timing, the positions and the mix levels are checked; the aesthetics are
+  yours to judge — run the game, or `tests/Audio -- --write` and play the files.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; more maps (the
-   `Skirmish` pattern generalises — it takes a size and uses no RNG); sound;
-   menus; unit/building selection panels.
+   `Skirmish` pattern generalises — it takes a size and uses no RNG); music and
+   ambience (the synth has the building blocks); menus; unit/building selection
+   panels.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

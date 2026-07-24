@@ -1045,10 +1045,20 @@ namespace Sim
                 {
                     b.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
                     u.AttackTimer = d.Cooldown;
+                    // The blow lands on the part of the structure the unit is
+                    // actually standing against, NOT the centre. Reach is measured
+                    // to the nearest footprint tile (see DistToBuilding), so
+                    // recording the centre made every blow look longer than it
+                    // was: against a 3x3 keep a soldier in melee logged a
+                    // 2.4-tile strike, which the renderer classified as ranged and
+                    // drew an arrow for. Presentation only — ShotsThisTick is
+                    // transient and never hashed — but it was wrong on screen and
+                    // it made melee siege sound like archery.
                     ShotsThisTick.Add(new Shot
                     {
                         FromX = u.X, FromY = u.Y,
-                        ToX = Fixed.FromInt(b.CenterX), ToY = Fixed.FromInt(b.CenterY),
+                        ToX = Clamp(u.X, Fixed.FromInt(b.X), Fixed.FromInt(b.X + b.W - 1)),
+                        ToY = Clamp(u.Y, Fixed.FromInt(b.Y), Fixed.FromInt(b.Y + b.H - 1)),
                     });
                 }
             }
