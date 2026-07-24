@@ -30,10 +30,11 @@ public partial class Main : Node2D
     const double Step = 1.0 / TicksPerSecond;
     const float PxPerUnit = 12f;     // world units -> screen pixels
 
-    // The match map. Every client builds its OWN copy; TileMap.Demo is
-    // deterministic, so all copies are identical and StateChecksum's map
-    // fingerprint agrees. Sized to fit the window set in project.godot.
-    const int DemoSize = 56;
+    // The match map. Every client builds its OWN copy; TileMap.Skirmish is
+    // deterministic (no RNG), so all copies are identical and StateChecksum's map
+    // fingerprint agrees. Much larger than the window — that's what the camera and
+    // minimap are for.
+    const int MapSize = Skirmish.DefaultSize;
 
     // Never simulate more than this many ticks in one frame. Without a cap, a
     // long stall followed by a burst of arriving turns would try to catch up all
@@ -62,7 +63,6 @@ public partial class Main : Node2D
     string _joinHint = "";
 
     // Which design a barracks trains when right-clicked. Chosen with number keys.
-    static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer" };
     int _trainDesign;
 
     public Client LocalClient => _me;
@@ -136,6 +136,9 @@ public partial class Main : Node2D
     // pinned to the corner at any zoom. Shows the whole battlefield, the current
     // view as a rectangle, and jumps the camera when clicked.
     const float MiniSize = 160f, MiniMargin = 10f;
+    // Terrain never changes, so it is baked into a one-pixel-per-tile texture
+    // once and blitted each frame — far cheaper than drawing 16k rects.
+    ImageTexture _miniTerrain;
 
     public override void _Ready()
     {
@@ -158,41 +161,14 @@ public partial class Main : Node2D
 
         // Identical starting state on EVERY machine (determinism starts here):
         // same armies, same drop-offs, same resource nodes in the same order.
-        foreach (var c in Clients())
-        {
-            c.Sim.SpawnUnit(1, 8, 8);
-            c.Sim.SpawnUnit(1, 11, 8);
-            c.Sim.SpawnUnit(1, 8, 11);
-            c.Sim.SpawnUnit(2, 44, 40);
-            c.Sim.SpawnUnit(2, 47, 40);
-
-            // A starting keep for each side — it sets the drop-off — plus some
-            // resources to build and train with.
-            c.Sim.PlaceBuilding(BuildingType.Keep, 1, 4, 4);
-            c.Sim.PlaceBuilding(BuildingType.Keep, 2, 44, 44);
-            foreach (int owner in new[] { 1, 2 })
-            {
-                c.Sim.AddResource(owner, ResourceType.Wood, 200);
-                c.Sim.AddResource(owner, ResourceType.Stone, 100);
-            }
-
-            c.Sim.SpawnNode(ResourceType.Wood, 14, 14, 300);   // player 1's side
-            c.Sim.SpawnNode(ResourceType.Stone, 8, 16, 300);
-            c.Sim.SpawnNode(ResourceType.Wood, 50, 40, 300);   // player 2's side
-            c.Sim.SpawnNode(ResourceType.Stone, 51, 36, 300);
-
-            // The point-buy roster, registered identically on every machine so
-            // design ids line up: 0 Soldier, 1 Runner, 2 Brute, 3 Archer. Each
-            // spends the same budget, allocated differently — the Archer trades
-            // HP and speed for reach (RangeStat 8 = 4 tiles), so it softens the
-            // enemy on approach but folds fast if it gets caught.
-            c.Sim.RegisterDesign(new UnitDesign { Hp = 60, Damage = 9, SpeedStat = 10, RangeStat = 3, Cooldown = 10 });
-            c.Sim.RegisterDesign(new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 });
-            c.Sim.RegisterDesign(new UnitDesign { Hp = 55, Damage = 9, SpeedStat = 6, RangeStat = 8, Cooldown = 13 });
-        }
+        // Armies, keeps, stockpiles, nodes and the unit roster — see Sim/Skirmish.cs.
+        // It lives in the sim so the headless tests can place the same start and
+        // check it is actually playable.
+        foreach (var c in Clients()) Skirmish.Setup(c.Sim, MapSize);
 
         _shown = _me.Sim;
         CenterCamera();
+        BuildMinimapTerrain();
 
         // Record the match we render, so it can be saved and watched back. Started
         // now, after setup, so the recording's initial snapshot is the real
@@ -223,6 +199,7 @@ public partial class Main : Node2D
         _mode = "REPLAY";
         _shown = _replay.Reconstruct();
         CenterCamera();
+        BuildMinimapTerrain();
         GD.Print($"[replay] playing {path}: {_replay.Commands.Count} ticks, " +
                  $"expecting final checksum 0x{_replay.FinalChecksum:X8}");
     }
@@ -248,8 +225,8 @@ public partial class Main : Node2D
         {
             var loop = new LoopbackTransport();
             _net = loop;
-            _me = new Client(1, loop, TileMap.Demo(DemoSize));
-            _other = new Client(2, loop, TileMap.Demo(DemoSize));
+            _me = new Client(1, loop, TileMap.Skirmish(MapSize));
+            _other = new Client(2, loop, TileMap.Skirmish(MapSize));
             loop.Connect(_me);
             loop.Connect(_other);
             _myPlayer = 1;
@@ -259,7 +236,7 @@ public partial class Main : Node2D
         _enet = mode == "HOST" ? EnetTransport.Host(port) : EnetTransport.Join(address, port);
         _net = _enet;
         _myPlayer = _enet.PlayerId;
-        _me = new Client(_myPlayer, _enet, TileMap.Demo(DemoSize));
+        _me = new Client(_myPlayer, _enet, TileMap.Skirmish(MapSize));
         _enet.Attach(_me);
 
         if (mode == "HOST")
@@ -500,7 +477,7 @@ public partial class Main : Node2D
         int stone = _shown.Stockpile(_myPlayer, ResourceType.Stone);
         int food = _shown.Stockpile(_myPlayer, ResourceType.Food);
         var d = _shown.DesignOf(_trainDesign);
-        string name = _trainDesign < DesignNames.Length ? DesignNames[_trainDesign] : $"#{_trainDesign}";
+        string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
                "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
@@ -794,8 +771,18 @@ public partial class Main : Node2D
                            new Vector2(map.Width * PxPerUnit, map.Height * PxPerUnit)),
                  GroundColor);
 
-        for (int y = 0; y < map.Height; y++)
-            for (int x = 0; x < map.Width; x++)
+        // Only the tiles actually on screen. On a 128x128 map that is a few
+        // hundred instead of sixteen thousand, every frame.
+        var vp = GetViewportRect().Size;
+        var half = vp / (2f * _camZoom * PxPerUnit);
+        var c = _camCenter / PxPerUnit;
+        int x0 = Mathf.Max(0, Mathf.FloorToInt(c.X - half.X) - 1);
+        int x1 = Mathf.Min(map.Width - 1, Mathf.CeilToInt(c.X + half.X) + 1);
+        int y0 = Mathf.Max(0, Mathf.FloorToInt(c.Y - half.Y) - 1);
+        int y1 = Mathf.Min(map.Height - 1, Mathf.CeilToInt(c.Y + half.Y) + 1);
+
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
             {
                 var t = map.At(x, y);
                 if (t == Terrain.Ground) continue;
@@ -991,8 +978,18 @@ public partial class Main : Node2D
         DrawSetTransform(vp / 2f - _camCenter * _camZoom, 0f, new Vector2(_camZoom, _camZoom));
     }
 
+    // Open on your own base if you have one — on a map this size the geometric
+    // centre is a long way from anything you own. Falls back to the map centre
+    // (which is what a replay wants, having no "your" side).
     void CenterCamera()
     {
+        foreach (var b in _shown.Buildings)
+        {
+            if (b.Owner != _myPlayer || b.Type != BuildingType.Keep) continue;
+            _camCenter = new Vector2(b.CenterX, b.CenterY) * PxPerUnit;
+            ClampCamera();
+            return;
+        }
         _camCenter = new Vector2(_shown.Map.Width, _shown.Map.Height) * (PxPerUnit / 2f);
     }
 
@@ -1024,6 +1021,24 @@ public partial class Main : Node2D
     }
 
     // The minimap panel, in screen coordinates, pinned to the bottom-right.
+    // One pixel per tile. Terrain is sealed for the life of the match, so this
+    // runs once at startup and the minimap is a single blit thereafter.
+    void BuildMinimapTerrain()
+    {
+        var map = _shown.Map;
+        var img = Image.CreateEmpty(map.Width, map.Height, false, Image.Format.Rgba8);
+        for (int y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width; x++)
+                img.SetPixel(x, y, map.At(x, y) switch
+                {
+                    Terrain.Water => WaterColor,
+                    Terrain.Rock => RockColor,
+                    Terrain.Marsh => MarshColor,
+                    _ => GroundColor,
+                });
+        _miniTerrain = ImageTexture.CreateFromImage(img);
+    }
+
     Rect2 MinimapRect()
     {
         var vp = GetViewportRect().Size;
@@ -1041,20 +1056,10 @@ public partial class Main : Node2D
 
         Vector2 At(float tileX, float tileY) => r.Position + new Vector2(tileX * sx, tileY * sy);
 
-        // Terrain: ground as the base, then only the tiles that differ.
-        DrawRect(r, GroundColor);
-        for (int y = 0; y < map.Height; y++)
-            for (int x = 0; x < map.Width; x++)
-            {
-                var t = map.At(x, y);
-                if (t == Terrain.Ground) continue;
-                DrawRect(new Rect2(At(x, y), cell), t switch
-                {
-                    Terrain.Water => WaterColor,
-                    Terrain.Rock => RockColor,
-                    _ => MarshColor,
-                });
-            }
+        // Terrain: baked once into a tile-per-pixel texture (see _miniTerrain)
+        // and stretched to the panel, rather than thousands of rects a frame.
+        if (_miniTerrain != null) DrawTextureRect(_miniTerrain, r, false);
+        else DrawRect(r, GroundColor);
 
         foreach (var n in _shown.Nodes)
             DrawRect(new Rect2(At(n.X, n.Y), cell), ResourceColor(n.Type));
@@ -1111,9 +1116,17 @@ public partial class Main : Node2D
     }
 
     // Keep the centre within the map so the battlefield can't be lost off-screen.
+    // Keep the VIEW on the map, not merely the centre. Clamping the centre alone
+    // was harmless when the whole map fit in the window, but on a 128-tile map it
+    // lets you scroll half a screen of void into frame. Along an axis too short
+    // to fill the window there is nothing to scroll to, so centre it instead.
     void ClampCamera()
     {
-        var max = new Vector2(_shown.Map.Width, _shown.Map.Height) * PxPerUnit;
-        _camCenter = new Vector2(Mathf.Clamp(_camCenter.X, 0, max.X), Mathf.Clamp(_camCenter.Y, 0, max.Y));
+        var map = new Vector2(_shown.Map.Width, _shown.Map.Height) * PxPerUnit;
+        var half = GetViewportRect().Size / (2f * _camZoom);
+
+        _camCenter = new Vector2(
+            map.X > half.X * 2f ? Mathf.Clamp(_camCenter.X, half.X, map.X - half.X) : map.X / 2f,
+            map.Y > half.Y * 2f ? Mathf.Clamp(_camCenter.Y, half.Y, map.Y - half.Y) : map.Y / 2f);
     }
 }

@@ -19,6 +19,7 @@ stronghold-clone/
 │  │  ├─ Rng.cs         seeded integer RNG (System.Random is banned here)
 │  │  ├─ TileMap.cs     terrain grid, integer movement costs
 │  │  ├─ PathFinder.cs  deterministic grid A* (total tie-break order)
+│  │  ├─ Skirmish.cs    the 1v1 starting position (so tests can check it)
 │  │  ├─ Simulation.cs  game state + Tick() + checksum
 │  │  └─ Lockstep.cs    client, turns, input delay, ITransport seam
 │  ├─ Net/              engine-agnostic protocol (Godot-free, so it's testable)
@@ -68,6 +69,14 @@ simulation is untouched).
 Mouse wheel zooms (toward the cursor), and middle-drag or the arrow keys pan the
 camera around the map. A minimap in the bottom-right shows the whole battlefield
 with your current view outlined — click it to jump the camera there.
+
+Matches are fought on a 128×128 skirmish map, far larger than the window. The two
+keeps face each other across a rock ridge that runs the length of the map, broken
+by three passes: the middle one is the short road but its marsh aprons slow
+anyone taking it, and the outer two are clean going but a long way round. Two
+lakes and a pair of outcrops break up the rest. Each side has safe wood and stone
+behind its base, and there is a richer patch out by each far pass worth leaving
+home for. The camera starts on your own keep.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That

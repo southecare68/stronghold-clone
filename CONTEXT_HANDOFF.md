@@ -573,10 +573,55 @@ watching a replay. Drawn after resetting the camera transform
 (`DrawSetTransform(identity)`), which is what keeps it pinned to the corner at
 any zoom. Engine-layer only — no sim or test changes.
 
+✅ **A real skirmish map** (128×128 — five times the area of the old 56-tile demo,
+and far larger than the window, which is what the camera and minimap were for).
+
+- `TileMap.Skirmish(size)` — hand-authored, **no RNG**: every coordinate is a
+  fixed fraction of `size`, so the same size always builds the identical map and
+  the `StateChecksum` map fingerprint agrees on every machine. A 3-tile rock
+  ridge runs north–south down the middle with **three passes** (at 25%, 50% and
+  75% height), so the terrain shapes the fight instead of decorating it: the
+  middle pass is the short road and is flanked by marsh aprons that slow anyone
+  taking it, while the outer passes are clean but long. Two lakes sit off the
+  centre line and two outcrops break up the open ground. `TileMap.Demo` is
+  untouched — the existing tests still reference it.
+- `Sim/Skirmish.cs` — **the starting position, defined once.** It lives in the sim
+  rather than `Main.cs` for two reasons. Determinism: every machine must build a
+  byte-identical world before tick 0, so there must be one definition, not one
+  per call site. And a layout can be wrong in ways the compiler cannot see — a
+  node dropped in a lake, a keep straddling the ridge — which is silent in-game
+  (you just find a patch nobody can work). Putting it here lets the headless
+  tests place the real start and check it. That is not hypothetical: **the south
+  contested node was in the water** when first written, and the test caught it.
+  Mirrored keeps and parties either side of the ridge, two safe patches behind
+  each base, and a contested pair out by the north and south passes.
+- `tests/Pathfinding` gained `TheSkirmishMapIsPlayable` (bases open, a route
+  exists west→east, and it crosses the ridge rather than rounding its ends —
+  checked at sizes 96/128/160) and `TheSkirmishStartIsSound` (both keeps place,
+  all six nodes are on open ground and reachable, the roster registers, and two
+  independent setups agree on `StateChecksum`).
+- **Renderer fixes the bigger map forced.** `DrawTerrain` now culls to the visible
+  tile range — a few hundred rects a frame instead of sixteen thousand. The
+  minimap bakes terrain **once** into a tile-per-pixel `ImageTexture` and blits
+  it, rather than drawing every tile every frame. And `ClampCamera` now keeps the
+  **view** on the map rather than just the centre: clamping the centre alone was
+  harmless when the whole map fit in the window, but at this size it let you
+  scroll half a screen of void into frame (it did, on the first run). An axis too
+  short to fill the window is centred instead.
+- The camera opens on **your own keep**, not the map centre, which is now a long
+  way from anything you own.
+- Verified live at 1200×800: start on your keep with the view stopping at the map
+  edge; a minimap click jumps to the enemy base and clamps to the east edge;
+  zoomed out the whole battlefield is visible and centred; three units ordered
+  across the map routed between the marsh aprons, **through the middle pass**,
+  and held it — `IN SYNC ✓` at tick 3339, keeping full 20 Hz throughout.
+- Sim-side additions only ever *add* state when used, so `0xB1A7A676` holds and
+  all 13 suites pass.
+
 ## Immediate next tasks (choose by taste — the core is done)
-17. **Polish & depth:** an interactive point-buy/roster UI; a real map/level
-   beyond `TileMap.Demo` (now that there's a camera and minimap, maps can be
-   much bigger than the window); sound; menus; unit/building selection panels.
+17. **Polish & depth:** an interactive point-buy/roster UI; more maps (the
+   `Skirmish` pattern generalises — it takes a size and uses no RNG); sound;
+   menus; unit/building selection panels.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

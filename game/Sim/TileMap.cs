@@ -263,6 +263,62 @@ namespace Sim
             return map;
         }
 
+        // A proper 1v1 skirmish map, hand-authored (no RNG, so every machine
+        // builds it identically) and laid out in fractions of `size` so it scales.
+        //
+        // The shape is deliberate: the two bases sit far apart on the west and
+        // east edges, and a north-south mountain ridge divides the map with three
+        // passes through it. That turns movement into decisions — which pass to
+        // take, which to wall off — instead of a straight line across open ground.
+        // Marsh aprons at the middle pass make the most obvious route the slowest,
+        // and two lakes off the centre line bend the northern and southern routes
+        // without sealing anything.
+        //
+        // tests/Pathfinding checks the two base areas are actually connected: an
+        // authored map that accidentally walls a player in would be a disaster,
+        // and it is exactly the sort of thing you only notice mid-match.
+        public static TileMap Skirmish(int size = 128)
+        {
+            var map = new TileMap(size, size);
+            int mid = size / 2;
+
+            // The dividing ridge, three tiles thick, with three gaps.
+            int top = size * 6 / 100, bottom = size * 94 / 100;
+            int[] passes = { size * 25 / 100, mid, size * 75 / 100 };
+            const int passHalf = 3;
+            for (int y = top; y < bottom; y++)
+            {
+                bool inPass = false;
+                foreach (int p in passes) if (y >= p - passHalf && y <= p + passHalf) inPass = true;
+                if (inPass) continue;
+                for (int x = mid - 1; x <= mid + 1; x++) map.Fill(x, y, x, y, Terrain.Rock);
+            }
+
+            // Lakes, off the centre line so they shape routes rather than block them.
+            map.Fill(size * 30 / 100, size * 14 / 100, size * 42 / 100, size * 28 / 100, Terrain.Water);
+            map.Fill(size * 58 / 100, size * 72 / 100, size * 70 / 100, size * 86 / 100, Terrain.Water);
+
+            // Boggy ground either side of the middle pass — the shortest way is
+            // also the slowest, so the flanking passes are worth considering.
+            map.Fill(mid - 8, mid - 6, mid - 3, mid + 6, Terrain.Marsh);
+            map.Fill(mid + 3, mid - 6, mid + 8, mid + 6, Terrain.Marsh);
+
+            // Outcrops for texture and a little cover near each base approach.
+            map.Fill(size * 18 / 100, size * 60 / 100, size * 24 / 100, size * 64 / 100, Terrain.Rock);
+            map.Fill(size * 76 / 100, size * 36 / 100, size * 82 / 100, size * 40 / 100, Terrain.Rock);
+
+            map.SealTerrain();
+            return map;
+        }
+
+        // Paint a rectangle of terrain, clamped to the map.
+        void Fill(int x0, int y0, int x1, int y1, Terrain t)
+        {
+            for (int y = Math.Max(0, y0); y <= Math.Min(Height - 1, y1); y++)
+                for (int x = Math.Max(0, x0); x <= Math.Min(Width - 1, x1); x++)
+                    _tiles[Index(x, y)] = t;
+        }
+
         // A deterministic scatter of obstacles: same seed, same map, on every
         // machine and every run. Not a real map generator — a stand-in so the
         // pathfinder can be exercised against something less tidy than a room —

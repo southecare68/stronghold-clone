@@ -28,6 +28,8 @@ static class Program
         SameQuerySameRoute();
         TheRouteIsPinned();
         BoundedWork();
+        TheSkirmishMapIsPlayable();
+        TheSkirmishStartIsSound();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -316,6 +318,92 @@ static class Program
         var pf2 = new PathFinder(map);
         Check("a walled-off goal terminates and reports failure",
               !pf2.TryFindPath(0, 0, 199, 199, path));
+    }
+
+    // An authored map has to be playable: both bases clear, and a route between
+    // them. A map that seals a player in is the kind of bug you only find in the
+    // middle of a match.
+    static void TheSkirmishMapIsPlayable()
+    {
+        Console.WriteLine("\nthe skirmish map is playable:");
+        foreach (int size in new[] { 96, 128, 160 })
+        {
+            var map = TileMap.Skirmish(size);
+            int mid = size / 2;
+            int westX = size * 8 / 100, eastX = size * 88 / 100;
+
+            bool basesClear = true;
+            for (int y = mid - 3; y <= mid + 3 && basesClear; y++)
+                for (int x = westX - 2; x <= westX + 3 && basesClear; x++)
+                    if (!map.Passable(x, y) || !map.Passable(eastX + (westX - x), y)) basesClear = false;
+            Check($"[{size}] both base areas are open ground", basesClear);
+
+            var pf = new PathFinder(map) { MaxExpansions = size * size };
+            var path = new List<Tile>();
+            Check($"[{size}] a route exists from the west base to the east base",
+                  pf.TryFindPath(westX, mid, eastX, mid, path));
+
+            // It must actually go THROUGH the ridge, not around its ends.
+            bool crossed = false;
+            foreach (var t in path) if (t.X == mid) crossed = true;
+            Check($"[{size}] and it crosses the ridge line", crossed);
+        }
+
+        // Deterministic: the same size builds the identical map every time.
+        Check("the same size builds an identical map",
+              MapsEqual(TileMap.Skirmish(128), TileMap.Skirmish(128)));
+    }
+
+    // The map being passable is not the same as the START being sound. A keep
+    // can straddle the ridge and fail to place; a resource node can land in a
+    // lake, leaving a patch nobody can ever work. Both are silent in the game —
+    // you just find a node you cannot reach — so place the real starting world
+    // and check it. (The south contested node was in fact in the water when this
+    // was first written.)
+    static void TheSkirmishStartIsSound()
+    {
+        Console.WriteLine("\nthe skirmish starting position is sound:");
+        const int size = Skirmish.DefaultSize;
+        var map = TileMap.Skirmish(size);
+        var sim = new Simulation(map);
+        Skirmish.Setup(sim, size);
+
+        int w = Skirmish.West(size), e = Skirmish.East(size), m = Skirmish.MidY(size);
+
+        Check("both starting parties exist", sim.Units.Count == 6);
+        int keeps = 0;
+        foreach (var b in sim.Buildings) if (b.Type == BuildingType.Keep) keeps++;
+        Check("both keeps placed (neither fell on bad ground)", keeps == 2);
+
+        var pf = new PathFinder(map) { MaxExpansions = size * size };
+        var path = new List<Tile>();
+
+        bool allReachable = true, allOnLand = true;
+        foreach (var n in sim.Nodes)
+        {
+            if (!map.Passable(n.X, n.Y)) { allOnLand = false; continue; }
+            // Whichever side owns that half of the map has to be able to work it.
+            int fromX = n.X < size / 2 ? w + 4 : e - 2;
+            if (!pf.TryFindPath(fromX, m, n.X, n.Y, path)) allReachable = false;
+        }
+        Check($"all {sim.Nodes.Count} resource nodes are on open ground", allOnLand);
+        Check("and a worker can walk to every one of them", allReachable);
+
+        Check("the two bases can reach each other",
+              pf.TryFindPath(w + 4, m, e - 2, m, path));
+
+        // The whole roster must register, or the number keys train the wrong thing.
+        Check("the full unit roster is registered",
+              sim.DesignList.Count == Skirmish.DesignNames.Length);
+
+        // Setting up twice must produce the identical world — this is the
+        // per-machine start, so any divergence here is an instant desync.
+        var host = new Simulation(TileMap.Skirmish(size));
+        var joiner = new Simulation(TileMap.Skirmish(size));
+        Skirmish.Setup(host, size);
+        Skirmish.Setup(joiner, size);
+        Check("two machines build a bit-identical starting world",
+              host.StateChecksum() == joiner.StateChecksum());
     }
 
     // ---- helpers -----------------------------------------------------------
