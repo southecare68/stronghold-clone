@@ -1,0 +1,24 @@
+<!-- Combat — units fight and matches are won, deterministically.
+
+     Combat is the first system to draw from the RNG, so its determinism is the
+     real test: two clients running the same attack orders must roll the same
+     damage in the same sequence and reach the same winner, and a rejoiner must
+     resume the RNG mid-stream without drifting. All headless.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>CombatTests</RootNamespace>
+    <AssemblyName>CombatTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

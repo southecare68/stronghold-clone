@@ -267,7 +267,17 @@ public partial class Main : Node2D
         GD.PrintErr("[sim] the two machines no longer agree — everything after this tick is meaningless");
     }
 
-    string BuildHud() => Head() + InterpLine();
+    string BuildHud() => Head() + WinnerLine() + InterpLine();
+
+    // Announced once a side has no units left. The sim keeps ticking (harmless —
+    // nobody is fighting), so this just reads the current verdict each frame.
+    string WinnerLine()
+    {
+        int w = _me.Sim.MatchWinner();
+        if (w < 0) return "";                              // still contested
+        if (w == 0) return "\n— DRAW — both armies destroyed";
+        return $"\n★ PLAYER {w} WINS ★" + (w == _myPlayer ? "  (you)" : "");
+    }
 
     string InterpLine()
     {
@@ -323,14 +333,28 @@ public partial class Main : Node2D
             }
             else if (mb.ButtonIndex == MouseButton.Right && _selected.Count > 0)
             {
-                var w = ScreenToWorld(mb.Position);
-                _me.Issue(new Command
+                // Right-click an enemy to attack it, empty ground to move there.
+                var enemy = EnemyUnitAt(mb.Position);
+                if (enemy != null)
                 {
-                    Type = CommandType.Move,
-                    UnitIds = new List<int>(_selected).ToArray(),
-                    X = Mathf.RoundToInt(w.X),
-                    Y = Mathf.RoundToInt(w.Y),
-                });
+                    _me.Issue(new Command
+                    {
+                        Type = CommandType.Attack,
+                        UnitIds = new List<int>(_selected).ToArray(),
+                        TargetId = enemy.Id,
+                    });
+                }
+                else
+                {
+                    var w = ScreenToWorld(mb.Position);
+                    _me.Issue(new Command
+                    {
+                        Type = CommandType.Move,
+                        UnitIds = new List<int>(_selected).ToArray(),
+                        X = Mathf.RoundToInt(w.X),
+                        Y = Mathf.RoundToInt(w.Y),
+                    });
+                }
             }
         }
         else if (e is InputEventMouseButton up && !up.Pressed &&
@@ -339,6 +363,21 @@ public partial class Main : Node2D
             _boxing = false;
             SelectInBox(_boxStart, up.Position);
         }
+    }
+
+    // The nearest enemy unit under the cursor, or null. Uses the drawn position,
+    // so clicking what you see hits what you meant even mid-move.
+    Unit EnemyUnitAt(Vector2 screen)
+    {
+        Unit best = null;
+        float bestD2 = 12f * 12f;      // within ~one unit radius of the click
+        foreach (var u in _me.Sim.Units)
+        {
+            if (u.Owner == _myPlayer) continue;
+            float d2 = WorldToScreen(u).DistanceSquaredTo(screen);
+            if (d2 < bestD2) { bestD2 = d2; best = u; }
+        }
+        return best;
     }
 
     void SelectInBox(Vector2 p0, Vector2 p1)
@@ -372,6 +411,8 @@ public partial class Main : Node2D
             DrawCircle(p, 6f, color);
             if (_selected.Contains(u.Id))
                 DrawArc(p, 9f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+            if (u.MaxHp > 0 && u.Hp < u.MaxHp)
+                DrawHealthBar(p, u.Hp, u.MaxHp);
         }
         if (_boxing)
         {
@@ -425,6 +466,16 @@ public partial class Main : Node2D
                 prev = wp;
             }
         }
+    }
+
+    // A small health bar above a damaged unit: red track, green fill.
+    void DrawHealthBar(Vector2 center, int hp, int maxHp)
+    {
+        const float w = 14f, h = 2.5f;
+        var topLeft = center + new Vector2(-w / 2f, -12f);
+        float frac = Mathf.Clamp((float)hp / maxHp, 0f, 1f);
+        DrawRect(new Rect2(topLeft, new Vector2(w, h)), new Color(0.5f, 0.1f, 0.1f));
+        DrawRect(new Rect2(topLeft, new Vector2(w * frac, h)), new Color(0.3f, 0.85f, 0.35f));
     }
 
     // Top-left corner of a tile in screen space. Tiles are centred on the integer

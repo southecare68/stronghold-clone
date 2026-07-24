@@ -307,8 +307,10 @@ static class Program
         // simulation rebuilt from them hashes identically.
         var fresh = new Client(2, new ManualTransport(2));
         fresh.AdoptSnapshot(back);
+        // The snapshot carries a StateChecksum (everything that can diverge), so
+        // that is what a sim rebuilt from it must reproduce.
         Check($"a sim rebuilt from the bytes hashes identically (0x{snap.Checksum:X8})",
-              fresh.Sim.Checksum() == snap.Checksum);
+              fresh.Sim.StateChecksum() == snap.Checksum);
     }
 
     // The whole point: a player drops out mid-match and comes back to the SAME

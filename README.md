@@ -33,16 +33,19 @@ stronghold-clone/
 │  ├─ CommandOrder/     command ordering is total (no arrival-order dependence)
 │  ├─ Netcode/          wire format, join codes, stalling, desync detection
 │  ├─ Pathfinding/      map, RNG, deterministic grid A*
-│  └─ PathFollowing/    units follow smoothed routes, two-client sync
+│  ├─ PathFollowing/    units follow smoothed routes, two-client sync
+│  └─ Combat/           deterministic fighting, RNG sync, win/lose
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
 
 ## Run the game
 Open the `game/` folder in a **Godot 4.x .NET (C#) editor build** and press
-Play. Left-drag to box-select your units, right-click to move them; they route
-around the terrain (a walled gate, a lake, marsh) and the selected units' path
-is drawn as a line. The HUD shows the tick, state checksum, and sync state.
+Play. Left-drag to box-select your units; right-click empty ground to move them
+(they route around the terrain — a walled gate, a lake, marsh — and the selected
+path is drawn) or right-click an enemy to attack. Units fight in melee, health
+bars show over the wounded, and the HUD announces the winner when a side is
+wiped out. The HUD also shows the tick, state checksum, and sync state.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
@@ -83,9 +86,12 @@ node test/float-hazard.test.js  # why the sim forbids floating point
 ```
 
 ## Status
-Netcode proven in Node, ported to C# (bit-identical), and now running over real
-ENet between two processes: commands cross both ways, checksums match, killing a
-peer freezes the match instead of desyncing it, and a fresh process can rejoin a
-match in progress. **Still unproven: the cross-architecture run** (ARM Mac vs
-x86 Linux), which is the one that tests the fixed-point rule. See
+Netcode proven in Node, ported to C# (bit-identical), and running over real ENet
+between two processes: commands cross both ways, checksums match, killing a peer
+freezes the match instead of desyncing it, and a fresh process can rejoin a match
+in progress. **Cross-architecture determinism is confirmed:** the parity test
+produces the identical checksum (`0xB1A7A676`) on an ARM Mac and an x86 Linux
+box. Units path around terrain with smoothing, fight deterministically (seeded
+RNG, in sync across clients and across a mid-fight rejoin), and a side that is
+wiped out loses. Next up in Phase 2: economy and buildings. See
 `CONTEXT_HANDOFF.md`.

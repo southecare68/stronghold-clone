@@ -15,15 +15,16 @@ using System.Collections.Generic;
 
 namespace Sim
 {
-    public enum CommandType { Move = 0 }
+    public enum CommandType { Move = 0, Attack = 1 }
 
     public sealed class Command
     {
         public int Owner;
         public CommandType Type;
         public int[] UnitIds = Array.Empty<int>();
-        public int X;         // whole-number target (converted to fixed inside sim)
+        public int X;         // Move: whole-number target (converted to fixed inside sim)
         public int Y;
+        public int TargetId;  // Attack: the enemy unit to engage
         public int ExecTick;  // set by the lockstep layer
         public int Seq;       // set by the lockstep layer; unique per owner
 
@@ -34,7 +35,7 @@ namespace Sim
         public Command Clone() => new Command
         {
             Owner = Owner, Type = Type, UnitIds = UnitIds,
-            X = X, Y = Y, ExecTick = ExecTick, Seq = Seq,
+            X = X, Y = Y, TargetId = TargetId, ExecTick = ExecTick, Seq = Seq,
         };
     }
 
@@ -45,6 +46,16 @@ namespace Sim
         public int X, Y;      // fixed-point position
         public int Tx, Ty;    // fixed-point position of the CURRENT waypoint
         public int Hp;
+        public int MaxHp;
+
+        // Combat. TargetId is the enemy this unit is engaging (0 = none); a unit
+        // only fights once it has been given an Attack order, which is what keeps
+        // Move-only scenarios (like the parity test) entirely out of combat.
+        // AttackTimer counts ticks until the next blow may land.
+        public int TargetId;
+        public int AttackTimer;
+
+        public bool Alive => Hp > 0;
 
         // The route still to walk, and how far along it we are. Tx/Ty always
         // mirror Path[PathIndex], so the movement integrator below never needs to
@@ -58,7 +69,8 @@ namespace Sim
         {
             var copy = new Unit
             {
-                Id = Id, Owner = Owner, X = X, Y = Y, Tx = Tx, Ty = Ty, Hp = Hp,
+                Id = Id, Owner = Owner, X = X, Y = Y, Tx = Tx, Ty = Ty,
+                Hp = Hp, MaxHp = MaxHp, TargetId = TargetId, AttackTimer = AttackTimer,
                 PathIndex = PathIndex,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
@@ -76,6 +88,22 @@ namespace Sim
         readonly int _speed = Fixed.One / 8;    // fixed-point units per tick
         readonly int _arriveEps = Fixed.One / 4;
 
+        // --- Combat tuning (fixed-point where it measures distance) ------------
+        const int SpawnHp = 100;
+        static readonly int AttackRange = Fixed.One * 3 / 2;    // 1.5 tiles of reach
+        static readonly int AggroRange = Fixed.FromInt(7);      // acquire the next foe within this
+        const int AttackCooldown = 10;                          // ticks between blows (0.5s @ 20Hz)
+        const int DamageMin = 8;
+        const int DamageMax = 13;
+        const int ChaseRepathEvery = 6;                         // ticks between chase re-paths
+
+        // The default match seed. Both machines must seed identically, so this is
+        // a fixed constant for now; a real lobby would agree one at match start
+        // and pass it in. Only DAMAGE draws from the RNG, so a Move-only scenario
+        // (the parity test) never touches it.
+        public const uint DefaultSeed = 0xC0FFEE11u;
+        readonly Rng _rng;
+
         // Scratch buffers for pathfinding, reused across calls. Working memory,
         // not game state: nothing here survives a call, so none of it is hashed.
         readonly PathFinder _pathFinder;
@@ -84,11 +112,18 @@ namespace Sim
 
         public Simulation() : this(TileMap.Open()) { }
 
-        public Simulation(TileMap map)
+        public Simulation(TileMap map, uint seed = DefaultSeed)
         {
             Map = map ?? TileMap.Open();
             _pathFinder = new PathFinder(Map);
+            _rng = new Rng(seed);
         }
+
+        // The RNG state is game state: two machines whose generators are one draw
+        // apart agree until the next damage roll, then diverge. It is hashed into
+        // StateChecksum and travels in a MatchSnapshot like everything else.
+        public uint RngState => _rng.State;
+        public void RestoreRng(uint state) => _rng.Restore(state);
 
         // Part of the state, not an implementation detail: two machines that
         // disagree about the next id would name the next spawned unit
@@ -103,10 +138,11 @@ namespace Sim
         // The unit ORDER is part of the state, not a detail: Tick and Checksum
         // both walk the list in place, so a restored list in a different order is
         // a different world with the same contents.
-        public void Restore(int tickNumber, int nextUnitId, IReadOnlyList<Unit> units)
+        public void Restore(int tickNumber, int nextUnitId, uint rngState, IReadOnlyList<Unit> units)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
+            _rng.Restore(rngState);
             Units.Clear();
             foreach (var u in units) Units.Add(u.Clone());
         }
@@ -121,7 +157,8 @@ namespace Sim
                 Y = Fixed.FromInt(yInt),
                 Tx = Fixed.FromInt(xInt),
                 Ty = Fixed.FromInt(yInt),
-                Hp = 100,
+                Hp = SpawnHp,
+                MaxHp = SpawnHp,
             };
             Units.Add(u);
             return u;
@@ -129,13 +166,32 @@ namespace Sim
 
         void Apply(Command cmd)
         {
-            if (cmd.Type == CommandType.Move)
+            switch (cmd.Type)
             {
-                foreach (var id in cmd.UnitIds)
-                {
-                    var u = Units.Find(v => v.Id == id);
-                    if (u != null && u.Owner == cmd.Owner) Order(u, cmd.X, cmd.Y);
-                }
+                case CommandType.Move:
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u != null && u.Owner == cmd.Owner)
+                        {
+                            u.TargetId = 0;          // a plain move breaks off any fight
+                            Order(u, cmd.X, cmd.Y);
+                        }
+                    }
+                    break;
+
+                case CommandType.Attack:
+                    var target = Units.Find(v => v.Id == cmd.TargetId);
+                    // Only a living enemy is a valid target; a bad id is ignored
+                    // rather than left to poison the combat phase.
+                    if (target == null || !target.Alive || target.Owner == cmd.Owner) break;
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u != null && u.Owner == cmd.Owner && u.Id != target.Id)
+                            u.TargetId = target.Id;   // the combat phase does the chasing/hitting
+                    }
+                    break;
             }
         }
 
@@ -248,7 +304,103 @@ namespace Sim
                     }
                 }
             }
+
+            ResolveCombat();
+            RemoveDead();
             TickNumber++;
+        }
+
+        // The combat phase. Iterated in id order so RNG draws (damage rolls)
+        // happen in a fixed sequence on every machine — the same discipline that
+        // keeps command application deterministic keeps the dice deterministic.
+        //
+        // A unit only fights if it has a TargetId, which is only ever set by an
+        // Attack command (or by acquiring the next foe after a kill). Move-only
+        // units never enter this loop's body, so a Move-only match — the parity
+        // scenario included — makes zero RNG draws and is completely unaffected.
+        void ResolveCombat()
+        {
+            foreach (var u in Units)
+            {
+                if (u.AttackTimer > 0) u.AttackTimer--;
+                if (u.TargetId == 0) continue;
+
+                var target = Units.Find(v => v.Id == u.TargetId);
+                if (target == null || !target.Alive)
+                {
+                    // Its foe is gone. Look for the next nearest one within aggro
+                    // range; if there is none, stand down.
+                    target = AcquireNearestEnemy(u);
+                    u.TargetId = target?.Id ?? 0;
+                    if (target == null) continue;
+                }
+
+                int dist = Fixed.VLen(target.X - u.X, target.Y - u.Y);
+
+                if (dist <= AttackRange)
+                {
+                    // In reach: hold position and strike on cooldown.
+                    u.Path = null;
+                    u.PathIndex = 0;
+                    u.Tx = u.X;
+                    u.Ty = u.Y;
+
+                    if (u.AttackTimer == 0)
+                    {
+                        target.Hp -= _rng.NextInt(DamageMin, DamageMax);
+                        u.AttackTimer = AttackCooldown;
+                    }
+                }
+                else
+                {
+                    // Out of reach: close the distance. Re-path periodically so a
+                    // moving target is still chased, but not every tick — that
+                    // would run A* for every fighting unit on every frame.
+                    bool needsPath = !u.HasPath || TickNumber % ChaseRepathEvery == 0;
+                    if (needsPath)
+                        Order(u, Fixed.ToInt(target.X), Fixed.ToInt(target.Y));
+                }
+            }
+        }
+
+        // Nearest living enemy within aggro range, ties broken by id so every
+        // machine acquires the same one. No RNG here — acquisition is pure
+        // geometry, only the damage roll is random.
+        Unit AcquireNearestEnemy(Unit u)
+        {
+            Unit best = null;
+            int bestDist = int.MaxValue;
+            foreach (var v in Units)
+            {
+                if (v.Owner == u.Owner || !v.Alive) continue;
+                int dist = Fixed.VLen(v.X - u.X, v.Y - u.Y);
+                if (dist > AggroRange) continue;
+                if (dist < bestDist) { bestDist = dist; best = v; }
+                // ties: keep the lower id, which is whichever we already have,
+                // since Units is walked in id order.
+            }
+            return best;
+        }
+
+        // Clear the dead, in id order so the surviving list stays id-ordered.
+        // Done as one pass after all attacks resolve, so within a tick a unit
+        // that drops to 0 still counts as present for everyone else's targeting
+        // that same tick — order of resolution can't change who dies.
+        void RemoveDead() => Units.RemoveAll(u => !u.Alive);
+
+        // -1 while both sides still have units, 0 if everyone is dead (a mutual
+        // wipe), otherwise the owner id of the last side standing. The engine
+        // decides what to DO with this; the sim only reports it.
+        public int MatchWinner()
+        {
+            int owner = -1;
+            foreach (var u in Units)
+            {
+                if (!u.Alive) continue;
+                if (owner == -1) owner = u.Owner;
+                else if (owner != u.Owner) return -1;   // two sides alive: ongoing
+            }
+            return owner == -1 ? 0 : owner;             // -1 became "nobody alive" -> draw
         }
 
         // 32-bit FNV-1a over tick number and unit position/health, and NOTHING
@@ -305,11 +457,14 @@ namespace Sim
             Mix(unchecked((int)Map.Fingerprint));
             Mix(TickNumber);
             Mix(_nextId);
+            Mix(unchecked((int)_rng.State));   // the dice must be in the same place
 
             foreach (var u in Units)
             {
-                Mix(u.Id); Mix(u.Owner); Mix(u.X); Mix(u.Y); Mix(u.Hp);
+                Mix(u.Id); Mix(u.Owner); Mix(u.X); Mix(u.Y);
+                Mix(u.Hp); Mix(u.MaxHp);
                 Mix(u.Tx); Mix(u.Ty);
+                Mix(u.TargetId); Mix(u.AttackTimer);
 
                 // The route still to walk. Two units in identical positions with
                 // different plans are not in the same world.

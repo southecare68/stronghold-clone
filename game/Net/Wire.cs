@@ -76,6 +76,7 @@ namespace Netcode
                 PutInt(buf, (int)c.Type);
                 PutInt(buf, c.X);
                 PutInt(buf, c.Y);
+                PutInt(buf, c.TargetId);      // Attack orders carry their target
                 PutInt(buf, c.ExecTick);
                 PutInt(buf, c.Seq);          // dropping this reintroduces the
                                              // ordering desync — see tests/CommandOrder
@@ -91,6 +92,7 @@ namespace Netcode
 
             PutInt(buf, snap.Tick);
             PutInt(buf, snap.NextUnitId);
+            PutUInt(buf, snap.RngState);
             PutUInt(buf, snap.Checksum);
 
             PutInt(buf, snap.Units.Length);
@@ -103,6 +105,20 @@ namespace Netcode
                 PutInt(buf, u.Tx);    // the target travels too — a unit restored
                 PutInt(buf, u.Ty);    // without it would stop dead on arrival
                 PutInt(buf, u.Hp);
+                PutInt(buf, u.MaxHp);
+                PutInt(buf, u.TargetId);
+                PutInt(buf, u.AttackTimer);
+
+                // The remaining route. StateChecksum hashes it, so a snapshot that
+                // dropped it would fail its own checksum verification on arrival —
+                // the rejoiner would rebuild a unit that had lost its orders.
+                int remaining = u.HasPath ? u.Path.Count - u.PathIndex : 0;
+                PutInt(buf, remaining);
+                for (int i = u.PathIndex; i < remaining + u.PathIndex; i++)
+                {
+                    PutInt(buf, u.Path[i].X);
+                    PutInt(buf, u.Path[i].Y);
+                }
             }
 
             PutInt(buf, snap.PendingTurns.Length);
@@ -140,6 +156,7 @@ namespace Netcode
                 {
                     Tick = GetInt(data, ref p),
                     NextUnitId = GetInt(data, ref p),
+                    RngState = GetUInt(data, ref p),
                     Checksum = GetUInt(data, ref p),
                 };
 
@@ -148,7 +165,7 @@ namespace Netcode
                 var units = new Unit[unitCount];
                 for (int i = 0; i < unitCount; i++)
                 {
-                    units[i] = new Unit
+                    var u = new Unit
                     {
                         Id = GetInt(data, ref p),
                         Owner = GetInt(data, ref p),
@@ -157,7 +174,22 @@ namespace Netcode
                         Tx = GetInt(data, ref p),
                         Ty = GetInt(data, ref p),
                         Hp = GetInt(data, ref p),
+                        MaxHp = GetInt(data, ref p),
+                        TargetId = GetInt(data, ref p),
+                        AttackTimer = GetInt(data, ref p),
                     };
+
+                    int remaining = GetInt(data, ref p);
+                    if (remaining < 0 || remaining > MaxUnits) return null;
+                    if (remaining > 0)
+                    {
+                        var path = new List<Tile>(remaining);
+                        for (int j = 0; j < remaining; j++)
+                            path.Add(new Tile(GetInt(data, ref p), GetInt(data, ref p)));
+                        u.Path = path;
+                        u.PathIndex = 0;
+                    }
+                    units[i] = u;
                 }
                 snap.Units = units;
 
@@ -202,6 +234,7 @@ namespace Netcode
                     Type = (CommandType)GetInt(data, ref p),
                     X = GetInt(data, ref p),
                     Y = GetInt(data, ref p),
+                    TargetId = GetInt(data, ref p),
                     ExecTick = GetInt(data, ref p),
                     Seq = GetInt(data, ref p),
                 };

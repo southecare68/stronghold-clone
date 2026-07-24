@@ -47,6 +47,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Netcode/` — wire format, join codes, stalling, desync detection, rejoin
   - `Pathfinding/` — map, RNG, and deterministic grid A* (Phase 2 foundations)
   - `PathFollowing/` — units follow smoothed routes; two-client StateChecksum sync
+  - `Combat/` — deterministic fighting, RNG in sync, rejoin mid-fight, win/lose
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -271,27 +272,56 @@ than mod the closed 2006 engine, which was too limiting.
    wall or water. `IN SYNC ✓` throughout. Terrain draws as one ground background
    rect plus only the non-ground tiles, so it stays cheap.
 
+8. ✅ **Cross-architecture determinism CONFIRMED** (2026-07-23). `SimParity` was
+   run on the Ubuntu **x86** box and printed **0xB1A7A676** — bit-identical to
+   the ARM Mac, across 300 ticks and all 11 checkpoints. This is the result the
+   whole architecture was built to earn: fixed-point-only sim, seeded RNG,
+   total-ordered iteration, explicit little-endian wire format — all of it exists
+   to make two different CPU architectures agree exactly, and now they provably
+   do. The riskiest unknown in the project is retired.
+
+   Still worth doing eventually, but no longer load-bearing: a **live** ARM↔x86
+   match over ENet (`--host` on one, `--join=<LAN IP>` on the other), watching
+   for `DESYNC`. The headless proof means that if a live match ever desyncs, the
+   sim is innocent and the fault is in the transport.
+
+9. ✅ **Combat + win condition** — the first actual game loop. An Attack command
+   targets an enemy unit; the unit chases (re-pathing periodically), strikes in
+   melee range on a cooldown, and rolls damage from the **seeded RNG**. Dead
+   units are removed in id order; `MatchWinner()` reports the last side standing.
+   Right-click an enemy in-game to attack, empty ground to move; health bars
+   show over damaged units and the HUD announces the winner.
+
+   **This is the change that forced — and completed — the checksum plumbing the
+   whole project had been deferring:**
+   - The RNG is now wired and drawn (damage only). Its `State` is game state:
+     hashed into `StateChecksum`, carried in `MatchSnapshot`, restored on rejoin.
+   - `Simulation.Restore` and the snapshot wire format now carry the RNG and the
+     full unit state (combat fields + remaining paths).
+   - Netcode switched from `Checksum()` to `StateChecksum()` (see above).
+
+   **0xB1A7A676 is untouched**, on purpose and by design: a unit only fights once
+   it has a TargetId, which only an Attack order sets, so a Move-only match makes
+   **zero** RNG draws. `tests/Combat` asserts this directly ("move-only makes no
+   RNG draws"), and `SimParity` still prints the constant.
+
+   `tests/Combat` proves the rest: a 1v1 resolves, an outnumbered side loses,
+   a unit acquires the next foe after a kill, a Move breaks off combat, **two
+   clients roll the identical damage across a 500-tick battle and agree on the
+   winner**, and **a mid-fight rejoin resumes the RNG in lockstep** (the proof
+   the RNG state travels correctly). Verified visually too: blue army crossed the
+   demo map, engaged, and won with the HUD banner, `IN SYNC ✓`.
+
+   Combat is deliberately minimal — melee only, no unit collision/separation (so
+   units stack when converging), no attack-move (Move ignores enemies; only
+   Attack engages), one unit type. All fair game to extend.
+
 ## Immediate next tasks (in order)
-8. **The cross-architecture run — the test that actually matters.** Everything
-   above ran on one Mac, so it proves the protocol, NOT determinism across
-   CPUs. The fixed-point rule is still unproven where it counts.
-
-   Cheapest first step, no window and no socket needed: copy the repo to the
-   Ubuntu box and run `dotnet run --project tests/SimParity`. It is deliberately
-   Godot-free, so it needs only the .NET SDK. If x86 also prints **0xB1A7A676**,
-   300 ticks of identical fixed-point math on a different CPU is settled
-   headlessly. `CommandOrder`, `Netcode`, `Pathfinding` and `PathFollowing` run
-   there too — and `Pathfinding`'s pinned golden routes are a second integer
-   cross-architecture probe.
-
-   Then the live match: `--host` on one machine, `--join=<its LAN IP>` on the
-   other, watching for `DESYNC` in the HUD or `[sim]` in the log. Doing the
-   headless check first means that if the live match desyncs, you already know
-   the sim is innocent and the fault is in the transport.
-9. **Phase 2 gameplay proper:** economy, buildings, combat, win/lose. Each adds
-   simulation state — mix it into `StateChecksum()`, never into `Checksum()`,
-   and switch the netcode's checksum calls to `StateChecksum()` when the first
-   non-unit state lands (see the golden-constant section).
+10. **Phase 2 gameplay, remaining:** economy (resource nodes, workers, stockpiles)
+   and buildings (placement on the tile grid, footprints that block movement, a
+   keep + production). Same discipline: new state into `StateChecksum()` and
+   `MatchSnapshot`, never into `Checksum()`. Buildings want economy first
+   (something to cost/produce); economy is the natural next piece.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy
@@ -342,11 +372,10 @@ compares; `Checksum()` is only the frozen regression guard.** `SimParity` keeps
 using `Checksum()`, so the verified movement core stays pinned while the game
 grows around it.
 
-⚠️ One wiring task outstanding: the network layer (`Client`/turns/`MatchSnapshot`)
-still exchanges and verifies `Checksum()`, not `StateChecksum()`. Harmless today —
-the only sim state that exists is units, which both hashes cover identically — but
-**the day the first non-unit state lands, switch the netcode's checksum calls to
-`StateChecksum()`** or desyncs in that new state go undetected on the wire.
+✅ Netcode wiring done (with combat, below): the network layer now exchanges and
+verifies `StateChecksum()` everywhere — turn checksums, snapshot capture/adopt —
+and `MatchSnapshot` carries full unit state (paths + combat) plus the RNG state.
+`Checksum()` is now used ONLY by `SimParity`.
 
 ⚠️ **The subtle part, and it is not the added fields.** Wiring movement onto the
 pathfinder threatens 0xB1A7A676 through unit **positions**, which `Checksum()`

@@ -60,6 +60,7 @@ namespace Sim
     {
         public int Tick;
         public int NextUnitId;
+        public uint RngState;      // the sim's random generator, mid-sequence
         public Unit[] Units = Array.Empty<Unit>();
 
         // Turns the sender has ALREADY published for ticks at or after Tick.
@@ -210,7 +211,11 @@ namespace Sim
 
             Sim.Tick(cmds);
 
-            _checksums[tick] = Sim.Checksum();
+            // StateChecksum, not Checksum: the network must compare EVERYTHING
+            // that can diverge (orders, paths, RNG, combat), not just the frozen
+            // units-only hash the parity test guards. Checksum() would miss a
+            // desync in any of the newer state.
+            _checksums[tick] = Sim.StateChecksum();
             Forget(tick - HistoryTicks);
             return true;
         }
@@ -243,9 +248,10 @@ namespace Sim
             {
                 Tick = Sim.TickNumber,
                 NextUnitId = Sim.NextUnitId,
+                RngState = Sim.RngState,
                 Units = units,
                 PendingTurns = pending.ToArray(),
-                Checksum = Sim.Checksum(),
+                Checksum = Sim.StateChecksum(),
             };
         }
 
@@ -255,7 +261,7 @@ namespace Sim
         // world is the worst outcome available.
         public bool AdoptSnapshot(MatchSnapshot snap)
         {
-            Sim.Restore(snap.Tick, snap.NextUnitId, snap.Units);
+            Sim.Restore(snap.Tick, snap.NextUnitId, snap.RngState, snap.Units);
 
             // Everything from before the join is meaningless now: turns for ticks
             // we will never run, checksums for a world we were not in, and any
@@ -271,7 +277,7 @@ namespace Sim
 
             foreach (var turn in snap.PendingTurns) Receive(turn);
 
-            uint mine = Sim.Checksum();
+            uint mine = Sim.StateChecksum();
             if (mine == snap.Checksum) return true;
 
             Desync = new DesyncReport
