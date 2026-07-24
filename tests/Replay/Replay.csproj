@@ -1,0 +1,28 @@
+<!-- Replay — a recorded match plays back bit-for-bit.
+
+     Lockstep makes a match a function of terrain + start state + command stream,
+     so recording those reproduces it exactly. This test records a full match
+     (movement, economy, combat, buildings, mixed unit designs), plays it back,
+     and checks the final state checksum matches; it also round-trips a replay
+     through bytes, and confirms a replay that lands on the recorded checksum
+     really did reproduce the SAME world tick for tick (not just the same final
+     number).
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ReplayTests</RootNamespace>
+    <AssemblyName>ReplayTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+    <Compile Include="../../game/Net/*.cs" LinkBase="Net" />
+  </ItemGroup>
+
+</Project>

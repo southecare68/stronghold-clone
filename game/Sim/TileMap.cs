@@ -105,6 +105,20 @@ namespace Sim
             Fingerprint = h;
         }
 
+        // Copy the terrain out, and rebuild a map from such a copy. Used by the
+        // replay system to record and reconstruct the exact battlefield — a
+        // replay of a match on a different map would desync at tick 0.
+        public Terrain[] CopyTiles() => (Terrain[])_tiles.Clone();
+
+        public static TileMap FromTiles(int width, int height, Terrain[] tiles)
+        {
+            var map = new TileMap(width, height);
+            if (tiles != null && tiles.Length == map._tiles.Length)
+                Array.Copy(tiles, map._tiles, tiles.Length);   // _tiles contents are mutable; the field is readonly
+            map.SealTerrain();
+            return map;
+        }
+
         public int Index(int x, int y) => y * Width + x;
 
         public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;

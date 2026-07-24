@@ -41,9 +41,20 @@ public partial class Main : Node2D
     const int MaxTicksPerFrame = 8;
 
     ITransport _net;
-    Client _me;      // the client we render and control
+    Client _me;      // the client we render and control (null in replay mode)
     Client _other;   // LOCAL mode only: the second in-process client
     EnetTransport _enet;   // networked modes only
+
+    // The simulation the renderer, HUD and input all read from. In live modes
+    // this IS _me.Sim; in replay mode it is the reconstructed playback sim.
+    Simulation _shown;
+
+    // Replay: when playing one back, we drive this sim from the recorded command
+    // stream instead of a client; when recording, _me carries a ReplayRecorder.
+    bool _replayMode;
+    Replay _replay;
+    int _replayIndex;
+    string _replayPath = "user://last.shrep";
 
     int _myPlayer = 1;
     string _mode = "LOCAL";
@@ -106,6 +117,17 @@ public partial class Main : Node2D
         // actually has it. The two differing, by less than one tick of travel,
         // is what "interpolation is running" looks like in a single frame.
         _debugInterp = HasFlag("--debug-interp");
+
+        // --replay=<path> watches a recorded match instead of playing.
+        string replayArg = FlagValue("--replay");
+        if (replayArg != null)
+        {
+            StartReplay(replayArg);
+            _hud = new Label { Position = new Vector2(8, 8) };
+            AddChild(_hud);
+            return;
+        }
+
         SetUpTransport();
 
         // Identical starting state on EVERY machine (determinism starts here):
@@ -140,8 +162,49 @@ public partial class Main : Node2D
             c.Sim.RegisterDesign(new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 });
         }
 
+        _shown = _me.Sim;
+
+        // Record the match we render, so it can be saved and watched back. Started
+        // now, after setup, so the recording's initial snapshot is the real
+        // starting world (tick 0). Costs nothing but a per-tick command copy.
+        _me.Recorder = new ReplayRecorder(_me.Sim);
+
         _hud = new Label { Position = new Vector2(8, 8) };
         AddChild(_hud);
+    }
+
+    // Load a replay file and stand up the playback simulation.
+    void StartReplay(string path)
+    {
+        var bytes = Godot.FileAccess.GetFileAsBytes(path);
+        if (bytes == null || bytes.Length == 0)
+        {
+            GD.PrintErr($"[replay] could not read {path}");
+            return;
+        }
+        _replay = Replay.Deserialize(bytes);
+        if (_replay == null)
+        {
+            GD.PrintErr($"[replay] {path} is not a valid replay");
+            return;
+        }
+        _replayMode = true;
+        _mode = "REPLAY";
+        _shown = _replay.Reconstruct();
+        GD.Print($"[replay] playing {path}: {_replay.Commands.Count} ticks, " +
+                 $"expecting final checksum 0x{_replay.FinalChecksum:X8}");
+    }
+
+    // Write the match so far to a replay file.
+    void SaveReplay()
+    {
+        if (_me?.Recorder == null) return;
+        var replay = _me.Recorder.Finish(_me.Sim);
+        using var f = Godot.FileAccess.Open(_replayPath, Godot.FileAccess.ModeFlags.Write);
+        if (f == null) { GD.PrintErr($"[replay] could not write {_replayPath}"); return; }
+        f.StoreBuffer(replay.Serialize());
+        GD.Print($"[replay] saved {_replayPath}: {replay.Commands.Count} ticks, " +
+                 $"final checksum 0x{replay.FinalChecksum:X8}. Watch with  --replay={_replayPath}");
     }
 
     void SetUpTransport()
@@ -229,6 +292,15 @@ public partial class Main : Node2D
         return false;
     }
 
+    // The value of a --flag=value argument, or null if absent.
+    static string FlagValue(string flag)
+    {
+        string prefix = flag + "=";
+        foreach (var a in OS.GetCmdlineUserArgs()) if (a.StartsWith(prefix)) return a.Substring(prefix.Length);
+        foreach (var a in OS.GetCmdlineArgs()) if (a.StartsWith(prefix)) return a.Substring(prefix.Length);
+        return null;
+    }
+
     static string LocalIPv4()
     {
         foreach (string a in IP.GetLocalAddresses())
@@ -236,9 +308,33 @@ public partial class Main : Node2D
         return null;
     }
 
+    // Advance the playback at the same fixed 20 Hz as a live match, feeding the
+    // recorded commands one tick at a time. Interpolation and separation use the
+    // same code as live play, so a replay looks exactly like the game.
+    void StepReplay(double delta)
+    {
+        _accum += delta;
+        int ran = 0;
+        while (_accum >= Step && ran < MaxTicksPerFrame && _replayIndex < _replay.Commands.Count)
+        {
+            SnapshotPositions();
+            _shown.Tick(_replay.Commands[_replayIndex++]);
+            _accum -= Step;
+            ran++;
+        }
+        _alpha = _replayIndex < _replay.Commands.Count
+            ? (float)Mathf.Clamp(_accum / Step, 0.0, 1.0) : 1f;
+
+        ComputeSeparation();
+        _hud.Text = BuildHud();
+        QueueRedraw();
+    }
+
     // --- Tick loop ---------------------------------------------------------
     public override void _Process(double delta)
     {
+        if (_replayMode) { StepReplay(delta); return; }
+
         _net.Poll();
 
         // Nothing may run before every player is present. Not one tick: a client
@@ -308,7 +404,7 @@ public partial class Main : Node2D
     {
         _sepOffset.Clear();
         var groups = new Dictionary<(int, int), List<int>>();
-        foreach (var u in _me.Sim.Units)
+        foreach (var u in _shown.Units)
         {
             var cell = (Mathf.RoundToInt(u.X / (float)Fixed.One), Mathf.RoundToInt(u.Y / (float)Fixed.One));
             if (!groups.TryGetValue(cell, out var list)) { list = new List<int>(); groups[cell] = list; }
@@ -337,21 +433,37 @@ public partial class Main : Node2D
 
     void LogDesyncOnce()
     {
-        if (_desyncLogged || _me.Desync == null) return;
+        if (_desyncLogged || _me?.Desync == null) return;
         _desyncLogged = true;
         GD.PrintErr($"[sim] {_me.Desync}");
         GD.PrintErr("[sim] the two machines no longer agree — everything after this tick is meaningless");
     }
 
-    string BuildHud() => Head() + StockLine() + WinnerLine() + InterpLine();
+    string BuildHud()
+    {
+        if (_replayMode) return ReplayHud();
+        return Head() + StockLine() + WinnerLine() + InterpLine();
+    }
+
+    // A replay shows progress and, once finished, whether it reproduced the
+    // recording — the same self-check the headless test runs, on screen.
+    string ReplayHud()
+    {
+        int done = _replayIndex, total = _replay.Commands.Count;
+        string head = $"[REPLAY] tick {_shown.TickNumber}   {done}/{total}   " +
+                      $"checksum 0x{_shown.StateChecksum():X8}";
+        if (done < total) return head + WinnerLine();
+        bool ok = _shown.StateChecksum() == _replay.FinalChecksum;
+        return head + (ok ? "   ✓ reproduced exactly" : "   ✗ DIVERGED from recording") + WinnerLine();
+    }
 
     // Your own stockpile. Reads straight from the sim each frame.
     string StockLine()
     {
-        int wood = _me.Sim.Stockpile(_myPlayer, ResourceType.Wood);
-        int stone = _me.Sim.Stockpile(_myPlayer, ResourceType.Stone);
-        int food = _me.Sim.Stockpile(_myPlayer, ResourceType.Food);
-        var d = _me.Sim.DesignOf(_trainDesign);
+        int wood = _shown.Stockpile(_myPlayer, ResourceType.Wood);
+        int stone = _shown.Stockpile(_myPlayer, ResourceType.Stone);
+        int food = _shown.Stockpile(_myPlayer, ResourceType.Food);
+        var d = _shown.DesignOf(_trainDesign);
         string name = _trainDesign < DesignNames.Length ? DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
@@ -363,7 +475,7 @@ public partial class Main : Node2D
     // nobody is fighting), so this just reads the current verdict each frame.
     string WinnerLine()
     {
-        int w = _me.Sim.MatchWinner();
+        int w = _shown.MatchWinner();
         if (w < 0) return "";                              // still contested
         if (w == 0) return "\n— DRAW — both armies destroyed";
         return $"\n★ PLAYER {w} WINS ★" + (w == _myPlayer ? "  (you)" : "");
@@ -373,7 +485,7 @@ public partial class Main : Node2D
     {
         if (!_debugInterp) return "";
 
-        var u = _me.Sim.Units.Count > 0 ? _me.Sim.Units[0] : null;
+        var u = _shown.Units.Count > 0 ? _shown.Units[0] : null;
         if (u == null) return $"\ninterp a={_alpha:0.000}";
 
         var sim = SimWorld(u);
@@ -385,7 +497,7 @@ public partial class Main : Node2D
 
     string Head()
     {
-        string head = $"[{_mode}] tick {_me.Sim.TickNumber}   checksum 0x{_me.Sim.Checksum():X8}";
+        string head = $"[{_mode}] tick {_shown.TickNumber}   checksum 0x{_shown.Checksum():X8}";
 
         if (_me.Desync != null)
             return head + "   DESYNC ✗\n" + _me.Desync;
@@ -397,11 +509,11 @@ public partial class Main : Node2D
                 return head + $"\n{_enet.Status.ToUpper()}" +
                        (_mode == "HOST" && _joinHint != "" ? $"\njoin with:  {_joinHint}" : "");
             if (_me.Stalled) return head + "   WAITING FOR PEER …";
-            return head + "   IN SYNC ✓   (peer agrees through tick " + (_me.Sim.TickNumber - 1) + ")";
+            return head + "   IN SYNC ✓   (peer agrees through tick " + (_shown.TickNumber - 1) + ")";
         }
 
         // LOCAL mode: two real simulations to compare directly.
-        uint a = _me.Sim.Checksum();
+        uint a = _shown.Checksum();
         uint b = _other.Sim.Checksum();
         return head + "   " + (a == b ? "IN SYNC ✓" : "DESYNC ✗");
     }
@@ -409,6 +521,9 @@ public partial class Main : Node2D
     // ---- Input: mouse produces COMMANDS, never direct state changes ---------
     public override void _UnhandledInput(InputEvent e)
     {
+        // A replay is a passive watch — no orders, no building.
+        if (_replayMode) return;
+
         if (e is InputEventMouseMotion mm)
         {
             _mouse = mm.Position;
@@ -470,6 +585,8 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
             else if (k.Keycode == Key.Key2) _trainDesign = 1;
             else if (k.Keycode == Key.Key3) _trainDesign = 2;
+            // F5 saves the match so far as a replay.
+            else if (k.Keycode == Key.F5) SaveReplay();
         }
         else if (e is InputEventMouseButton up && !up.Pressed &&
                  up.ButtonIndex == MouseButton.Left && _boxing)
@@ -485,7 +602,7 @@ public partial class Main : Node2D
     {
         Unit best = null;
         float bestD2 = 12f * 12f;      // within ~one unit radius of the click
-        foreach (var u in _me.Sim.Units)
+        foreach (var u in _shown.Units)
         {
             if (u.Owner == _myPlayer) continue;
             float d2 = WorldToScreen(u).DistanceSquaredTo(screen);
@@ -504,7 +621,7 @@ public partial class Main : Node2D
     {
         var w = ScreenToWorld(screen);
         int tx = Mathf.RoundToInt(w.X), ty = Mathf.RoundToInt(w.Y);
-        foreach (var b in _me.Sim.Buildings)
+        foreach (var b in _shown.Buildings)
         {
             if ((b.Owner == _myPlayer) != mine) continue;
             if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) return b;
@@ -529,7 +646,7 @@ public partial class Main : Node2D
     {
         ResourceNode best = null;
         float bestD2 = 12f * 12f;
-        foreach (var n in _me.Sim.Nodes)
+        foreach (var n in _shown.Nodes)
         {
             float d2 = (new Vector2(n.X, n.Y) * PxPerUnit).DistanceSquaredTo(screen);
             if (d2 < bestD2) { bestD2 = d2; best = n; }
@@ -541,7 +658,7 @@ public partial class Main : Node2D
     {
         _selected.Clear();
         var rect = new Rect2(p0, Vector2.Zero).Expand(p1).Abs();
-        foreach (var u in _me.Sim.Units)
+        foreach (var u in _shown.Units)
         {
             if (u.Owner != _myPlayer) continue;
             if (rect.HasPoint(WorldToScreen(u))) _selected.Add(u.Id);
@@ -568,7 +685,7 @@ public partial class Main : Node2D
         DrawDropOffs();
         DrawPaths();
 
-        foreach (var u in _me.Sim.Units)
+        foreach (var u in _shown.Units)
         {
             var p = WorldToScreen(u);
             var color = u.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
@@ -597,7 +714,7 @@ public partial class Main : Node2D
     // their integer coordinate, matching where a unit standing on that tile draws.
     void DrawTerrain()
     {
-        var map = _me.Sim.Map;
+        var map = _shown.Map;
         DrawRect(new Rect2(TileCorner(0, 0),
                            new Vector2(map.Width * PxPerUnit, map.Height * PxPerUnit)),
                  GroundColor);
@@ -623,7 +740,7 @@ public partial class Main : Node2D
     void DrawPaths()
     {
         var line = new Color(1f, 0.9f, 0.4f, 0.55f);
-        foreach (var u in _me.Sim.Units)
+        foreach (var u in _shown.Units)
         {
             if (!_selected.Contains(u.Id) || !u.HasPath) continue;
 
@@ -649,7 +766,7 @@ public partial class Main : Node2D
     // depleting node visibly shrinks.
     void DrawNodes()
     {
-        foreach (var n in _me.Sim.Nodes)
+        foreach (var n in _shown.Nodes)
         {
             var center = new Vector2(n.X, n.Y) * PxPerUnit;
             float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
@@ -663,7 +780,7 @@ public partial class Main : Node2D
     void DrawBuildings()
     {
         var stone = new Color(0.55f, 0.55f, 0.58f);
-        foreach (var b in _me.Sim.Buildings)
+        foreach (var b in _shown.Buildings)
         {
             var owner = b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
             var rect = new Rect2(TileCorner(b.X, b.Y),
@@ -725,7 +842,7 @@ public partial class Main : Node2D
     // A ring at each player's drop-off, in that player's colour.
     void DrawDropOffs()
     {
-        foreach (var kv in _me.Sim.DropOffs)
+        foreach (var kv in _shown.DropOffs)
         {
             var p = new Vector2(kv.Value.X, kv.Value.Y) * PxPerUnit;
             var c = kv.Key == 1 ? new Color(0.3f, 0.7f, 1f, 0.8f) : new Color(1f, 0.45f, 0.35f, 0.8f);
@@ -748,7 +865,11 @@ public partial class Main : Node2D
     static Vector2 TileCorner(int x, int y) =>
         new Vector2((x - 0.5f) * PxPerUnit, (y - 0.5f) * PxPerUnit);
 
-    public override void _ExitTree() => _enet?.Close();
+    public override void _ExitTree()
+    {
+        if (!_replayMode && _me?.Recorder != null) SaveReplay();   // always leave a recording behind
+        _enet?.Close();
+    }
 
     // The unit's true position, straight out of the sim.
     static Vector2 SimWorld(Unit u) =>
@@ -756,7 +877,7 @@ public partial class Main : Node2D
 
     void SnapshotPositions()
     {
-        foreach (var u in _me.Sim.Units) _prevWorld[u.Id] = SimWorld(u);
+        foreach (var u in _shown.Units) _prevWorld[u.Id] = SimWorld(u);
     }
 
     // Where the unit is DRAWN this frame: between its position before the last

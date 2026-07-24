@@ -111,7 +111,14 @@
       "Bash(sips -c 640 640 --cropOffset 80 80 siege3.png --out siege3-crop.png)",
       "Bash(perl -e 'select\\(undef,undef,undef,12\\)')",
       "Bash(screencapture -x -o pb1.png)",
-      "Bash(sips -c 240 480 --cropOffset 100 100 pb1.png --out pb1-crop.png)"
+      "Bash(sips -c 240 480 --cropOffset 100 100 pb1.png --out pb1-crop.png)",
+      "Bash(screencapture -x -o rep-mid.png)",
+      "Bash(sips -c 40 900 --cropOffset 90 90 rep-mid.png --out rep-mid-crop.png)",
+      "Bash(perl -e 'select\\(undef,undef,undef,32\\)')",
+      "Bash(screencapture -x -o rep-end.png)",
+      "Bash(sips -c 70 640 --cropOffset 88 88 rep-end.png --out rep-end-crop.png)",
+      "Bash(sed -i '' 's#  - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin#  - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin\\\\n  - `Replay/` — record a match, replay it bit-for-bit, save/load#' CONTEXT_HANDOFF.md)",
+      "Bash(sed -i '' 's#│  └─ PointBuy/         data-driven unit designs within a point budget#│  ├─ PointBuy/         data-driven unit designs within a point budget\\\\n│  └─ Replay/           record a match and replay it bit-for-bit#' README.md)"
     ]
   }
 }

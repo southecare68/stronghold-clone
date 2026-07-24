@@ -70,19 +70,45 @@ namespace Netcode
             PutUInt(buf, turn.Checksum);
 
             PutInt(buf, turn.Commands.Length);
-            foreach (var c in turn.Commands)
+            foreach (var c in turn.Commands) WriteCommand(buf, c);
+        }
+
+        // One command's bytes. Public and shared so anything that persists
+        // commands — turns on the wire, or a saved replay — uses the exact same
+        // layout, and adding a field can never desync one path but not the other.
+        public static void WriteCommand(List<byte> buf, Command c)
+        {
+            PutInt(buf, c.Owner);
+            PutInt(buf, (int)c.Type);
+            PutInt(buf, c.X);
+            PutInt(buf, c.Y);
+            PutInt(buf, c.TargetId);      // Attack orders carry their target
+            PutInt(buf, c.ExecTick);
+            PutInt(buf, c.Seq);          // dropping this reintroduces the
+                                         // ordering desync — see tests/CommandOrder
+            PutInt(buf, c.UnitIds.Length);
+            foreach (int id in c.UnitIds) PutInt(buf, id);
+        }
+
+        // Reads one command; returns null if a length field is out of range.
+        public static Command ReadCommand(byte[] data, ref int p)
+        {
+            var c = new Command
             {
-                PutInt(buf, c.Owner);
-                PutInt(buf, (int)c.Type);
-                PutInt(buf, c.X);
-                PutInt(buf, c.Y);
-                PutInt(buf, c.TargetId);      // Attack orders carry their target
-                PutInt(buf, c.ExecTick);
-                PutInt(buf, c.Seq);          // dropping this reintroduces the
-                                             // ordering desync — see tests/CommandOrder
-                PutInt(buf, c.UnitIds.Length);
-                foreach (int id in c.UnitIds) PutInt(buf, id);
-            }
+                Owner = GetInt(data, ref p),
+                Type = (CommandType)GetInt(data, ref p),
+                X = GetInt(data, ref p),
+                Y = GetInt(data, ref p),
+                TargetId = GetInt(data, ref p),
+                ExecTick = GetInt(data, ref p),
+                Seq = GetInt(data, ref p),
+            };
+            int n = GetInt(data, ref p);
+            if (n < 0 || n > MaxUnitsPerCommand) return null;
+            var ids = new int[n];
+            for (int j = 0; j < n; j++) ids[j] = GetInt(data, ref p);
+            c.UnitIds = ids;
+            return c;
         }
 
         public static byte[] Serialize(MatchSnapshot snap)
@@ -382,31 +408,17 @@ namespace Netcode
             var cmds = new Command[count];
             for (int i = 0; i < count; i++)
             {
-                var c = new Command
-                {
-                    Owner = GetInt(data, ref p),
-                    Type = (CommandType)GetInt(data, ref p),
-                    X = GetInt(data, ref p),
-                    Y = GetInt(data, ref p),
-                    TargetId = GetInt(data, ref p),
-                    ExecTick = GetInt(data, ref p),
-                    Seq = GetInt(data, ref p),
-                };
-                int n = GetInt(data, ref p);
-                if (n < 0 || n > MaxUnitsPerCommand) return null;
-                var ids = new int[n];
-                for (int j = 0; j < n; j++) ids[j] = GetInt(data, ref p);
-                c.UnitIds = ids;
-                cmds[i] = c;
+                cmds[i] = ReadCommand(data, ref p);
+                if (cmds[i] == null) return null;
             }
 
             turn.Commands = cmds;
             return turn;
         }
 
-        static void PutInt(List<byte> b, int v) => PutUInt(b, unchecked((uint)v));
+        public static void PutInt(List<byte> b, int v) => PutUInt(b, unchecked((uint)v));
 
-        static void PutUInt(List<byte> b, uint v)
+        public static void PutUInt(List<byte> b, uint v)
         {
             b.Add((byte)(v & 0xff));
             b.Add((byte)((v >> 8) & 0xff));
@@ -414,9 +426,9 @@ namespace Netcode
             b.Add((byte)((v >> 24) & 0xff));
         }
 
-        static int GetInt(byte[] d, ref int p) => unchecked((int)GetUInt(d, ref p));
+        public static int GetInt(byte[] d, ref int p) => unchecked((int)GetUInt(d, ref p));
 
-        static uint GetUInt(byte[] d, ref int p)
+        public static uint GetUInt(byte[] d, ref int p)
         {
             if (p + 4 > d.Length) throw new ArgumentOutOfRangeException(nameof(p));
             uint v = (uint)d[p] | ((uint)d[p + 1] << 8) |

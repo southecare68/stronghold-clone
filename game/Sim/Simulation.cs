@@ -362,10 +362,53 @@ namespace Sim
             }
         }
 
+        // Restore straight from a snapshot object — the same unpacking every
+        // caller was doing by hand.
+        public void Restore(MatchSnapshot s) =>
+            Restore(s.Tick, s.NextUnitId, s.RngState, s.Units, s.NextNodeId, s.Nodes,
+                    s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs);
+
+        // A complete, standalone snapshot of the simulation's state right now — no
+        // network bookkeeping (no pending turns). This is what a rejoin adopts and
+        // what a replay records as its starting point.
+        public MatchSnapshot Snapshot()
+        {
+            var units = new Unit[Units.Count];
+            for (int i = 0; i < units.Length; i++) units[i] = Units[i].Clone();
+            var nodes = new ResourceNode[Nodes.Count];
+            for (int i = 0; i < nodes.Length; i++) nodes[i] = Nodes[i].Clone();
+            var buildings = new Building[Buildings.Count];
+            for (int i = 0; i < buildings.Length; i++) buildings[i] = Buildings[i].Clone();
+            var designs = new UnitDesign[_designs.Count];
+            for (int i = 0; i < designs.Length; i++) designs[i] = _designs[i].Clone();
+
+            var stock = new Dictionary<int, int[]>();
+            foreach (var kv in _stock) stock[kv.Key] = (int[])kv.Value.Clone();
+            var drops = new Dictionary<int, Tile>();
+            foreach (var kv in _dropOff) drops[kv.Key] = kv.Value;
+
+            return new MatchSnapshot
+            {
+                Tick = TickNumber,
+                NextUnitId = _nextId,
+                NextNodeId = _nextNodeId,
+                NextBuildingId = _nextBuildingId,
+                RngState = _rng.State,
+                Units = units,
+                Nodes = nodes,
+                Buildings = buildings,
+                Designs = designs,
+                Stock = stock,
+                DropOffs = drops,
+                Checksum = StateChecksum(),
+            };
+        }
+
         // Read-only views for snapshotting. Sorted iteration is preserved, so a
         // snapshot serialises owners in a fixed order on every machine.
         public IReadOnlyList<ResourceNode> NodeList => Nodes;
         public IReadOnlyList<Building> BuildingList => Buildings;
+        public IReadOnlyList<UnitDesign> DesignList => _designs;
         public IReadOnlyDictionary<int, int[]> Stockpiles => _stock;
         public IReadOnlyDictionary<int, Tile> DropOffs => _dropOff;
 

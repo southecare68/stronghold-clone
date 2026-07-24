@@ -39,7 +39,8 @@ stronghold-clone/
 │  ├─ Buildings/        placement, footprint blocking, keep drop-off, production
 │  ├─ Walls/            curtain walls, gatehouse open/close, sync, rejoin
 │  ├─ Siege/            destructible buildings, breaching, sync, rejoin
-│  └─ PointBuy/         data-driven unit designs within a point budget
+│  ├─ PointBuy/         data-driven unit designs within a point budget
+│  └─ Replay/           record a match and replay it bit-for-bit
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```

@@ -53,6 +53,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Walls/` — curtain walls, gatehouse open/close, two-client sync, rejoin
   - `Siege/` — destructible buildings, breaching, two-client sync, rejoin
   - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin
+  - `Replay/` — record a match, replay it bit-for-bit, save/load
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -500,8 +501,37 @@ unit point-buy, your own mechanics).
 siege) and the custom point-buy roster. The deterministic, cross-architecture
 RTS is feature-complete against the original brief.
 
+16. ✅ **Replay system.** Lockstep makes a match a function of terrain + start
+   state + command stream, so recording those reproduces it EXACTLY. `Replay`
+   (game/Net) records a match, plays it back, and serialises to a few KB;
+   `ReplayRecorder` attaches to a `Client` (via the `ITickRecorder` interface in
+   Sim, so the Sim layer keeps no dependency on Net) and captures each tick's
+   commands.
+
+   Two payoffs beyond "watch your game back": it's a **determinism check** (a
+   playback whose checksum differs from the live run is a desync the recorder
+   caught), and a **debugging superpower** (a desync seen between two machines can
+   be reproduced on ONE machine from the recorded commands and bisected — the
+   natural companion to the pending live ARM↔x86 match).
+
+   Plumbing reused/added: `Simulation.Snapshot()` (a pure sim snapshot, which
+   `Client.CaptureSnapshot` now builds on) and `Restore(MatchSnapshot)`;
+   `TileMap.CopyTiles()`/`FromTiles()`; `Wire.WriteCommand`/`ReadCommand` +
+   public `PutInt/GetInt` (single source of truth for command bytes, shared by
+   turns and replays).
+
+   `tests/Replay`: a 400-tick match (economy/combat/buildings/mixed designs on
+   the demo map) reproduces bit-for-bit — verified **every tick**, not just the
+   final number — survives save/load byte-identically, and refuses malformed
+   bytes. Verified live in Godot: played a match, `F5` saved
+   `user://last.shrep` (661 ticks, `0xB0408CA2`), and `--replay=<path>` watched
+   it back to `✓ reproduced exactly` on the same checksum.
+
+   In-game: `F5` saves the match so far (also auto-saved on exit);
+   `--replay=user://last.shrep` watches it back (passive — no input).
+
 ## Immediate next tasks (choose by taste — the core is done)
-16. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
+17. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
    RangeStat already works — a design with a long reach hits from afar, no
    projectile needed, but visuals/balance want attention); a real map/level
    beyond `TileMap.Demo`; camera/scroll for bigger maps; sound; menus.

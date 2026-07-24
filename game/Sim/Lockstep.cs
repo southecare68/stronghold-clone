@@ -95,6 +95,13 @@ namespace Sim
             $"{RemotePlayer} 0x{RemoteChecksum:X8}";
     }
 
+    // A sink for each tick's command set. The replay recorder implements it; the
+    // Client only knows this interface, so Sim stays independent of Net.
+    public interface ITickRecorder
+    {
+        void Record(IReadOnlyList<Command> commands);
+    }
+
     public interface ITransport
     {
         // Deliver one player's turn to every participant, the sender included.
@@ -139,6 +146,12 @@ namespace Sim
         // ours. Never cleared — after a desync the two worlds have already parted
         // and everything downstream is noise.
         public DesyncReport Desync { get; private set; }
+
+        // Optional: attach a recorder and every tick this client runs is captured.
+        // Typed as the interface below, NOT the concrete ReplayRecorder, so the
+        // engine-agnostic Sim layer keeps no dependency on the Net layer where the
+        // recorder lives — the sim-only test projects must still compile.
+        public ITickRecorder Recorder;
 
         public Client(int playerId, ITransport net) : this(playerId, net, null) { }
 
@@ -216,6 +229,7 @@ namespace Sim
             foreach (var turn in _turns[tick])
                 cmds.AddRange(turn.Commands);
 
+            Recorder?.Record(cmds);   // capture the exact command set BEFORE it's applied
             Sim.Tick(cmds);
 
             // StateChecksum, not Checksum: the network must compare EVERYTHING
@@ -237,27 +251,12 @@ namespace Sim
         // already in the match (the host) at the moment someone connects.
         public MatchSnapshot CaptureSnapshot()
         {
-            var units = new Unit[Sim.Units.Count];
-            for (int i = 0; i < units.Length; i++) units[i] = Sim.Units[i].Clone();
+            var snap = Sim.Snapshot();
 
-            var nodes = new ResourceNode[Sim.NodeList.Count];
-            for (int i = 0; i < nodes.Length; i++) nodes[i] = Sim.NodeList[i].Clone();
-
-            var stock = new Dictionary<int, int[]>();
-            foreach (var kv in Sim.Stockpiles) stock[kv.Key] = (int[])kv.Value.Clone();
-
-            var drops = new Dictionary<int, Tile>();
-            foreach (var kv in Sim.DropOffs) drops[kv.Key] = kv.Value;
-
-            var buildings = new Building[Sim.BuildingList.Count];
-            for (int i = 0; i < buildings.Length; i++) buildings[i] = Sim.BuildingList[i].Clone();
-
-            var designs = new UnitDesign[Sim.Designs.Count];
-            for (int i = 0; i < designs.Length; i++) designs[i] = Sim.Designs[i].Clone();
-
-            // Our own turns from the current tick onward. We published these
-            // already and will never publish them again — _sentThrough has moved
-            // past them — so if we don't hand them over now, nobody ever will.
+            // The only thing a rejoin snapshot needs beyond the sim state: our own
+            // turns from the current tick onward. We published these already and
+            // will never publish them again — _sentThrough has moved past them —
+            // so if we don't hand them over now, nobody ever will.
             var pending = new List<TurnInput>();
             for (int t = Sim.TickNumber; t <= _sentThrough; t++)
             {
@@ -265,23 +264,8 @@ namespace Sim
                 foreach (var turn in list)
                     if (turn.Owner == PlayerId) pending.Add(turn.Clone());
             }
-
-            return new MatchSnapshot
-            {
-                Tick = Sim.TickNumber,
-                NextUnitId = Sim.NextUnitId,
-                NextNodeId = Sim.NextNodeId,
-                NextBuildingId = Sim.NextBuildingId,
-                RngState = Sim.RngState,
-                Units = units,
-                Nodes = nodes,
-                Buildings = buildings,
-                Designs = designs,
-                Stock = stock,
-                DropOffs = drops,
-                PendingTurns = pending.ToArray(),
-                Checksum = Sim.StateChecksum(),
-            };
+            snap.PendingTurns = pending.ToArray();
+            return snap;
         }
 
         // Adopt a match already in progress. Returns false — and reports a
@@ -290,9 +274,7 @@ namespace Sim
         // world is the worst outcome available.
         public bool AdoptSnapshot(MatchSnapshot snap)
         {
-            Sim.Restore(snap.Tick, snap.NextUnitId, snap.RngState, snap.Units,
-                        snap.NextNodeId, snap.Nodes, snap.Stock, snap.DropOffs,
-                        snap.NextBuildingId, snap.Buildings, snap.Designs);
+            Sim.Restore(snap);
 
             // Everything from before the join is meaningless now: turns for ticks
             // we will never run, checksums for a world we were not in, and any
