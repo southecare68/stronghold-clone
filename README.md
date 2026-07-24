@@ -29,11 +29,18 @@ stronghold-clone/
 │  ├─ Audio/            engine-agnostic sound synthesis (no audio files at all)
 │  │  ├─ Synth.cs       every effect generated from noise and envelopes
 │  │  └─ Music.cs       the score: Compose() writes notes, Render() plays them
+│  ├─ Art/              baked 2D sprites (small, committed — see tools/bake)
+│  │  ├─ terrain/       ground/rock/marsh tiles
+│  │  ├─ buildings/     keep, barracks, wall, gatehouse
+│  │  └─ units/         soldier/runner/brute/archer, 8 facings each
 │  └─ Scripts/          the Godot layer
 │     ├─ Main.cs        renders the sim, mouse -> commands
+│     ├─ SpriteBank.cs  loads the baked sprites, falls back to shapes
 │     ├─ Sound.cs       voices, positional playback, mix levels
 │     ├─ MusicPlayer.cs seamless loops, cross-fading between moods
 │     └─ EnetTransport.cs   ITransport over a real ENet socket
+├─ tools/               offline tooling
+│  └─ bake/             render the 3D asset packs into 2D sprites (run.sh)
 ├─ tests/               console tests; no Godot, so they run anywhere dotnet does
 │  ├─ SimParity/        C# sim reproduces the Node reference exactly
 │  ├─ InputSlice/       the mouse flow, headless
@@ -106,6 +113,16 @@ so, and everything is positional — a fight across the map sounds like it is
 across the map, and one you cannot see makes no sound at all, because audible
 fog would hand back exactly what the fog was there to withhold. `M` mutes, `-`
 and `=` set the volume.
+
+**Art.** Units and buildings are 2D sprites baked from 3D model packs — the same
+trick the classic isometric RTS used: render each model once from a fixed 3/4
+view into a PNG, then draw flat sprites and never touch a mesh at runtime. Units
+carry eight facings; terrain is textured grass, rock and marsh. The sprites live
+in `game/Art/` (small, committed); the multi-gigabyte source packs do not (see
+`tools/bake/` for how they are produced). If the sprites are absent the game
+draws its original coloured shapes instead, so it runs the same with or without
+them — the art is an overlay on a game that was already complete, not a
+dependency.
 
 **Music** is generated too, and adapts. Three tracks in D Dorian — the medieval
 mode — cross-fade with the situation: calm while you build, tension the moment

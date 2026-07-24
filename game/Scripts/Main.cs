@@ -141,6 +141,19 @@ public partial class Main : Node2D
     // once and blitted each frame — far cheaper than drawing 16k rects.
     ImageTexture _miniTerrain;
 
+    // ---- Baked art ----------------------------------------------------------
+    // Sprites rendered offline from the 3D packs (tools/bake/), loaded at startup.
+    // Every lookup can return null and the renderer falls back to its original
+    // shapes, so the game is complete with or without art — see SpriteBank.
+    SpriteBank _art;
+    // A unit's heading changes tick to tick and would make the sprite flicker
+    // between facings on the spot; this remembers the last committed facing per
+    // unit and only switches when the heading has clearly moved on.
+    readonly Dictionary<int, int> _facing = new();
+    // Baked units face this screen direction at facing 0. Calibrated once against
+    // the actual sprites; a wrong value just rotates every unit by a constant.
+    const int FacingOffset = 0;
+
     // ---- Fog of war (the DRAWING half) --------------------------------------
     // The rule lives in the simulation (Sim/Vision.cs) — what you may attack,
     // gather and build on. This is only the picture of it: unexplored ground is
@@ -215,6 +228,7 @@ public partial class Main : Node2D
         if (replayArg != null)
         {
             StartReplay(replayArg);
+            StartArt();
             StartSound();
             _hud = new Label { Position = new Vector2(8, 8) };
             AddChild(_hud);
@@ -240,12 +254,18 @@ public partial class Main : Node2D
         _recorder = new ReplayRecorder(_me.Sim);
         _me.Recorder = _recorder;
 
+        StartArt();
         StartSound();
         _hud = new Label { Position = new Vector2(8, 8) };
         AddChild(_hud);
     }
 
     // ---- Sound: setup and the observer --------------------------------------
+
+    void StartArt()
+    {
+        _art = new SpriteBank();
+    }
 
     void StartSound()
     {
@@ -1043,9 +1063,25 @@ public partial class Main : Node2D
             // Radius scales with the design's HP, so a Brute reads as bigger than
             // a Runner at a glance.
             float r = Mathf.Clamp(4f + u.MaxHp * 0.03f, 4f, 9f);
-            DrawCircle(p, r, color);
-            if (_selected.Contains(u.Id))
-                DrawArc(p, r + 3f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+
+            var sprite = _art?.Unit(u.DesignId, UnitFacing(u));
+            if (sprite != null)
+            {
+                // A team-coloured disc UNDER the feet — the sprite carries no
+                // colour, so this is what says whose unit it is, and it doubles as
+                // the shadow that anchors the sprite to the ground.
+                DrawCircle(p + new Vector2(0, 2f), r, new Color(color.R, color.G, color.B, 0.5f));
+                DrawUnitSprite(sprite, p, r);
+                if (_selected.Contains(u.Id))
+                    DrawArc(p + new Vector2(0, 2f), r + 3f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+            }
+            else
+            {
+                DrawCircle(p, r, color);
+                if (_selected.Contains(u.Id))
+                    DrawArc(p, r + 3f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
+            }
+
             if (u.MaxHp > 0 && u.Hp < u.MaxHp)
                 DrawHealthBar(p, u.Hp, u.MaxHp);
             // A worker hauling a load shows a small dot of the resource's colour.
@@ -1074,11 +1110,25 @@ public partial class Main : Node2D
     void DrawTerrain()
     {
         var map = _shown.Map;
+        var (x0, y0, x1, y1) = VisibleTiles();
+
+        // Textured path: draw a ground texture under everything, then only the
+        // non-ground tiles on top. Each tile samples a DIFFERENT sub-region of
+        // its texture keyed by (x,y), so a 128-texture tiled across the map does
+        // not repeat visibly every tile — it reads as one continuous surface.
+        var ground = _art?.Terrain("ground");
+        if (ground != null)
+        {
+            for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++)
+                    DrawTerrainTile(map.At(x, y), x, y, ground);
+            return;
+        }
+
+        // Fallback: flat colours, exactly as before the art existed.
         DrawRect(new Rect2(TileCorner(0, 0),
                            new Vector2(map.Width * PxPerUnit, map.Height * PxPerUnit)),
                  GroundColor);
-
-        var (x0, y0, x1, y1) = VisibleTiles();
         for (int y = y0; y <= y1; y++)
             for (int x = x0; x <= x1; x++)
             {
@@ -1092,6 +1142,42 @@ public partial class Main : Node2D
                              _ => MarshColor,
                          });
             }
+    }
+
+    void DrawTerrainTile(Terrain t, int x, int y, Texture2D ground)
+    {
+        var tex = t switch
+        {
+            Terrain.Rock => _art.Terrain("rock"),
+            Terrain.Marsh => _art.Terrain("marsh"),
+            Terrain.Water => _art.Terrain("water"),
+            _ => ground,
+        } ?? ground;
+
+        var dst = new Rect2(TileCorner(x, y), new Vector2(PxPerUnit, PxPerUnit));
+
+        // Water has no texture in the pack, so tint the ground blue for it rather
+        // than leaving a hole; every other type has its own.
+        if (t == Terrain.Water && _art.Terrain("water") == null)
+        {
+            DrawTextureRectRegion(ground, dst, TileRegion(ground, x, y), WaterColor.Lerp(Colors.White, 0.15f));
+            return;
+        }
+        DrawTextureRectRegion(tex, dst, TileRegion(tex, x, y));
+    }
+
+    // A small, deterministic window into the texture chosen by tile coordinate,
+    // so adjacent tiles show different parts of the source and the surface does
+    // not look stamped. 4x4 windows across the texture give sixteen variations,
+    // shuffled by a cheap hash of (x,y) so the pattern has no visible period.
+    static Rect2 TileRegion(Texture2D tex, int x, int y)
+    {
+        var size = tex.GetSize();
+        float w = size.X / 4f, h = size.Y / 4f;
+        int hash = (x * 73856093) ^ (y * 19349663);
+        int gx = ((hash & 3) + 4) % 4;
+        int gy = (((hash >> 2) & 3) + 4) % 4;
+        return new Rect2(gx * w, gy * h, w, h);
     }
 
     // The tile range actually on screen. On a 128x128 map that is a few hundred
@@ -1190,6 +1276,21 @@ public partial class Main : Node2D
             var rect = new Rect2(TileCorner(b.X, b.Y),
                                  new Vector2(b.W * PxPerUnit, b.H * PxPerUnit));
 
+            // Baked sprite if we have one for this type. Drawn wider than the
+            // footprint and anchored at the footprint's BOTTOM, so the building
+            // rises up out of its tiles the way an isometric sprite should, and a
+            // thin owner-tinted ring on the ground says whose it is (the sprite
+            // itself carries no team colour).
+            var sprite = _art?.Building(b.Type);
+            if (sprite != null)
+            {
+                DrawRect(rect, new Color(owner.R, owner.G, owner.B, 0.18f));
+                DrawRect(rect, owner, false, 1.5f);
+                DrawBuildingSprite(sprite, rect);
+                DrawBuildingBars(b, rect);
+                continue;
+            }
+
             switch (b.Type)
             {
                 case BuildingType.Wall:
@@ -1222,25 +1323,47 @@ public partial class Main : Node2D
                     break;
             }
 
-            // Damage bar (only once a building has been hit).
-            if (b.MaxHp > 0 && b.Hp < b.MaxHp)
-            {
-                float frac = Mathf.Clamp((float)b.Hp / b.MaxHp, 0f, 1f);
-                var barTop = rect.Position + new Vector2(0, -4f);
-                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0.5f, 0.1f, 0.1f));
-                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.3f, 0.85f, 0.35f));
-            }
-
-            // Production progress (BuildTimer counts DOWN from TrainTime=60),
-            // above the damage bar so both are visible.
-            if (b.Type == BuildingType.Barracks && b.TrainQueue.Count > 0)
-            {
-                float frac = 1f - Mathf.Clamp(b.BuildTimer / 60f, 0f, 1f);
-                var barTop = rect.Position + new Vector2(0, -8f);
-                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0, 0, 0, 0.5f));
-                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.9f, 0.8f, 0.3f));
-            }
+            DrawBuildingBars(b, rect);
         }
+    }
+
+    // Damage and production bars, above a building's footprint. Shared by the
+    // sprite and the shape path so both read the same.
+    void DrawBuildingBars(Building b, Rect2 rect)
+    {
+        if (b.MaxHp > 0 && b.Hp < b.MaxHp)
+        {
+            float frac = Mathf.Clamp((float)b.Hp / b.MaxHp, 0f, 1f);
+            var barTop = rect.Position + new Vector2(0, -4f);
+            DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0.5f, 0.1f, 0.1f));
+            DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.3f, 0.85f, 0.35f));
+        }
+
+        // Production progress (BuildTimer counts DOWN from TrainTime=60), above
+        // the damage bar so both are visible.
+        if (b.Type == BuildingType.Barracks && b.TrainQueue.Count > 0)
+        {
+            float frac = 1f - Mathf.Clamp(b.BuildTimer / 60f, 0f, 1f);
+            var barTop = rect.Position + new Vector2(0, -8f);
+            DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0, 0, 0, 0.5f));
+            DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.9f, 0.8f, 0.3f));
+        }
+    }
+
+    // Draw a building sprite anchored at the BOTTOM-CENTRE of its footprint. A
+    // sprite is a tall picture of something standing ON the tiles, so its base
+    // belongs on the ground and its height rises up the screen. Width tracks the
+    // footprint (with a little overhang); height follows the sprite's own aspect,
+    // so a tower stays tall and a wall stays low.
+    void DrawBuildingSprite(Texture2D sprite, Rect2 footprint)
+    {
+        var texSize = sprite.GetSize();
+        float drawW = footprint.Size.X * 1.35f;
+        float drawH = drawW * texSize.Y / texSize.X;
+        float bottom = footprint.Position.Y + footprint.Size.Y;
+        float cx = footprint.Position.X + footprint.Size.X * 0.5f;
+        var dst = new Rect2(cx - drawW * 0.5f, bottom - drawH, drawW, drawH);
+        DrawTextureRect(sprite, dst, false);
     }
 
     // A ring at each player's drop-off, in that player's colour.
@@ -1253,6 +1376,37 @@ public partial class Main : Node2D
             var c = kv.Key == 1 ? new Color(0.3f, 0.7f, 1f, 0.8f) : new Color(1f, 0.45f, 0.35f, 0.8f);
             DrawArc(p, 13f, 0, Mathf.Tau, 28, c, 2f);
         }
+    }
+
+    // Which of the eight baked facings to show for a unit, from the direction it
+    // is heading toward its current waypoint. A stationary unit keeps whatever it
+    // last faced, so an idle army does not all snap to face south. The chosen
+    // facing is remembered and only changed when the heading has clearly moved to
+    // a new octant, so a unit crossing a boundary does not strobe between two
+    // sprites.
+    int UnitFacing(Unit u)
+    {
+        int dx = u.Tx - u.X, dy = u.Ty - u.Y;
+        if (dx * dx + dy * dy < (Fixed.One / 8) * (Fixed.One / 8))
+            return _facing.TryGetValue(u.Id, out var held) ? held : 0;
+
+        // Screen angle: atan2(dy, dx) with +y downward, mapped to 8 octants.
+        float ang = Mathf.Atan2(dy, dx);                       // -pi..pi
+        int oct = Mathf.PosMod(Mathf.RoundToInt(ang / (Mathf.Tau / 8f)) + FacingOffset, 8);
+        _facing[u.Id] = oct;
+        return oct;
+    }
+
+    // A unit sprite, anchored at the FEET (bottom-centre on the unit's point) so
+    // it stands on the tile rather than floating. Sized to a few multiples of the
+    // shape radius it replaces, so the scene keeps the same visual density.
+    void DrawUnitSprite(Texture2D sprite, Vector2 feet, float r)
+    {
+        var texSize = sprite.GetSize();
+        float drawH = r * 4.6f;
+        float drawW = drawH * texSize.X / texSize.Y;
+        var dst = new Rect2(feet.X - drawW * 0.5f, feet.Y - drawH + r * 0.6f, drawW, drawH);
+        DrawTextureRect(sprite, dst, false);
     }
 
     // A small health bar above a damaged unit: red track, green fill.

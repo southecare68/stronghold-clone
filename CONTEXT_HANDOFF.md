@@ -812,11 +812,62 @@ further: the score is generated too. The design decision that matters is the
 - **Still not verified by me: whether any of it sounds good.** I cannot listen.
   All 13 effects and all 3 tracks are dumped to `~/Desktop/stronghold-sfx/`.
 
+✅ **Art — 2D sprites baked from the 3D asset packs.** The user downloaded some
+Synty POLYGON packs (Fantasy Kingdom, Nature, Particle FX). They are 3D and the
+game is 2D, so a fork went to the user: render-only sprite bake vs. converting the
+renderer to 3D vs. cherry-picking. **Sprite bake was chosen** — the classic
+isometric-RTS approach, and the one that keeps everything already built.
+
+- `tools/bake/` — an offline tool (`run.sh` + `bake.gd`) that renders each prefab
+  from a fixed 52° 3/4 view into a PNG with alpha. Buildings get one view; units
+  get eight facings. It runs INSIDE the asset project (that is where the prefabs'
+  mesh/material uids resolve) and writes PNGs out to `game/Art/` by absolute path.
+  It is a `SceneTree` MainLoop launched with `--script`, NOT a scene-with-script —
+  the first attempt used a `.tscn` and the mono build silently failed to attach
+  the script, giving a grey window and no output. The MainLoop owns its own render
+  tree and cannot hit that.
+- `game/Art/` — 39 sprites, 464 KB total, COMMITTED. Derived, tiny, and shippable
+  under Synty's licence as part of a game; the gigabyte of source packs stays
+  gitignored. terrain/ (grass, rock, marsh — downscaled from the Nature pack),
+  buildings/ (keep=castle tower, barracks=house, wall=battlement, gatehouse=gate),
+  units/ (soldier, runner, brute=rider, archer=king placeholder; 8 facings each).
+- `game/Scripts/SpriteBank.cs` — loads the PNGs at RUNTIME with `Image.Load`, like
+  the audio the game already synthesises at startup: no `.import` files to manage,
+  drop a new PNG in and it is picked up. **Every lookup can return null and the
+  renderer keeps its shape-drawing**, so the game is identical with or without art
+  — which is what leaves the 15 headless suites, and anyone who has not unpacked
+  the packs, untouched. The art is an overlay, not a dependency.
+- `Main.cs` render changes, ALL with a shape fallback: terrain draws textured
+  tiles (each tile samples a hashed 4x4 sub-region so a 128px texture across the
+  map does not look stamped); buildings draw their sprite anchored at the
+  footprint's bottom with a team-tinted ownership ring on the ground; units draw
+  a facing sprite over a team-coloured disc (which doubles as the shadow). The
+  facing is picked from the unit's heading and held stable so it does not strobe
+  at octant boundaries.
+- **The one honest limitation:** the Synty base packs ship no animation clips, so
+  units are static bind-pose (a slight T-pose) rather than walking. Flagged to the
+  user up front. At RTS zoom it reads fine; adding a Synty animation pack or Mixamo
+  later is the fix, and the bake tool already renders whatever pose the model is in.
+- Two bugs the work shook out, both in the bake tool: type-inference errors on
+  `PREFABS + ...` and a transform expression (GDScript `:=` cannot infer those),
+  and the FIRST entity baking blank because its camera `look_at` fired before the
+  nodes were in-tree — fixed with a two-frame settle before the loop.
+- No simulation changes at all — `game/Sim/` and `game/Net/` are untouched, so
+  0xB1A7A676 holds and all 15 suites pass. Verified live: textured grass with
+  per-tile variation, the keep tower on its footprint, a placed barracks (house)
+  and gatehouse, soldier sprites on team discs facing their heading, ownership
+  rings, fog and selection all intact, `IN SYNC ✓`.
+- First-time setup gotcha: the asset project must be imported once
+  (`Godot --headless --path polygon-fantasy-kingdom --editor --quit-after 4000`)
+  before the bake can load prefabs; the character FBX is the slow part.
+
 ## Immediate next tasks (choose by taste — the core is done)
-17. **Polish & depth:** an interactive point-buy/roster UI; more maps (the
-   `Skirmish` pattern generalises — it takes a size and uses no RNG); ambience and
-   victory/defeat stingers (the synth and the composer have the building blocks);
-   menus; unit/building selection panels.
+17. **Polish & depth:** unit ANIMATION (the packs have none — a Synty anim pack or
+   Mixamo retarget would replace the static T-pose, and the bake tool already
+   renders whatever pose the rig holds); the particle-fx pack (fire on burning
+   buildings, dust under marching units) if the renderer ever goes 3D; more baked
+   entities (siege engines, resource-node props); an interactive point-buy UI;
+   more maps; menus; selection panels.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the
