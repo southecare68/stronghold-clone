@@ -35,7 +35,8 @@ stronghold-clone/
 │  ├─ Pathfinding/      map, RNG, deterministic grid A*
 │  ├─ PathFollowing/    units follow smoothed routes, two-client sync
 │  ├─ Combat/           deterministic fighting, RNG sync, win/lose
-│  └─ Economy/          gather/haul/deposit, conservation, two-client sync
+│  ├─ Economy/          gather/haul/deposit, conservation, two-client sync
+│  └─ Buildings/        placement, footprint blocking, keep drop-off, production
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -48,7 +49,9 @@ path is drawn) or right-click an enemy to attack. Units fight in melee, health
 bars show over the wounded, and the HUD announces the winner when a side is
 wiped out. Right-click a resource node to send workers to gather it — they haul
 loads back to the drop-off and your stockpile (shown in the HUD) grows. The HUD
-also shows the tick, state checksum, and sync state.
+also shows the tick, state checksum, and sync state. Press `B`/`K` to place a
+barracks/keep at the cursor; right-click your own barracks to train soldiers.
+Buildings block movement, so units path around them.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
@@ -96,5 +99,7 @@ in progress. **Cross-architecture determinism is confirmed:** the parity test
 produces the identical checksum (`0xB1A7A676`) on an ARM Mac and an x86 Linux
 box. Units path around terrain with smoothing, fight deterministically (seeded
 RNG, in sync across clients and across a mid-fight rejoin), gather resources into
-per-player stockpiles, and a side that is wiped out loses. Next up in Phase 2:
-buildings. See `CONTEXT_HANDOFF.md`.
+per-player stockpiles, put up buildings whose footprints block movement, train
+soldiers from a barracks, and win by wiping out the other side. **Phase 2 is
+essentially complete** — map, pathfinding, combat, economy, and buildings, all
+deterministic and cross-architecture-verified. See `CONTEXT_HANDOFF.md`.

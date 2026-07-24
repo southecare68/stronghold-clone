@@ -49,6 +49,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `PathFollowing/` — units follow smoothed routes; two-client StateChecksum sync
   - `Combat/` — deterministic fighting, RNG in sync, rejoin mid-fight, win/lose
   - `Economy/` — gather/haul/deposit, conservation, two-client sync, rejoin
+  - `Buildings/` — placement/cost, footprint blocking, keep drop-off, production
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -345,15 +346,54 @@ than mod the closed 2006 engine, which was too limiting.
    a bare tile (a stand-in for a keep/town-centre until buildings exist), no
    worker/soldier distinction (any unit can gather or fight).
 
+11. ✅ **Buildings — the Phase 2 capstone.** A Build order places a structure
+   (Keep 3×3, Barracks 2×2) with its footprint validated (in-bounds, passable,
+   unoccupied) and its cost charged to the stockpile; a refused build spends and
+   places nothing. Footprints **block the pathfinder** — units route around them,
+   the castle-defining behaviour — via a mutable occupancy overlay on the TileMap
+   (which the terrain fingerprint deliberately ignores, since occupancy is
+   derived from the buildings list that IS in StateChecksum). A Keep sets its
+   owner's drop-off (replacing the bare-tile stand-in). A Barracks takes Train
+   orders that cost wood and queue soldiers, produced after a build time and
+   spawned on the footprint's edge.
+
+   Same discipline: integer, id-ordered, new state (buildings, nextBuildingId)
+   into `StateChecksum()` and `MatchSnapshot` — never `Checksum()`, so SimParity
+   still prints 0xB1A7A676. Build/Train reuse `Command.TargetId` (building type /
+   building id), so the turn wire was unchanged. Added `Simulation.AddResource`
+   for match-setup starting stockpiles.
+
+   **Two real bugs the tests caught, both about a building's centre being
+   walled-in:** a 3×3 keep's centre is two tiles from the nearest standable tile,
+   so (1) a worker could never get within the 1.5-tile deposit range of it, and
+   (2) it couldn't even PATH to the blocked centre. Fixed by depositing at a
+   larger `DropOffRange` AND setting a keep's drop-off to a reachable perimeter
+   tile, not the buried centre.
+
+   `tests/Buildings` proves placement/cost/validation, footprint blocking (a path
+   that ran straight now detours and never crosses the footprint), keep-as-
+   drop-off, barracks production, move-only-changes-nothing, **two-client
+   build+train sync**, and a **rejoin that rebuilds buildings AND re-stamps their
+   map occupancy**. Verified live: placed a barracks with `B`, right-clicked to
+   train, wood went 200 → 130 (−40 barracks, −2×15 soldiers), soldiers spawned,
+   `IN SYNC ✓`.
+
+   In-game: `[B]`/`[K]` place a barracks/keep at the cursor; right-click your own
+   barracks to train.
+
+**Phase 2 is essentially complete** — map, pathfinding+smoothing, combat+win,
+economy, and buildings, all deterministic and cross-architecture-verified. What
+remains is polish and Phase 3 (the castle identity: walls/gatehouses, the custom
+unit point-buy, your own mechanics).
+
 ## Immediate next tasks (in order)
-11. **Buildings** — the last core Phase 2 system. Placement validated on the tile
-   grid, footprints that block movement (and become real drop-offs, replacing the
-   bare-tile stand-in), a keep, and production that costs from the stockpile.
-   Now unblocked: economy gives buildings something to cost and produce. Same
-   discipline — new state into `StateChecksum()`/`MatchSnapshot`, never
-   `Checksum()`.
-12. Optional polish that keeps coming up: **unit collision/separation** (units
-   currently stack when converging — on a move target, an enemy, or a node).
+12. **Unit collision / separation** — the one rough edge that keeps recurring:
+   units stack on the same pixel when they converge (a move target, an enemy, a
+   node, a barracks spawn point). A deterministic separation/local-avoidance step
+   would make crowds read correctly. Integer-only, into the movement phase.
+13. **Phase 3** (ARCHITECTURE.md): walls & gatehouses, the custom unit point-buy,
+   and the mechanics that make this its own game. Buildings + blocking already
+   lay the groundwork for walls.
 
 ## Phase 2 so far: the map and the pathfinder
 Deliberately started with the piece everything else stands on — buildings occupy

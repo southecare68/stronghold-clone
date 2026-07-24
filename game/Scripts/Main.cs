@@ -101,12 +101,19 @@ public partial class Main : Node2D
             c.Sim.SpawnUnit(2, 44, 40);
             c.Sim.SpawnUnit(2, 47, 40);
 
-            c.Sim.SetDropOff(1, 8, 8);          // each side banks near its start
-            c.Sim.SetDropOff(2, 47, 40);
+            // A starting keep for each side — it sets the drop-off — plus some
+            // resources to build and train with.
+            c.Sim.PlaceBuilding(BuildingType.Keep, 1, 4, 4);
+            c.Sim.PlaceBuilding(BuildingType.Keep, 2, 44, 44);
+            foreach (int owner in new[] { 1, 2 })
+            {
+                c.Sim.AddResource(owner, ResourceType.Wood, 200);
+                c.Sim.AddResource(owner, ResourceType.Stone, 100);
+            }
 
             c.Sim.SpawnNode(ResourceType.Wood, 14, 14, 300);   // player 1's side
-            c.Sim.SpawnNode(ResourceType.Stone, 5, 16, 300);
-            c.Sim.SpawnNode(ResourceType.Wood, 50, 44, 300);   // player 2's side
+            c.Sim.SpawnNode(ResourceType.Stone, 8, 16, 300);
+            c.Sim.SpawnNode(ResourceType.Wood, 50, 40, 300);   // player 2's side
             c.Sim.SpawnNode(ResourceType.Stone, 51, 36, 300);
         }
 
@@ -284,7 +291,8 @@ public partial class Main : Node2D
         int wood = _me.Sim.Stockpile(_myPlayer, ResourceType.Wood);
         int stone = _me.Sim.Stockpile(_myPlayer, ResourceType.Stone);
         int food = _me.Sim.Stockpile(_myPlayer, ResourceType.Food);
-        return $"\nwood {wood}   stone {stone}   food {food}";
+        return $"\nwood {wood}   stone {stone}   food {food}" +
+               "\n[B] barracks  [K] keep at cursor   right-click barracks to train";
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -349,28 +357,42 @@ public partial class Main : Node2D
                 _boxing = true;
                 _boxStart = mb.Position;
             }
-            else if (mb.ButtonIndex == MouseButton.Right && _selected.Count > 0)
+            else if (mb.ButtonIndex == MouseButton.Right)
             {
                 // Right-click resolves to the most specific thing under the
-                // cursor: an enemy is an attack, a resource node is a gather,
-                // bare ground is a move.
-                var ids = new List<int>(_selected).ToArray();
-                var enemy = EnemyUnitAt(mb.Position);
-                var node = NodeAt(mb.Position);
-                if (enemy != null)
-                    _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
-                else if (node != null)
-                    _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
-                else
+                // cursor. Training at your own barracks needs no unit selected;
+                // orders to units do.
+                var barracks = OwnBarracksAt(mb.Position);
+                if (barracks != null)
                 {
-                    var w = ScreenToWorld(mb.Position);
-                    _me.Issue(new Command
+                    _me.Issue(new Command { Type = CommandType.Train, TargetId = barracks.Id });
+                }
+                else if (_selected.Count > 0)
+                {
+                    var ids = new List<int>(_selected).ToArray();
+                    var enemy = EnemyUnitAt(mb.Position);
+                    var node = NodeAt(mb.Position);
+                    if (enemy != null)
+                        _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+                    else if (node != null)
+                        _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
+                    else
                     {
-                        Type = CommandType.Move, UnitIds = ids,
-                        X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
-                    });
+                        var w = ScreenToWorld(mb.Position);
+                        _me.Issue(new Command
+                        {
+                            Type = CommandType.Move, UnitIds = ids,
+                            X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
+                        });
+                    }
                 }
             }
+        }
+        else if (e is InputEventKey k && k.Pressed && !k.Echo)
+        {
+            // B / K place a building with its top-left at the cursor tile.
+            if (k.Keycode == Key.B) PlaceAtCursor(BuildingType.Barracks);
+            else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
         }
         else if (e is InputEventMouseButton up && !up.Pressed &&
                  up.ButtonIndex == MouseButton.Left && _boxing)
@@ -393,6 +415,31 @@ public partial class Main : Node2D
             if (d2 < bestD2) { bestD2 = d2; best = u; }
         }
         return best;
+    }
+
+    // One of your own barracks whose footprint is under the cursor, or null.
+    Building OwnBarracksAt(Vector2 screen)
+    {
+        var w = ScreenToWorld(screen);
+        int tx = Mathf.RoundToInt(w.X), ty = Mathf.RoundToInt(w.Y);
+        foreach (var b in _me.Sim.Buildings)
+        {
+            if (b.Owner != _myPlayer || b.Type != BuildingType.Barracks) continue;
+            if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) return b;
+        }
+        return null;
+    }
+
+    // Issue a Build order with the building's top-left at the cursor tile. The
+    // sim validates footprint and cost and refuses quietly if it cannot place.
+    void PlaceAtCursor(BuildingType type)
+    {
+        var w = ScreenToWorld(_mouse);
+        _me.Issue(new Command
+        {
+            Type = CommandType.Build, TargetId = (int)type,
+            X = Mathf.RoundToInt(w.X), Y = Mathf.RoundToInt(w.Y),
+        });
     }
 
     // The resource node under the cursor, or null.
@@ -435,6 +482,7 @@ public partial class Main : Node2D
     {
         DrawTerrain();
         DrawNodes();
+        DrawBuildings();
         DrawDropOffs();
         DrawPaths();
 
@@ -522,6 +570,30 @@ public partial class Main : Node2D
             float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
             DrawRect(new Rect2(center - new Vector2(s / 2f, s / 2f), new Vector2(s, s)),
                      ResourceColor(n.Type));
+        }
+    }
+
+    // Buildings: a filled footprint in the owner's colour, keeps darker and
+    // walled, barracks lighter with a production bar when a unit is queued.
+    void DrawBuildings()
+    {
+        foreach (var b in _me.Sim.Buildings)
+        {
+            var owner = b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
+            var fill = b.Type == BuildingType.Keep ? owner.Darkened(0.35f) : owner.Darkened(0.15f);
+            var rect = new Rect2(TileCorner(b.X, b.Y),
+                                 new Vector2(b.W * PxPerUnit, b.H * PxPerUnit));
+            DrawRect(rect, fill);
+            DrawRect(rect, owner, false, 2f);
+
+            // Production progress (BuildTimer counts DOWN from TrainTime=60).
+            if (b.Type == BuildingType.Barracks && b.Queue > 0)
+            {
+                float frac = 1f - Mathf.Clamp(b.BuildTimer / 60f, 0f, 1f);
+                var barTop = rect.Position + new Vector2(0, -5f);
+                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X, 3f)), new Color(0, 0, 0, 0.5f));
+                DrawRect(new Rect2(barTop, new Vector2(rect.Size.X * frac, 3f)), new Color(0.9f, 0.8f, 0.3f));
+            }
         }
     }
 

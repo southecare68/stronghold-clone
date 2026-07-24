@@ -15,7 +15,9 @@ using System.Collections.Generic;
 
 namespace Sim
 {
-    public enum CommandType { Move = 0, Attack = 1, Gather = 2 }
+    public enum CommandType { Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4 }
+
+    public enum BuildingType { Keep = 0, Barracks = 1 }
 
     public enum ResourceType { Wood = 0, Stone = 1, Food = 2 }
 
@@ -43,6 +45,31 @@ namespace Sim
     public static class Resources
     {
         public const int Count = 3;   // Wood, Stone, Food
+    }
+
+    // A placed structure. Its footprint (X,Y top-left, W×H tiles) blocks the map
+    // while it stands. Barracks carry a small production queue; a Keep anchors its
+    // owner's drop-off. Position is whole tiles, never fixed-point.
+    public sealed class Building
+    {
+        public int Id;
+        public int Owner;
+        public BuildingType Type;
+        public int X, Y, W, H;
+
+        // Production: how many units are queued, and ticks left on the one being
+        // built. Only Barracks use these.
+        public int Queue;
+        public int BuildTimer;
+
+        public int CenterX => X + W / 2;
+        public int CenterY => Y + H / 2;
+
+        public Building Clone() => new Building
+        {
+            Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
+            Queue = Queue, BuildTimer = BuildTimer,
+        };
     }
 
     public sealed class Command
@@ -122,9 +149,11 @@ namespace Sim
         public int TickNumber;
         public readonly List<Unit> Units = new(); // always iterated in id order
         public readonly List<ResourceNode> Nodes = new(); // id order
+        public readonly List<Building> Buildings = new(); // id order
         public readonly TileMap Map;
         int _nextId = 1;
         int _nextNodeId = 1;
+        int _nextBuildingId = 1;
 
         // Per-owner stockpiles and drop-off points. SortedDictionary so every
         // machine hashes owners in the same order — a plain Dictionary iterates in
@@ -146,8 +175,27 @@ namespace Sim
 
         // --- Economy tuning ---------------------------------------------------
         static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
+        // Bigger than GatherRange because a drop-off can be a building's CENTRE,
+        // and the middle of a 3x3 keep is two tiles from the nearest tile a
+        // worker can actually stand on — a 1.5-tile deposit range could never be
+        // met there, so workers would circle a keep forever without depositing.
+        static readonly int DropOffRange = Fixed.FromInt(3);
         const int CarryCapacity = 10;                           // load a worker hauls
         const int GatherInterval = 5;                           // ticks per 1 unit gathered
+
+        // --- Buildings --------------------------------------------------------
+        const int TrainTime = 60;                               // ticks to produce one unit (3s)
+        const int TrainCostWood = 15;                           // per unit trained at a Barracks
+
+        // Footprint size and placement cost per building type, indexed by
+        // (int)BuildingType. Cost is [wood, stone, food].
+        static readonly int[] FootW = { 3, 2 };                 // Keep 3x3, Barracks 2x2
+        static readonly int[] FootH = { 3, 2 };
+        static readonly int[][] BuildCost =
+        {
+            new[] { 30, 20, 0 },   // Keep
+            new[] { 40, 0, 0 },    // Barracks
+        };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -192,11 +240,13 @@ namespace Sim
         // a different world with the same contents.
         public void Restore(int tickNumber, int nextUnitId, uint rngState, IReadOnlyList<Unit> units,
                             int nextNodeId, IReadOnlyList<ResourceNode> nodes,
-                            IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff)
+                            IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff,
+                            int nextBuildingId, IReadOnlyList<Building> buildings)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
             _nextNodeId = nextNodeId;
+            _nextBuildingId = nextBuildingId;
             _rng.Restore(rngState);
 
             Units.Clear();
@@ -210,11 +260,25 @@ namespace Sim
 
             _dropOff.Clear();
             foreach (var kv in dropOff) _dropOff[kv.Key] = kv.Value;
+
+            // Rebuild the buildings AND the map occupancy they imply — the
+            // rejoiner's map starts as bare terrain, so the footprints have to be
+            // re-stamped or its pathfinding would route straight through walls
+            // that the host's does not.
+            Buildings.Clear();
+            Map.ClearBlocked();
+            foreach (var b in buildings)
+            {
+                var copy = b.Clone();
+                Buildings.Add(copy);
+                BlockFootprint(copy, true);
+            }
         }
 
         // Read-only views for snapshotting. Sorted iteration is preserved, so a
         // snapshot serialises owners in a fixed order on every machine.
         public IReadOnlyList<ResourceNode> NodeList => Nodes;
+        public IReadOnlyList<Building> BuildingList => Buildings;
         public IReadOnlyDictionary<int, int[]> Stockpiles => _stock;
         public IReadOnlyDictionary<int, Tile> DropOffs => _dropOff;
 
@@ -251,6 +315,12 @@ namespace Sim
         public int Stockpile(int owner, ResourceType type) =>
             _stock.TryGetValue(owner, out var s) ? s[(int)type] : 0;
 
+        // Grant resources directly. For match setup (starting stockpiles) — call
+        // it identically on every machine before the match runs, exactly like
+        // SpawnUnit. Not an in-match action: there is no command for it.
+        public void AddResource(int owner, ResourceType type, int amount) =>
+            StockOf(owner)[(int)type] += amount;
+
         public int NextNodeId => _nextNodeId;
 
         int[] StockOf(int owner)
@@ -258,6 +328,56 @@ namespace Sim
             if (!_stock.TryGetValue(owner, out var s)) { s = new int[Resources.Count]; _stock[owner] = s; }
             return s;
         }
+
+        public int NextBuildingId => _nextBuildingId;
+
+        // Can a building of this type legally sit with its top-left at (x,y)?
+        // Every footprint tile must be in bounds, passable terrain, and free of
+        // any other building. Uses the SAME passability the pathfinder does, so a
+        // building is never placed where a unit could not have stood.
+        public bool CanPlace(BuildingType type, int x, int y)
+        {
+            int w = FootW[(int)type], h = FootH[(int)type];
+            for (int ty = y; ty < y + h; ty++)
+                for (int tx = x; tx < x + w; tx++)
+                    if (!Map.Passable(tx, ty)) return false;   // out of bounds, terrain, or already blocked
+            return true;
+        }
+
+        // Place a building directly, no cost, no validation beyond fit. For match
+        // setup and tests — the Build COMMAND (which charges and validates) is the
+        // in-game path. Returns null if it will not fit.
+        public Building PlaceBuilding(BuildingType type, int owner, int x, int y)
+        {
+            if (!CanPlace(type, x, y)) return null;
+
+            var b = new Building
+            {
+                Id = _nextBuildingId++, Owner = owner, Type = type,
+                X = x, Y = y, W = FootW[(int)type], H = FootH[(int)type],
+            };
+            Buildings.Add(b);
+            BlockFootprint(b, true);
+
+            // A keep is where its owner's gatherers deposit — at a REACHABLE tile
+            // just outside its footprint, not the walled-in centre (which no
+            // worker could path to or stand on).
+            if (type == BuildingType.Keep)
+            {
+                var drop = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
+                SetDropOff(owner, drop.X, drop.Y);
+            }
+            return b;
+        }
+
+        void BlockFootprint(Building b, bool blocked)
+        {
+            for (int ty = b.Y; ty < b.Y + b.H; ty++)
+                for (int tx = b.X; tx < b.X + b.W; tx++)
+                    Map.SetBlocked(tx, ty, blocked);
+        }
+
+        public IReadOnlyList<int> CostOf(BuildingType type) => BuildCost[(int)type];
 
         void Apply(Command cmd)
         {
@@ -309,7 +429,43 @@ namespace Sim
                         }
                     }
                     break;
+
+                case CommandType.Build:
+                    // TargetId carries the building type; X,Y the top-left tile.
+                    // Refused silently if it will not fit or the owner cannot pay —
+                    // a refused build simply spends nothing and places nothing.
+                    var type = (BuildingType)cmd.TargetId;
+                    if ((int)type < 0 || (int)type >= BuildCost.Length) break;
+                    if (!CanPlace(type, cmd.X, cmd.Y) || !CanAfford(cmd.Owner, BuildCost[(int)type])) break;
+                    Pay(cmd.Owner, BuildCost[(int)type]);
+                    PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
+                    break;
+
+                case CommandType.Train:
+                    // TargetId carries the barracks id. Costs wood and queues a
+                    // unit; the production phase spawns it when the timer elapses.
+                    var barracks = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (barracks == null || barracks.Owner != cmd.Owner ||
+                        barracks.Type != BuildingType.Barracks) break;
+                    var trainCost = new[] { TrainCostWood, 0, 0 };
+                    if (!CanAfford(cmd.Owner, trainCost)) break;
+                    Pay(cmd.Owner, trainCost);
+                    barracks.Queue++;
+                    break;
             }
+        }
+
+        bool CanAfford(int owner, IReadOnlyList<int> cost)
+        {
+            for (int i = 0; i < Resources.Count; i++)
+                if (Stockpile(owner, (ResourceType)i) < cost[i]) return false;
+            return true;
+        }
+
+        void Pay(int owner, IReadOnlyList<int> cost)
+        {
+            var s = StockOf(owner);
+            for (int i = 0; i < Resources.Count; i++) s[i] -= cost[i];
         }
 
         // Cancel whatever task a unit was on. Called before a plain Move so an
@@ -435,7 +591,49 @@ namespace Sim
             ResolveCombat();
             RemoveDead();
             ResolveEconomy();
+            ResolveProduction();
             TickNumber++;
+        }
+
+        // Barracks turn their queue into units. Iterated in id order so a spawn
+        // (and the id it takes) happens in the same sequence on every machine.
+        void ResolveProduction()
+        {
+            foreach (var b in Buildings)
+            {
+                if (b.Type != BuildingType.Barracks || b.Queue <= 0) continue;
+
+                if (b.BuildTimer <= 0) b.BuildTimer = TrainTime;
+                b.BuildTimer--;
+
+                if (b.BuildTimer <= 0)
+                {
+                    b.Queue--;
+                    b.BuildTimer = 0;
+                    var spot = SpawnPointAround(b);
+                    if (spot.HasValue) SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y);
+                    // No free tile this tick: the unit stays queued and we try
+                    // again next tick, rather than dropping it.
+                    else b.Queue++;
+                }
+            }
+        }
+
+        // First passable tile on the ring just outside a building's footprint,
+        // scanned in a fixed order so both machines pick the same one.
+        Tile? SpawnPointAround(Building b)
+        {
+            for (int tx = b.X - 1; tx <= b.X + b.W; tx++)
+            {
+                if (Map.Passable(tx, b.Y - 1)) return new Tile(tx, b.Y - 1);
+                if (Map.Passable(tx, b.Y + b.H)) return new Tile(tx, b.Y + b.H);
+            }
+            for (int ty = b.Y; ty < b.Y + b.H; ty++)
+            {
+                if (Map.Passable(b.X - 1, ty)) return new Tile(b.X - 1, ty);
+                if (Map.Passable(b.X + b.W, ty)) return new Tile(b.X + b.W, ty);
+            }
+            return null;
         }
 
         // The gathering loop, iterated in id order (no RNG, pure integer state).
@@ -457,7 +655,7 @@ namespace Sim
                 {
                     // Haul the load home.
                     var drop = _dropOff[u.Owner];
-                    if (WithinRange(u, drop.X, drop.Y, GatherRange))
+                    if (WithinRange(u, drop.X, drop.Y, DropOffRange))
                     {
                         StockOf(u.Owner)[(int)u.CarryType] += u.CarryAmount;
                         u.CarryAmount = 0;
@@ -651,6 +849,7 @@ namespace Sim
             Mix(TickNumber);
             Mix(_nextId);
             Mix(_nextNodeId);
+            Mix(_nextBuildingId);
             Mix(unchecked((int)_rng.State));   // the dice must be in the same place
 
             foreach (var u in Units)
@@ -687,6 +886,13 @@ namespace Sim
             foreach (var kv in _dropOff)             // owner order
             {
                 Mix(kv.Key); Mix(kv.Value.X); Mix(kv.Value.Y);
+            }
+
+            foreach (var b in Buildings)             // id order
+            {
+                Mix(b.Id); Mix(b.Owner); Mix((int)b.Type);
+                Mix(b.X); Mix(b.Y); Mix(b.W); Mix(b.H);
+                Mix(b.Queue); Mix(b.BuildTimer);
             }
             return h;
         }

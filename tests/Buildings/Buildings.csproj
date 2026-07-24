@@ -1,0 +1,26 @@
+<!-- Buildings — placement, blocking, cost, and production, deterministically.
+
+     Buildings tie the systems together: they cost from the stockpile, their
+     footprints block the pathfinder (units route around them, the castle-
+     defining behaviour), a keep anchors the economy drop-off, and a barracks
+     turns resources into soldiers. This test proves each of those and, as ever,
+     that two clients agree tick for tick and a rejoin rebuilds it all —
+     including the map occupancy the footprints imply.
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>BuildingsTests</RootNamespace>
+    <AssemblyName>BuildingsTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

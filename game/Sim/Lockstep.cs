@@ -61,9 +61,11 @@ namespace Sim
         public int Tick;
         public int NextUnitId;
         public int NextNodeId;
+        public int NextBuildingId;
         public uint RngState;      // the sim's random generator, mid-sequence
         public Unit[] Units = Array.Empty<Unit>();
         public ResourceNode[] Nodes = Array.Empty<ResourceNode>();
+        public Building[] Buildings = Array.Empty<Building>();
         public Dictionary<int, int[]> Stock = new();       // owner -> per-resource amounts
         public Dictionary<int, Tile> DropOffs = new();     // owner -> drop-off tile
 
@@ -246,6 +248,9 @@ namespace Sim
             var drops = new Dictionary<int, Tile>();
             foreach (var kv in Sim.DropOffs) drops[kv.Key] = kv.Value;
 
+            var buildings = new Building[Sim.BuildingList.Count];
+            for (int i = 0; i < buildings.Length; i++) buildings[i] = Sim.BuildingList[i].Clone();
+
             // Our own turns from the current tick onward. We published these
             // already and will never publish them again — _sentThrough has moved
             // past them — so if we don't hand them over now, nobody ever will.
@@ -262,9 +267,11 @@ namespace Sim
                 Tick = Sim.TickNumber,
                 NextUnitId = Sim.NextUnitId,
                 NextNodeId = Sim.NextNodeId,
+                NextBuildingId = Sim.NextBuildingId,
                 RngState = Sim.RngState,
                 Units = units,
                 Nodes = nodes,
+                Buildings = buildings,
                 Stock = stock,
                 DropOffs = drops,
                 PendingTurns = pending.ToArray(),
@@ -279,7 +286,8 @@ namespace Sim
         public bool AdoptSnapshot(MatchSnapshot snap)
         {
             Sim.Restore(snap.Tick, snap.NextUnitId, snap.RngState, snap.Units,
-                        snap.NextNodeId, snap.Nodes, snap.Stock, snap.DropOffs);
+                        snap.NextNodeId, snap.Nodes, snap.Stock, snap.DropOffs,
+                        snap.NextBuildingId, snap.Buildings);
 
             // Everything from before the join is meaningless now: turns for ticks
             // we will never run, checksums for a world we were not in, and any

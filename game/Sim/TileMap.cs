@@ -55,6 +55,13 @@ namespace Sim
 
         readonly Terrain[] _tiles;
 
+        // Building occupancy, laid over the terrain. This is MUTABLE and is
+        // deliberately NOT part of the fingerprint: the fingerprint proves two
+        // machines loaded the same terrain, while occupancy is derived from the
+        // buildings list (which IS in StateChecksum), so hashing it here would be
+        // redundant — and it changes during a match, which terrain must never do.
+        readonly bool[] _blocked;
+
         public TileMap(int width, int height, Terrain fill = Terrain.Ground)
         {
             if (width <= 0 || height <= 0)
@@ -63,9 +70,15 @@ namespace Sim
             Width = width;
             Height = height;
             _tiles = new Terrain[width * height];
+            _blocked = new bool[width * height];
             if (fill != Terrain.Ground)
                 for (int i = 0; i < _tiles.Length; i++) _tiles[i] = fill;
         }
+
+        // ---- Building occupancy ----------------------------------------------
+        public bool Blocked(int x, int y) => _blocked[Index(x, y)];
+        public void SetBlocked(int x, int y, bool v) => _blocked[Index(x, y)] = v;
+        public void ClearBlocked() => Array.Clear(_blocked, 0, _blocked.Length);
 
         // A hash of the whole map, computed once. Terrain itself is not
         // checksummed per tick (it never changes), but the two machines must be
@@ -101,7 +114,8 @@ namespace Sim
         public void Set(int x, int y, Terrain t) => _tiles[Index(x, y)] = t;
 
         public bool Passable(int x, int y) =>
-            InBounds(x, y) && At(x, y) != Terrain.Water && At(x, y) != Terrain.Rock;
+            InBounds(x, y) && At(x, y) != Terrain.Water && At(x, y) != Terrain.Rock
+            && !_blocked[Index(x, y)];
 
         // Cost of ENTERING this tile, before the diagonal surcharge.
         public int EnterCost(int x, int y) =>

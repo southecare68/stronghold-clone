@@ -206,7 +206,8 @@ static class Program
         var units = new List<Unit>();
         foreach (var u in host.Units) units.Add(u.Clone());
         rejoiner.Restore(host.TickNumber, host.NextUnitId, host.RngState, units,
-                         host.NextNodeId, host.NodeList, host.Stockpiles, host.DropOffs);
+                         host.NextNodeId, host.NodeList, host.Stockpiles, host.DropOffs,
+                         host.NextBuildingId, host.BuildingList);
 
         Check("the rebuilt sim hashes identically at the join",
               rejoiner.StateChecksum() == host.StateChecksum());

@@ -93,6 +93,7 @@ namespace Netcode
             PutInt(buf, snap.Tick);
             PutInt(buf, snap.NextUnitId);
             PutInt(buf, snap.NextNodeId);
+            PutInt(buf, snap.NextBuildingId);
             PutUInt(buf, snap.RngState);
             PutUInt(buf, snap.Checksum);
 
@@ -135,6 +136,20 @@ namespace Netcode
                 PutInt(buf, n.X);
                 PutInt(buf, n.Y);
                 PutInt(buf, n.Amount);
+            }
+
+            PutInt(buf, snap.Buildings.Length);
+            foreach (var b in snap.Buildings)
+            {
+                PutInt(buf, b.Id);
+                PutInt(buf, b.Owner);
+                PutInt(buf, (int)b.Type);
+                PutInt(buf, b.X);
+                PutInt(buf, b.Y);
+                PutInt(buf, b.W);
+                PutInt(buf, b.H);
+                PutInt(buf, b.Queue);
+                PutInt(buf, b.BuildTimer);
             }
 
             // Stockpiles and drop-offs, each written in the snapshot's iteration
@@ -190,6 +205,7 @@ namespace Netcode
                     Tick = GetInt(data, ref p),
                     NextUnitId = GetInt(data, ref p),
                     NextNodeId = GetInt(data, ref p),
+                    NextBuildingId = GetInt(data, ref p),
                     RngState = GetUInt(data, ref p),
                     Checksum = GetUInt(data, ref p),
                 };
@@ -247,6 +263,26 @@ namespace Netcode
                     };
                 }
                 snap.Nodes = nodes;
+
+                int buildCount = GetInt(data, ref p);
+                if (buildCount < 0 || buildCount > MaxUnits) return null;
+                var buildings = new Building[buildCount];
+                for (int i = 0; i < buildCount; i++)
+                {
+                    buildings[i] = new Building
+                    {
+                        Id = GetInt(data, ref p),
+                        Owner = GetInt(data, ref p),
+                        Type = (BuildingType)GetInt(data, ref p),
+                        X = GetInt(data, ref p),
+                        Y = GetInt(data, ref p),
+                        W = GetInt(data, ref p),
+                        H = GetInt(data, ref p),
+                        Queue = GetInt(data, ref p),
+                        BuildTimer = GetInt(data, ref p),
+                    };
+                }
+                snap.Buildings = buildings;
 
                 int stockCount = GetInt(data, ref p);
                 if (stockCount < 0 || stockCount > MaxUnits) return null;
