@@ -856,6 +856,32 @@ isometric-RTS approach, and the one that keeps everything already built.
   — render-only, like interpolation. 231 sprites, 2.1 MB. Verified live: soldiers
   walk with cycling legs when moving, face their heading, and stand in the idle
   pose when stopped; no T-pose anywhere; IN SYNC throughout.
+
+- ✅ **Attack and death animation** (added after walk). Both authored the same way
+  — pose the rig, bake a frame per pose. `_pose_attack` is a four-frame right-arm
+  swing (ready/windup/strike/follow); the characters carry no weapon (weapons are
+  separate prefabs) so it reads as a strike rather than a sword blow, which is
+  plenty at RTS scale. `_pose_death` is a four-frame crumple. The one subtlety was
+  death from a FIXED 3/4 camera: a body-local backward fall foreshortens into a
+  crouch head-on. Fixed by splitting the bake rig into `_pivot` (a WORLD-space
+  topple about the across-screen axis, X−Z) and `_spin` (the facing yaw), so the
+  body lays down flat across the screen and reads as prone from every facing.
+- **Death is a render-only corpse.** The sim removes a dead unit immediately, so
+  the renderer keeps a `Corpse {design, facing, feet, age}` when a unit vanishes
+  (found by the same diff the death SOUND uses), plays the topple over ~0.55 s,
+  holds the prone frame, then fades it over ~0.7 s. Fog-gated like everything —
+  a corpse in ground that slipped back into fog is hidden. Nothing here is game
+  state; it cannot move a checksum.
+- **State machine** in Main.cs: a unit is Walk (moving), Attack (stationary with a
+  unit or building target), or Idle. `SpriteBank` grew a clean `Anim` enum and a
+  per-(design,clip) frame count; the renderer advances a phase by frame time,
+  faster for walk than for the swing. 487 sprites, 4.3 MB.
+- Verified: two full battles fought to victory, which REQUIRES attacks landing
+  (keep and enemy health bars draining, battle music) and units dying (whole enemy
+  army wiped, corpse system running through thousands of ticks with no error),
+  all IN SYNC; the baked attack and death frames confirmed correct by eye. The
+  per-frame swing/topple is deliberately subtle at RTS scale (a unit is ~30 px) —
+  it reads as motion in aggregate, not as a posed hero shot.
 - Two bugs the work shook out, both in the bake tool: type-inference errors on
   `PREFABS + ...` and a transform expression (GDScript `:=` cannot infer those),
   and the FIRST entity baking blank because its camera `look_at` fired before the
@@ -870,10 +896,7 @@ isometric-RTS approach, and the one that keeps everything already built.
   before the bake can load prefabs; the character FBX is the slow part.
 
 ## Immediate next tasks (choose by taste — the core is done)
-17. **Polish & depth:** more authored animation (attack swing, death topple — the
-   bake tool poses the rig, so an attack pose is a few more bone rotations; the sim
-   already emits the hit/death events the renderer would trigger on); the
-   particle-fx pack (fire on burning
+17. **Polish & depth:** the particle-fx pack (fire on burning
    buildings, dust under marching units) if the renderer ever goes 3D; more baked
    entities (siege engines, resource-node props); an interactive point-buy UI;
    more maps; menus; selection panels.

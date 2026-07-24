@@ -40,40 +40,55 @@ public sealed class SpriteBank
         [BuildingType.Gatehouse] = "gatehouse",
     };
 
+    // The animation states a unit sprite can be in. The clip name under Art/units
+    // is the lowercased state ("walk", "atk", "death"); Idle is a single frame.
+    public enum Anim { Idle, Walk, Attack, Death }
+    static string Clip(Anim a) => a switch
+    {
+        Anim.Walk => "walk",
+        Anim.Attack => "atk",
+        Anim.Death => "death",
+        _ => "idle",
+    };
+
     // How many facings the bake produced per unit. Must match UNIT_FACINGS in
     // tools/bake/bake.gd.
     public const int Facings = 8;
-    // Walk-cycle frames per facing. Must match WALK_FRAMES in bake.gd. Discovered
-    // at load time (below) so a re-bake with a different count needs no code
-    // change; this is just the ceiling we probe up to.
-    const int MaxWalkFrames = 16;
+    // Upper bound on frames per clip we probe for at load. The real count is
+    // discovered per (design, clip), so a re-bake with different counts needs no
+    // code change here.
+    const int MaxFrames = 32;
 
     readonly Dictionary<string, Texture2D> _cache = new();
-    // Per design, how many walk frames actually loaded — so the renderer knows
-    // the cycle length without probing the dictionary every draw.
-    readonly int[] _walkFrames;
+    // [design][state] -> how many frames actually loaded, so the renderer knows a
+    // clip's length without probing the dictionary every draw.
+    readonly int[,] _frames;
     public bool AnyLoaded { get; private set; }
 
     public SpriteBank()
     {
-        _walkFrames = new int[UnitArt.Length];
+        _frames = new int[UnitArt.Length, 4];
 
         for (int d = 0; d < UnitArt.Length; d++)
         {
             var name = UnitArt[d];
             for (int f = 0; f < Facings; f++)
             {
-                // Idle, and the un-suffixed name the pre-animation bake produced,
-                // so an old Art/ folder still works.
+                // Idle, plus the un-suffixed name the first bake produced, so an
+                // old Art/ folder still works.
                 TryLoad($"units/{name}_{f}_idle");
                 TryLoad($"units/{name}_{f}");
-                for (int w = 0; w < MaxWalkFrames; w++)
-                    if (!TryLoad($"units/{name}_{f}_walk{w}")) break;
+                foreach (Anim a in new[] { Anim.Walk, Anim.Attack, Anim.Death })
+                    for (int k = 0; k < MaxFrames; k++)
+                        if (!TryLoad($"units/{name}_{f}_{Clip(a)}{k}")) break;
             }
-            // How many walk frames facing 0 has is the cycle length for the design.
-            int wf = 0;
-            while (_cache.ContainsKey($"units/{name}_0_walk{wf}")) wf++;
-            _walkFrames[d] = wf;
+            // Clip length = however many frames facing 0 has.
+            foreach (Anim a in new[] { Anim.Walk, Anim.Attack, Anim.Death })
+            {
+                int n = 0;
+                while (_cache.ContainsKey($"units/{name}_0_{Clip(a)}{n}")) n++;
+                _frames[d, (int)a] = n;
+            }
         }
 
         foreach (var name in BuildingArt.Values)
@@ -82,13 +97,13 @@ public sealed class SpriteBank
             TryLoad($"terrain/{t}");
 
         GD.Print(AnyLoaded
-            ? $"[art] {_cache.Count} sprites loaded from res://Art " +
-              $"(walk frames: {string.Join("/", _walkFrames)})"
+            ? $"[art] {_cache.Count} sprites loaded from res://Art"
             : "[art] no baked sprites found — drawing shapes (run tools/bake/run.sh to add art)");
     }
 
-    public int WalkFrames(int designId) =>
-        designId >= 0 && designId < _walkFrames.Length ? _walkFrames[designId] : 0;
+    // Frames in a clip for a design (0 if that clip was not baked).
+    public int FrameCount(int designId, Anim a) =>
+        designId >= 0 && designId < UnitArt.Length ? _frames[designId, (int)a] : 0;
 
     bool TryLoad(string key)
     {
@@ -117,17 +132,17 @@ public sealed class SpriteBank
 
     public Texture2D Terrain(string name) => _cache.TryGetValue($"terrain/{name}", out var t) ? t : null;
 
-    // The sprite for a unit design, facing a screen direction, at an animation
-    // frame. walkFrame < 0 means standing (idle). The lookup degrades gracefully:
-    // a missing walk frame falls back to idle, and idle falls back to the old
-    // un-suffixed sprite, so a partially-baked or pre-animation Art/ still draws.
-    public Texture2D Unit(int designId, int facing, int walkFrame)
+    // The sprite for a unit design, facing a screen direction, in a state at a
+    // frame. The lookup degrades gracefully: a missing clip frame falls back to
+    // idle, and idle to the old un-suffixed sprite — so a partially-baked or
+    // pre-animation Art/ folder still draws something.
+    public Texture2D Unit(int designId, int facing, Anim state, int frame)
     {
         if (designId < 0 || designId >= UnitArt.Length) designId = 0;
         facing = ((facing % Facings) + Facings) % Facings;
         string b = $"units/{UnitArt[designId]}_{facing}";
 
-        if (walkFrame >= 0 && _cache.TryGetValue($"{b}_walk{walkFrame}", out var w)) return w;
+        if (state != Anim.Idle && _cache.TryGetValue($"{b}_{Clip(state)}{frame}", out var c)) return c;
         if (_cache.TryGetValue($"{b}_idle", out var idle)) return idle;
         return _cache.TryGetValue(b, out var t) ? t : null;
     }

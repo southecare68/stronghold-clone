@@ -158,6 +158,19 @@ public partial class Main : Node2D
     // never touches the simulation, exactly like interpolation.
     readonly Dictionary<int, float> _animPhase = new();
     const float WalkCadence = 9f;      // walk frames per second at full stride
+    const float AttackCadence = 7f;    // attack frames per second while engaged
+    // Last-seen design per living unit, so a corpse knows which sprite set to use
+    // after the simulation has removed the unit.
+    readonly Dictionary<int, int> _lastDesign = new();
+
+    // Render-only corpses. When a unit vanishes from the simulation we keep
+    // drawing a death animation where it fell, then fade it out. Purely cosmetic:
+    // the sim removed the unit already, nothing here is game state, and — like the
+    // death SOUND — it only appears where the player could see the kill.
+    sealed class Corpse { public int Design, Facing; public Vector2 Feet; public float Age; }
+    readonly List<Corpse> _corpses = new();
+    const float DeathPlaySec = 0.55f;  // time to play the topple frames
+    const float DeathFadeSec = 0.7f;   // then fade the settled body out
 
     // ---- Fog of war (the DRAWING half) --------------------------------------
     // The rule lives in the simulation (Sim/Vision.cs) — what you may attack,
@@ -383,8 +396,20 @@ public partial class Main : Node2D
         {
             if (_shown.Units.Find(u => u.Id == id) != null) continue;
             if (!_prevWorld.TryGetValue(id, out var where)) continue;
-            if (Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Y)))
-                _sound.Play(Sfx.UnitDeath, Aud(where.X, where.Y));
+            if (!Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Y))) continue;
+
+            _sound.Play(Sfx.UnitDeath, Aud(where.X, where.Y));
+
+            // Leave a corpse to play the death topple where it fell. Render-only:
+            // the sim has already removed the unit; this just animates its exit.
+            if (_art != null && _art.AnyLoaded && _art.FrameCount(_lastDesign.GetValueOrDefault(id), SpriteBank.Anim.Death) > 0)
+                _corpses.Add(new Corpse
+                {
+                    Design = _lastDesign.GetValueOrDefault(id),
+                    Facing = _facing.GetValueOrDefault(id),
+                    Feet = where,
+                    Age = 0f,
+                });
         }
 
         // Units arrived: a barracks finished one. Only your own — an enemy
@@ -1056,6 +1081,7 @@ public partial class Main : Node2D
         DrawDropOffs();
         DrawPaths();
         DrawProjectiles();
+        DrawCorpses();   // under the living, on the ground
 
         foreach (var u in _shown.Units)
         {
@@ -1070,14 +1096,15 @@ public partial class Main : Node2D
             // a Runner at a glance.
             float r = Mathf.Clamp(4f + u.MaxHp * 0.03f, 4f, 9f);
 
-            var sprite = _art?.Unit(u.DesignId, UnitFacing(u), UnitWalkFrame(u));
+            var state = UnitState(u);
+            var sprite = _art?.Unit(u.DesignId, UnitFacing(u), state, UnitFrame(u, state));
             if (sprite != null)
             {
                 // A team-coloured disc UNDER the feet — the sprite carries no
                 // colour, so this is what says whose unit it is, and it doubles as
                 // the shadow that anchors the sprite to the ground.
                 DrawCircle(p + new Vector2(0, 2f), r, new Color(color.R, color.G, color.B, 0.5f));
-                DrawUnitSprite(sprite, p, r);
+                DrawUnitSprite(sprite, p, r, Colors.White);
                 if (_selected.Contains(u.Id))
                     DrawArc(p + new Vector2(0, 2f), r + 3f, 0, Mathf.Tau, 24, Colors.White, 1.5f);
             }
@@ -1384,14 +1411,43 @@ public partial class Main : Node2D
         }
     }
 
-    // Advance each unit's walk phase while it is moving, hold it while it stands.
-    // A unit at rest keeps a small non-zero phase so it does not snap to a jarring
-    // mid-stride pose the instant it stops — the renderer shows idle then anyway.
+    // Advance each unit's clip phase — faster for walking, slower for a swing,
+    // frozen when idle — and age the corpses. Render-only, driven by frame time.
     void AdvanceAnimation(double delta)
     {
         if (_art == null || !_art.AnyLoaded) return;
+
         foreach (var u in _shown.Units)
-            if (Moving(u)) _animPhase[u.Id] = _animPhase.GetValueOrDefault(u.Id) + (float)delta * WalkCadence;
+        {
+            _lastDesign[u.Id] = u.DesignId;
+            var st = UnitState(u);
+            if (st == SpriteBank.Anim.Walk)
+                _animPhase[u.Id] = _animPhase.GetValueOrDefault(u.Id) + (float)delta * WalkCadence;
+            else if (st == SpriteBank.Anim.Attack)
+                _animPhase[u.Id] = _animPhase.GetValueOrDefault(u.Id) + (float)delta * AttackCadence;
+        }
+
+        for (int i = _corpses.Count - 1; i >= 0; i--)
+        {
+            _corpses[i].Age += (float)delta;
+            if (_corpses[i].Age > DeathPlaySec + DeathFadeSec) _corpses.RemoveAt(i);
+        }
+    }
+
+    // What a unit is doing, for animation. Chasing counts as walking; standing
+    // with a target (a unit or a building) is attacking; anything else is idle.
+    SpriteBank.Anim UnitState(Unit u)
+    {
+        if (Moving(u)) return SpriteBank.Anim.Walk;
+        if (u.TargetId != 0 || u.TargetBuildingId != 0) return SpriteBank.Anim.Attack;
+        return SpriteBank.Anim.Idle;
+    }
+
+    int UnitFrame(Unit u, SpriteBank.Anim state)
+    {
+        int n = _art.FrameCount(u.DesignId, state);
+        if (n <= 0) return 0;
+        return Mathf.PosMod((int)_animPhase.GetValueOrDefault(u.Id), n);
     }
 
     // Is the unit travelling toward a waypoint (as opposed to standing)? The sim
@@ -1400,15 +1456,6 @@ public partial class Main : Node2D
     {
         int dx = u.Tx - u.X, dy = u.Ty - u.Y;
         return dx * dx + dy * dy > (Fixed.One / 8) * (Fixed.One / 8);
-    }
-
-    // The walk frame to draw for a unit, or -1 for its idle pose.
-    int UnitWalkFrame(Unit u)
-    {
-        if (!Moving(u)) return -1;
-        int frames = _art.WalkFrames(u.DesignId);
-        if (frames <= 0) return -1;
-        return Mathf.PosMod((int)_animPhase.GetValueOrDefault(u.Id), frames);
     }
 
     // Which of the eight baked facings to show for a unit, from the direction it
@@ -1433,13 +1480,40 @@ public partial class Main : Node2D
     // A unit sprite, anchored at the FEET (bottom-centre on the unit's point) so
     // it stands on the tile rather than floating. Sized to a few multiples of the
     // shape radius it replaces, so the scene keeps the same visual density.
-    void DrawUnitSprite(Texture2D sprite, Vector2 feet, float r)
+    void DrawUnitSprite(Texture2D sprite, Vector2 feet, float r, Color modulate)
     {
         var texSize = sprite.GetSize();
         float drawH = r * 4.6f;
         float drawW = drawH * texSize.X / texSize.Y;
         var dst = new Rect2(feet.X - drawW * 0.5f, feet.Y - drawH + r * 0.6f, drawW, drawH);
-        DrawTextureRect(sprite, dst, false);
+        DrawTextureRect(sprite, dst, false, modulate);
+    }
+
+    // The fallen, mid-topple or settled-and-fading. Drawn on the ground under the
+    // living. A corpse in ground that has slipped back into fog is hidden, the
+    // same rule the death sound and every enemy sprite follow.
+    void DrawCorpses()
+    {
+        if (_art == null) return;
+        foreach (var c in _corpses)
+        {
+            int tx = Mathf.RoundToInt(c.Feet.X), ty = Mathf.RoundToInt(c.Feet.Y);
+            if (!Lit(tx, ty)) continue;
+
+            int n = _art.FrameCount(c.Design, SpriteBank.Anim.Death);
+            if (n <= 0) continue;
+
+            // Play through the topple frames over DeathPlaySec and hold the last;
+            // then fade that settled body out over DeathFadeSec.
+            float playT = Mathf.Clamp(c.Age / DeathPlaySec, 0f, 1f);
+            int frame = Mathf.Min(n - 1, (int)(playT * n));
+            float alpha = c.Age <= DeathPlaySec ? 1f
+                        : 1f - Mathf.Clamp((c.Age - DeathPlaySec) / DeathFadeSec, 0f, 1f);
+
+            var sprite = _art.Unit(c.Design, c.Facing, SpriteBank.Anim.Death, frame);
+            if (sprite != null)
+                DrawUnitSprite(sprite, c.Feet * PxPerUnit, 6f, new Color(1, 1, 1, alpha));
+        }
     }
 
     // A small health bar above a damaged unit: red track, green fill.

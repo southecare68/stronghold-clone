@@ -118,9 +118,10 @@ and `=` set the volume.
 trick the classic isometric RTS used: render each model once from a fixed 3/4
 view into a PNG, then draw flat sprites and never touch a mesh at runtime. Units
 carry eight facings and animate — the models ship no animation clips, so the walk
-cycle and standing pose are authored by posing the rigged skeleton at bake time
-(which also lifts the models out of their T-pose). They idle when still and walk
-when moving; terrain is textured grass, rock and marsh. The sprites live
+cycle, attack swing, death topple and standing pose are authored by posing the
+rigged skeleton at bake time (which also lifts the models out of their T-pose).
+Units idle when still, walk when moving, swing while fighting, and topple and fade
+where they fall; terrain is textured grass, rock and marsh. The sprites live
 in `game/Art/` (small, committed); the multi-gigabyte source packs do not (see
 `tools/bake/` for how they are produced). If the sprites are absent the game
 draws its original coloured shapes instead, so it runs the same with or without
