@@ -122,7 +122,9 @@
       "Bash(screencapture -x -o cam-default.png)",
       "Bash(sips -c 720 720 --cropOffset 80 80 cam-default.png --out cam-default-crop.png)",
       "Bash(screencapture -x -o full.png)",
-      "Bash(sips -c 720 720 --cropOffset 80 80 full.png --out full-crop.png)"
+      "Bash(sips -c 720 720 --cropOffset 80 80 full.png --out full-crop.png)",
+      "Bash(screencapture -x -o mm1.png)",
+      "Bash(sips -c 220 220 --cropOffset 590 590 mm1.png --out mm1-crop.png)"
     ]
   }
 }

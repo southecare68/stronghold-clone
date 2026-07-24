@@ -66,7 +66,8 @@ Units that pile onto the same spot fan out on screen (a render-only effect; the
 simulation is untouched).
 
 Mouse wheel zooms (toward the cursor), and middle-drag or the arrow keys pan the
-camera around the map.
+camera around the map. A minimap in the bottom-right shows the whole battlefield
+with your current view outlined — click it to jump the camera there.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That

@@ -564,10 +564,19 @@ melee unit must move in. Verified live: archers loosed yellow arrows at the enem
 from range and killed a unit. (Range's point WEIGHT is unchanged — 1 pt/half-tile
 — so if archers prove too strong, bump the weight in `UnitDesign.PointCost`.)
 
+✅ **Minimap.** Bottom-right panel showing the whole battlefield — terrain,
+resource nodes, buildings and units — plus a **viewport rectangle** that tracks
+the camera and shrinks as you zoom in, clipped to the panel so it never spills
+outside. **Click it to jump the camera** there; the click is hit-tested in screen
+space before any gameplay click, so it never orders units, and it works while
+watching a replay. Drawn after resetting the camera transform
+(`DrawSetTransform(identity)`), which is what keeps it pinned to the corner at
+any zoom. Engine-layer only — no sim or test changes.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; a real map/level
-   beyond `TileMap.Demo` (now that there's a camera, maps can be bigger than the
-   window); sound; menus; minimap.
+   beyond `TileMap.Demo` (now that there's a camera and minimap, maps can be
+   much bigger than the window); sound; menus; unit/building selection panels.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

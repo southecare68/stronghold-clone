@@ -131,6 +131,12 @@ public partial class Main : Node2D
     readonly List<Projectile> _projectiles = new();
     static readonly int RangedShotDist = Fixed.FromInt(2);   // shots longer than this get an arrow
 
+    // ---- Minimap ------------------------------------------------------------
+    // Drawn in SCREEN space (the camera transform is reset first), so it stays
+    // pinned to the corner at any zoom. Shows the whole battlefield, the current
+    // view as a rectangle, and jumps the camera when clicked.
+    const float MiniSize = 160f, MiniMargin = 10f;
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -568,6 +574,19 @@ public partial class Main : Node2D
             if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelDown) { ZoomAt(1f / 1.1f, mb.Position);  QueueRedraw(); return; }
             if (mb.ButtonIndex == MouseButton.Middle)                 { _panning = mb.Pressed;            return; }
 
+            // Clicking the minimap jumps the camera there — checked in SCREEN
+            // space (the panel doesn't move with the camera) and before any
+            // gameplay click, so a click on the panel never orders units.
+            if (mb.Pressed && MinimapRect().HasPoint(mb.Position))
+            {
+                var r = MinimapRect();
+                var rel = (mb.Position - r.Position) / r.Size;      // 0..1 across the panel
+                _camCenter = new Vector2(rel.X * _shown.Map.Width, rel.Y * _shown.Map.Height) * PxPerUnit;
+                ClampCamera();
+                QueueRedraw();
+                return;
+            }
+
             if (_replayMode) return;   // no orders while watching a replay
             var at = ScreenToCanvas(mb.Position);
 
@@ -759,6 +778,10 @@ public partial class Main : Node2D
             DrawRect(r, new Color(1, 1, 1, 0.15f), true);
             DrawRect(r, new Color(1, 1, 1, 0.6f), false, 1f);
         }
+
+        // Back to screen space for anything pinned to the display.
+        DrawSetTransform(Vector2.Zero, 0f, Vector2.One);
+        DrawMinimap();
     }
 
     // Ground is one background rect; only water/rock/marsh are drawn per tile, so
@@ -998,6 +1021,68 @@ public partial class Main : Node2D
             _projectiles[i].Age += (float)delta;
             if (_projectiles[i].Age >= _projectiles[i].Life) _projectiles.RemoveAt(i);
         }
+    }
+
+    // The minimap panel, in screen coordinates, pinned to the bottom-right.
+    Rect2 MinimapRect()
+    {
+        var vp = GetViewportRect().Size;
+        return new Rect2(vp.X - MiniSize - MiniMargin, vp.Y - MiniSize - MiniMargin, MiniSize, MiniSize);
+    }
+
+    // The whole battlefield at a glance. Called AFTER the camera transform has
+    // been reset, so all of this is screen-space and never pans or zooms.
+    void DrawMinimap()
+    {
+        var map = _shown.Map;
+        var r = MinimapRect();
+        float sx = r.Size.X / map.Width, sy = r.Size.Y / map.Height;
+        var cell = new Vector2(Mathf.Ceil(sx), Mathf.Ceil(sy));   // ceil so tiles leave no gaps
+
+        Vector2 At(float tileX, float tileY) => r.Position + new Vector2(tileX * sx, tileY * sy);
+
+        // Terrain: ground as the base, then only the tiles that differ.
+        DrawRect(r, GroundColor);
+        for (int y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width; x++)
+            {
+                var t = map.At(x, y);
+                if (t == Terrain.Ground) continue;
+                DrawRect(new Rect2(At(x, y), cell), t switch
+                {
+                    Terrain.Water => WaterColor,
+                    Terrain.Rock => RockColor,
+                    _ => MarshColor,
+                });
+            }
+
+        foreach (var n in _shown.Nodes)
+            DrawRect(new Rect2(At(n.X, n.Y), cell), ResourceColor(n.Type));
+
+        foreach (var b in _shown.Buildings)
+            DrawRect(new Rect2(At(b.X, b.Y), new Vector2(b.W * sx, b.H * sy)),
+                     b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f));
+
+        foreach (var u in _shown.Units)
+        {
+            var p = At(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
+            DrawRect(new Rect2(p - Vector2.One, new Vector2(3, 3)),
+                     u.Owner == 1 ? new Color(0.45f, 0.8f, 1f) : new Color(1f, 0.55f, 0.45f));
+        }
+
+        // Where the camera is looking, in tiles.
+        var vp = GetViewportRect().Size;
+        var halfTiles = vp / (2f * _camZoom * PxPerUnit);
+        var centreTiles = _camCenter / PxPerUnit;
+        var view = new Rect2(At(centreTiles.X - halfTiles.X, centreTiles.Y - halfTiles.Y),
+                             new Vector2(halfTiles.X * 2f * sx, halfTiles.Y * 2f * sy));
+        // Clipped to the panel: near a map edge the view runs past the map, and an
+        // outline spilling outside the minimap looks like a rendering bug.
+        view = view.Intersection(r);
+        if (view.Size.X > 0 && view.Size.Y > 0)
+            DrawRect(view, new Color(1, 1, 1, 0.85f), false, 1f);
+
+        DrawRect(r, new Color(1, 1, 1, 0.35f), false, 1f);   // frame, on top
     }
 
     // Drawn in world-pixel space (under the camera transform): a small head with a
