@@ -294,6 +294,42 @@ namespace Sim
             _pathFinder = new PathFinder(Map);
             _rng = new Rng(seed);
             _designs.Add(UnitDesign.DefaultSoldier());   // design 0, always present
+            Fog = new Vision(Map);
+        }
+
+        // ---- Fog of war -------------------------------------------------------
+        // Per-player sight. `Fog.Explored` is accumulated game state (hashed,
+        // snapshotted); `Fog.IsVisible` is derived from current positions and is
+        // rebuilt at the top of every Tick. See Vision.cs.
+        //
+        // FogEnabled exists because fog CHANGES WHAT ORDERS ARE LEGAL, and a
+        // great deal of this project's verification — the parity scenario, the
+        // combat and economy suites — was written against a sim with no fog, in
+        // scenarios that place units far apart and order them at each other
+        // immediately. Turning fog on globally would silently rewrite what those
+        // tests are testing. So it is opt-in, exactly like every other feature
+        // that can change a checksum: off, the simulation behaves precisely as it
+        // did before, and 0xB1A7A676 is untouched.
+        public Vision Fog;
+        public bool FogEnabled;
+
+        // Can this player act on that spot at all? With fog off, everything is
+        // both seen and known — which is what keeps every pre-fog scenario intact.
+        public bool CanSee(int owner, int x, int y) => !FogEnabled || Fog.IsVisible(owner, x, y);
+        public bool HasExplored(int owner, int x, int y) => !FogEnabled || Fog.IsExplored(owner, x, y);
+        public bool CanSeeUnit(int owner, Unit u) => CanSee(owner, Fixed.ToInt(u.X), Fixed.ToInt(u.Y));
+
+        // A building is bigger than a tile and does not move: knowing where a
+        // wall stands is knowledge you keep. So a structure counts as known once
+        // ANY of its footprint has been explored — you may besiege a keep you
+        // scouted an hour ago, which is how the genre has always worked.
+        public bool HasExploredBuilding(int owner, Building b)
+        {
+            if (!FogEnabled) return true;
+            for (int y = b.Y; y < b.Y + b.H; y++)
+                for (int x = b.X; x < b.X + b.W; x++)
+                    if (Fog.IsExplored(owner, x, y)) return true;
+            return false;
         }
 
         // ---- Unit designs (point-buy) ----------------------------------------
@@ -335,7 +371,8 @@ namespace Sim
                             int nextNodeId, IReadOnlyList<ResourceNode> nodes,
                             IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff,
                             int nextBuildingId, IReadOnlyList<Building> buildings,
-                            IReadOnlyList<UnitDesign> designs)
+                            IReadOnlyList<UnitDesign> designs,
+                            bool fogEnabled = false, IReadOnlyDictionary<int, uint[]> explored = null)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
@@ -373,13 +410,23 @@ namespace Sim
                 // gateway as a solid wall.
                 BlockFootprint(copy, !(copy.Type == BuildingType.Gatehouse && copy.Open));
             }
+
+            // Fog: adopt what the sender had EXPLORED, then rebuild what is
+            // currently VISIBLE from the units we were just handed. Copying the
+            // visible set instead would be the same mistake as copying the
+            // footprint blocking — carrying over derived state that the local
+            // world should be deriving for itself.
+            FogEnabled = fogEnabled;
+            Fog.RestoreExplored(explored);
+            if (FogEnabled) Fog.RecomputeVisible(Units, Buildings);
         }
 
         // Restore straight from a snapshot object — the same unpacking every
         // caller was doing by hand.
         public void Restore(MatchSnapshot s) =>
             Restore(s.Tick, s.NextUnitId, s.RngState, s.Units, s.NextNodeId, s.Nodes,
-                    s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs);
+                    s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs,
+                    s.FogEnabled, s.Explored);
 
         // A complete, standalone snapshot of the simulation's state right now — no
         // network bookkeeping (no pending turns). This is what a rejoin adopts and
@@ -413,6 +460,8 @@ namespace Sim
                 Designs = designs,
                 Stock = stock,
                 DropOffs = drops,
+                FogEnabled = FogEnabled,
+                Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
         }
@@ -548,6 +597,11 @@ namespace Sim
                     // Only a living enemy is a valid target; a bad id is ignored
                     // rather than left to poison the combat phase.
                     if (target == null || !target.Alive || target.Owner == cmd.Owner) break;
+                    // And only one you can actually SEE. This is the rule that
+                    // makes fog worth having: without it a client could order a
+                    // strike on a unit hidden behind the ridge, which is exactly
+                    // the maphack the whole feature exists to prevent.
+                    if (!CanSeeUnit(cmd.Owner, target)) break;
                     foreach (var id in cmd.UnitIds)
                     {
                         var u = Units.Find(v => v.Id == id);
@@ -565,6 +619,10 @@ namespace Sim
                     // be besieged; your own (and a bad id) is ignored.
                     var wall = Buildings.Find(x => x.Id == cmd.TargetId);
                     if (wall == null || !wall.Alive || wall.Owner == cmd.Owner) break;
+                    // Explored, not visible: a structure you have scouted stays
+                    // on your map, and marching on a keep you saw an hour ago is
+                    // the whole point of scouting.
+                    if (!HasExploredBuilding(cmd.Owner, wall)) break;
                     foreach (var id in cmd.UnitIds)
                     {
                         var u = Units.Find(v => v.Id == id);
@@ -583,6 +641,10 @@ namespace Sim
                     // load it hauls would have nowhere to go.
                     var node = Nodes.Find(n => n.Id == cmd.TargetId);
                     if (node == null || !_dropOff.ContainsKey(cmd.Owner)) break;
+                    // Explored is the right test again: a wood you have found is
+                    // a wood you can keep working, whether or not anyone of yours
+                    // is standing there this instant.
+                    if (!HasExplored(cmd.Owner, node.X, node.Y)) break;
                     foreach (var id in cmd.UnitIds)
                     {
                         var u = Units.Find(v => v.Id == id);
@@ -604,6 +666,10 @@ namespace Sim
                     var type = (BuildingType)cmd.TargetId;
                     if ((int)type < 0 || (int)type >= BuildCost.Length) break;
                     if (!CanPlace(type, cmd.X, cmd.Y) || !CanAfford(cmd.Owner, BuildCost[(int)type])) break;
+                    // No building on ground you have never laid eyes on. Checked
+                    // over the whole footprint, so a keep cannot be half-planted
+                    // in the dark.
+                    if (!ExploredFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
                     Pay(cmd.Owner, BuildCost[(int)type]);
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
                     break;
@@ -633,6 +699,15 @@ namespace Sim
                     BlockFootprint(gate, !gate.Open);
                     break;
             }
+        }
+
+        bool ExploredFootprint(int owner, BuildingType type, int x, int y)
+        {
+            if (!FogEnabled) return true;
+            for (int ty = y; ty < y + FootH[(int)type]; ty++)
+                for (int tx = x; tx < x + FootW[(int)type]; tx++)
+                    if (!Fog.IsExplored(owner, tx, ty)) return false;
+            return true;
         }
 
         bool CanAfford(int owner, IReadOnlyList<int> cost)
@@ -732,6 +807,12 @@ namespace Sim
         public void Tick(IReadOnlyList<Command> commands)
         {
             ShotsThisTick.Clear();   // transient render log; nothing here is game state
+
+            // Sight FIRST, so a command is judged against the world as the player
+            // could last have seen it — and at the same point in the sequence on
+            // every machine. Doing it after the commands would mean an order was
+            // legal or not depending on where the move it triggered ended up.
+            if (FogEnabled) Fog.Update(Units, Buildings);
 
             var ordered = new List<Command>(commands);
             ordered.Sort(CanonicalOrder); // same order on every machine
@@ -1009,6 +1090,17 @@ namespace Sim
         // Nearest living enemy within aggro range, ties broken by id so every
         // machine acquires the same one. No RNG here — acquisition is pure
         // geometry, only the damage roll is random.
+        //
+        // With fog on, an enemy your side cannot see is not a candidate — the
+        // gate on the Attack command would be pointless if units then auto-locked
+        // onto whatever was hiding behind the ridge. Note this reads the OWNER's
+        // sight, not the individual unit's: an army shares what its scouts see,
+        // which is both how the genre works and cheaper than per-unit vision.
+        //
+        // A target already engaged is NOT dropped when it slips into fog. Units
+        // chase what they are fighting; a soldier that forgot its opponent the
+        // instant it stepped behind a rock would look broken, and "you may not
+        // START a fight you cannot see" is the rule that actually matters.
         Unit AcquireNearestEnemy(Unit u)
         {
             Unit best = null;
@@ -1016,6 +1108,7 @@ namespace Sim
             foreach (var v in Units)
             {
                 if (v.Owner == u.Owner || !v.Alive) continue;
+                if (!CanSeeUnit(u.Owner, v)) continue;
                 int dist = Fixed.VLen(v.X - u.X, v.Y - u.Y);
                 if (dist > AggroRange) continue;
                 if (dist < bestDist) { bestDist = dist; best = v; }
@@ -1158,6 +1251,13 @@ namespace Sim
                 Mix(b.BuildTimer);
                 Mix(b.Open ? 1 : 0);
             }
+
+            // Fog. Only the EXPLORED half — see Vision.cs for why the currently
+            // visible half is deliberately left out. Two machines that disagree
+            // about whether fog is even on would disagree about which orders are
+            // legal, so the flag itself is hashed too.
+            Mix(FogEnabled ? 1 : 0);
+            if (FogEnabled) Fog.MixInto(Mix);
             return h;
         }
 

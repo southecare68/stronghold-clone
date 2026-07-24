@@ -70,6 +70,14 @@ namespace Sim
         public Dictionary<int, int[]> Stock = new();       // owner -> per-resource amounts
         public Dictionary<int, Tile> DropOffs = new();     // owner -> drop-off tile
 
+        // Fog of war. Only the EXPLORED bitsets travel — what a player can see
+        // right now is derived from where their units stand, so the rejoiner
+        // recomputes it rather than trusting a copy. What they have EVER seen
+        // cannot be derived from anything: it is the whole history of the match,
+        // and without it a returning player would find their own map blank.
+        public bool FogEnabled;
+        public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
+
         // Turns the sender has ALREADY published for ticks at or after Tick.
         // Input delay means a client commits to turns several ticks ahead, and it
         // will not send them again — without these the rejoiner would wait

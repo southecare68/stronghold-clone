@@ -43,13 +43,18 @@ namespace Sim
         // Where the resource nodes go. Two safe patches behind each base, and a
         // contested pair out by the northern and southern passes — the only
         // reason to leave home early.
+        //
+        // The home patches are deliberately inside the keep's opening sight
+        // radius. With fog on, a node you cannot see is a node you cannot order a
+        // worker to, and a start where both players must scout their own back
+        // yard before they may gather is just a delay, not a decision.
         public static IEnumerable<(ResourceType Type, int X, int Y, int Amount)> Nodes(int size)
         {
             int w = West(size), e = East(size), m = MidY(size);
-            yield return (ResourceType.Wood, w + 6, m - 10, 400);
-            yield return (ResourceType.Stone, w + 6, m + 10, 400);
-            yield return (ResourceType.Wood, e - 4, m - 10, 400);
-            yield return (ResourceType.Stone, e - 4, m + 10, 400);
+            yield return (ResourceType.Wood, w + 6, m - 8, 400);
+            yield return (ResourceType.Stone, w + 6, m + 8, 400);
+            yield return (ResourceType.Wood, e - 4, m - 8, 400);
+            yield return (ResourceType.Stone, e - 4, m + 8, 400);
             yield return (ResourceType.Wood, size / 2 - 8, size * 25 / 100, 500);
             yield return (ResourceType.Stone, size / 2 + 6, size * 75 / 100, 500);
         }
@@ -60,6 +65,12 @@ namespace Sim
         public static void Setup(Simulation sim, int size = DefaultSize)
         {
             int w = West(size), e = East(size), m = MidY(size);
+
+            // Fog of war on. It is opt-in at the sim level so the older suites
+            // keep testing what they were written to test, and this is the switch
+            // that turns it on for an actual match. Set BEFORE anything is placed
+            // so both machines agree from tick 0.
+            sim.FogEnabled = true;
 
             // Mirrored starting parties, either side of the ridge.
             sim.SpawnUnit(1, w + 4, m - 2);

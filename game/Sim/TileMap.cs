@@ -159,6 +159,47 @@ namespace Sim
         public bool HasClearRun(int x0, int y0, int x1, int y1) =>
             TraceLine(x0, y0, x1, y1, groundOnly: true);
 
+        // Does this tile stop you SEEING past it? Deliberately not the same
+        // question as Passable. A lake is impassable but you can see clean across
+        // it; rock is what actually hides an army. Buildings are excluded too —
+        // making walls opaque sounds right until your own castle blinds you, and
+        // it would mean a player could darken their opponent's view by building.
+        //
+        // Off-map counts as blocking so a trace that wanders out cannot read past
+        // the edge.
+        public bool BlocksSight(int x, int y) =>
+            !InBounds(x, y) || _tiles[Index(x, y)] == Terrain.Rock;
+
+        // Can a watcher at one tile see another? Same integer Bresenham as the
+        // other traces, so it is exactly reproducible on every machine — vision
+        // gates orders, which makes it game state, which makes "close enough"
+        // a desync.
+        //
+        // Only the tiles BETWEEN the two are tested: standing on rock you can
+        // still see out, and a rock face is itself visible from in front of it.
+        // No corner rule here — sight squeezing diagonally past a corner is
+        // realistic, where a unit's body squeezing through one is not.
+        public bool HasSightLine(int x0, int y0, int x1, int y1)
+        {
+            if (!InBounds(x0, y0) || !InBounds(x1, y1)) return false;
+
+            int dx = Math.Abs(x1 - x0);
+            int dy = Math.Abs(y1 - y0);
+            int sx = x0 < x1 ? 1 : -1;
+            int sy = y0 < y1 ? 1 : -1;
+            int err = dx - dy;
+            int x = x0, y = y0;
+
+            while (true)
+            {
+                int e2 = 2 * err;
+                if (e2 > -dy) { err -= dy; x += sx; }
+                if (e2 < dx) { err += dx; y += sy; }
+                if (x == x1 && y == y1) return true;
+                if (BlocksSight(x, y)) return false;
+            }
+        }
+
         bool TraceLine(int x0, int y0, int x1, int y1, bool groundOnly)
         {
             if (!Passable(x0, y0) || !Passable(x1, y1)) return false;

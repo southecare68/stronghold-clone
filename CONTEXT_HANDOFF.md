@@ -29,7 +29,9 @@ than mod the closed 2006 engine, which was too limiting.
   hazard is demonstrated (`node test/float-hazard.test.js`). This is the
   reference behaviour.
 - `game/Sim/` — the C# port of that verified core: `Fixed.cs`, `Simulation.cs`,
-  `Lockstep.cs` (turns, input delay, stalling, snapshots, the `ITransport` seam).
+  `Lockstep.cs` (turns, input delay, stalling, snapshots, the `ITransport` seam),
+  plus `TileMap.cs`, `PathFinder.cs`, `Vision.cs` (fog) and `Skirmish.cs` (the
+  1v1 start).
   **Built and verified** — see `tests/SimParity`.
 - `game/Net/` — engine-agnostic protocol, Godot-free like `Sim/` so it is
   testable with plain `dotnet`: `Wire.cs` (turn/snapshot serialization),
@@ -54,6 +56,7 @@ than mod the closed 2006 engine, which was too limiting.
   - `Siege/` — destructible buildings, breaching, two-client sync, rejoin
   - `PointBuy/` — data-driven unit designs, budget, stat effects, sync, rejoin
   - `Replay/` — record a match, replay it bit-for-bit, save/load
+  - `Fog/` — fog of war: sight, explored memory, and the orders they gate
 
 ## Toolchain on the Mac Studio (nothing is on PATH — use full paths)
 - Godot 4.7.1 .NET: `~/Downloads/Godot_mono.app/Contents/MacOS/Godot`
@@ -541,7 +544,7 @@ RTS is feature-complete against the original brief.
 deterministic, cross-architecture multiplayer castle RTS: economy, buildings,
 combat, siege, working gatehouses, a custom point-buy roster, rejoin, desync
 detection, and replays — proven bit-identical on ARM and x86 both headlessly
-(SimParity) and in a **live windowed ENet match** between the two machines. 13
+(SimParity) and in a **live windowed ENet match** between the two machines. 14
 Godot-free test suites guard it all; `0xB1A7A676` still holds.
 
 ✅ **Camera (pan & zoom)** added, engine-layer only. Mouse wheel zooms toward the
@@ -617,6 +620,71 @@ and far larger than the window, which is what the camera and minimap were for).
   and held it — `IN SYNC ✓` at tick 3339, keeping full 20 Hz throughout.
 - Sim-side additions only ever *add* state when used, so `0xB1A7A676` holds and
   all 13 suites pass.
+
+✅ **Fog of war — a rule, not a screen effect.** The fork here was real and went
+to the user: render-only fog (cheap, checksum-free, but a modified client sees
+everything and you can still order attacks into the dark) versus fog in the
+simulation. **Sim-level with order gating was chosen.**
+
+- `Sim/Vision.cs` splits the two things both called "fog":
+  - **Explored** — every tile a player has EVER seen. Accumulates, never clears.
+    Genuine accumulated state: it depends on the whole history of the match, two
+    machines could disagree, and it gates orders. So it is **hashed into
+    StateChecksum and travels in a MatchSnapshot**. Stored as one bit per tile
+    (512 uint words for a 128x128 map, per player).
+  - **Visible** — what a player can see right now. A pure function of where their
+    units and buildings stand, so two machines agreeing on positions cannot
+    disagree about it. Rebuilt at the top of every Tick and deliberately **not**
+    hashed and **not** snapshotted — hashing derived state adds no detection
+    power and only invites an ordering bug.
+- **Sight is blocked by rock, not by "impassable".** New `TileMap.HasSightLine`
+  (integer Bresenham, same family as the existing traces) blocks on rock only:
+  a lake is impassable but you can see clean across it. Buildings are excluded
+  too — opaque walls sound right until your own castle blinds you, and it would
+  let a player darken their opponent's view by building. This is what makes the
+  skirmish ridge more than decoration.
+- **What it gates:** Attack needs the target VISIBLE; AttackBuilding, Gather and
+  Build need the ground EXPLORED (a structure or a wood you scouted stays known —
+  that is the point of scouting). Move is never gated, or you could not scout at
+  all. `AcquireNearestEnemy` skips what the owner cannot see, but a target already
+  engaged is NOT dropped when it slips into fog — a soldier that forgot its
+  opponent the instant it stepped behind a rock would look broken.
+- **`FogEnabled` is opt-in, like every other checksum-affecting feature.** Fog
+  changes which orders are legal, and the older suites were written against a sim
+  without it, in scenarios that place units far apart and order them at each other
+  immediately. Turning it on globally would silently rewrite what those tests
+  test. `Skirmish.Setup` switches it on for real matches; the flag itself is
+  hashed, since two machines disagreeing about it would disagree about legality.
+- **The bug this shook out:** `Restore` first recomputed visibility with
+  accumulation on. Exploration folds in at the TOP of a tick, so by snapshot time
+  the units have since moved — the rejoiner ended up knowing a sliver more of the
+  map than the sender. Split into `Update` (accumulates) and `RecomputeVisible`
+  (does not); restore uses the latter.
+- **Renderer** (`Main.cs`): unexplored black, remembered dimmed, visible clear;
+  enemy units hidden unless visible; enemy buildings and resource patches
+  remembered once explored; arrows only when an end of the shot is in sight; the
+  same rules on the minimap, whose fog layer is a tile-per-pixel texture rebuilt
+  at the TICK rate, not the frame rate. Click hit-testing uses the same tests, so
+  a right-click on a hidden enemy falls through to a move order. `F` reveals the
+  map — display only, and no fog at all in a replay, which is watched from
+  outside the match.
+- **The layout bug fog exposed:** the home resource patches sat just outside the
+  keep's opening sight, so neither player could gather until they had scouted
+  their own back yard. Moved to ±8 tiles; `tests/Fog` now pins "both players open
+  with two workable patches, and the contested ones still have to be found".
+- `tests/Fog` (14th suite): sight geometry is round not square, rock blocks sight
+  and water does not, explored accumulates while visible does not, every gated
+  order is refused and then accepted once seen, aggro does not reach through
+  rock, two clients agree for 400 ticks with fog on, wiping one client's memory
+  IS caught by StateChecksum, explored survives snapshot and the wire bit for
+  bit, a truncated snapshot is refused, and a fogged match replays exactly.
+- Verified live: opening view is your base disc alone with both home patches
+  workable; scouting leaves a corridor of remembered ground in a visibly
+  different shade; the sight disc **clips flat against the ridge** with the rock
+  face visible and everything behind it black; `F` reveals the map and a
+  right-click on an enemy then produces an Attack that **the simulation refuses**
+  — the units do not move; moving into unexplored dark still works. `IN SYNC ✓`
+  at tick 5175, full 20 Hz throughout.
 
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; more maps (the

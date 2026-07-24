@@ -35,6 +35,10 @@ namespace Netcode
         const int MaxUnitsPerCommand = 4096;
         const int MaxUnits = 65536;
         const int MaxPendingTurns = 1024;
+        // One bit per tile, so this caps a map at 4096x4096 — far past anything
+        // playable, and small enough that a hostile packet cannot make us
+        // allocate a gigabyte.
+        const int MaxExploredWords = 4096 * 4096 / 32;
 
         // What kind of message is this, if any? Returns null for anything we
         // cannot identify, so callers can drop it without parsing further.
@@ -211,6 +215,19 @@ namespace Netcode
                 PutInt(buf, kv.Value.Y);
             }
 
+            // Fog: the explored bitsets, one run of 32-bit words per owner. On a
+            // 128x128 map that is 512 words (2 KB) each — easily the largest part
+            // of a snapshot, and unavoidable: what a player has seen cannot be
+            // recomputed from anything else. Only sent on rejoin, never per turn.
+            PutInt(buf, snap.FogEnabled ? 1 : 0);
+            PutInt(buf, snap.Explored.Count);
+            foreach (var kv in snap.Explored)
+            {
+                PutInt(buf, kv.Key);
+                PutInt(buf, kv.Value.Length);
+                foreach (uint w in kv.Value) PutUInt(buf, w);
+            }
+
             PutInt(buf, snap.PendingTurns.Length);
             foreach (var turn in snap.PendingTurns) WriteTurn(buf, turn);
 
@@ -372,6 +389,21 @@ namespace Netcode
                     drops[owner] = new Tile(GetInt(data, ref p), GetInt(data, ref p));
                 }
                 snap.DropOffs = drops;
+
+                snap.FogEnabled = GetInt(data, ref p) != 0;
+                int fogCount = GetInt(data, ref p);
+                if (fogCount < 0 || fogCount > MaxUnits) return null;
+                var explored = new Dictionary<int, uint[]>();
+                for (int i = 0; i < fogCount; i++)
+                {
+                    int owner = GetInt(data, ref p);
+                    int len = GetInt(data, ref p);
+                    if (len < 0 || len > MaxExploredWords) return null;
+                    var words = new uint[len];
+                    for (int j = 0; j < len; j++) words[j] = GetUInt(data, ref p);
+                    explored[owner] = words;
+                }
+                snap.Explored = explored;
 
                 int turnCount = GetInt(data, ref p);
                 if (turnCount < 0 || turnCount > MaxPendingTurns) return null;

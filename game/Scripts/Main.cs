@@ -140,6 +140,39 @@ public partial class Main : Node2D
     // once and blitted each frame — far cheaper than drawing 16k rects.
     ImageTexture _miniTerrain;
 
+    // ---- Fog of war (the DRAWING half) --------------------------------------
+    // The rule lives in the simulation (Sim/Vision.cs) — what you may attack,
+    // gather and build on. This is only the picture of it: unexplored ground is
+    // black, ground you have seen but cannot see now is dimmed and shows what you
+    // remember (terrain, buildings, resource patches) but no live enemies, and
+    // ground in sight is drawn in full.
+    //
+    // Deliberately NOT shown in a replay: a replay is watched from outside the
+    // match, and re-fogging it to one player's view would hide the very thing
+    // you replayed it to look at. Press F to check the other reading anyway.
+    bool _fogView = true;
+    bool FogOn => _shown != null && _shown.FogEnabled && _fogView && !_replayMode;
+
+    bool Lit(int x, int y) => !FogOn || _shown.Fog.IsVisible(_myPlayer, x, y);
+    bool Known(int x, int y) => !FogOn || _shown.Fog.IsExplored(_myPlayer, x, y);
+    bool LitUnit(Unit u) => !FogOn || _shown.Fog.IsVisible(_myPlayer, Fixed.ToInt(u.X), Fixed.ToInt(u.Y));
+
+    bool KnownBuilding(Building b)
+    {
+        if (!FogOn) return true;
+        for (int y = b.Y; y < b.Y + b.H; y++)
+            for (int x = b.X; x < b.X + b.W; x++)
+                if (_shown.Fog.IsExplored(_myPlayer, x, y)) return true;
+        return false;
+    }
+
+    // The minimap's fog layer. Rebuilt only when the sim ticks (20 Hz at most),
+    // as one byte array handed to Godot in a single call — per-pixel SetPixel
+    // over 16k tiles every frame would not be affordable.
+    ImageTexture _miniFog;
+    byte[] _fogPixels;
+    int _fogBakedTick = -1;
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -358,6 +391,7 @@ public partial class Main : Node2D
             _accum = 0;
             _alpha = 0f;
             LogDesyncOnce();
+            UpdateMinimapFog();
             _hud.Text = BuildHud();
             QueueRedraw();
             return;
@@ -403,6 +437,7 @@ public partial class Main : Node2D
 
         AgeProjectiles(delta);
         ComputeSeparation();
+        UpdateMinimapFog();
         LogDesyncOnce();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -481,7 +516,10 @@ public partial class Main : Node2D
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
                "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
-               "\nright-click your barracks to train, gate to open/close, enemy to attack";
+               "\nright-click your barracks to train, gate to open/close, enemy to attack" +
+               (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
+                                    "  — you cannot attack, gather or build where you cannot see"
+                                  : "");
     }
 
     // Announced once a side has no units left. The sim keeps ticking (harmless —
@@ -623,6 +661,10 @@ public partial class Main : Node2D
                 case Key.Right: _camCenter += new Vector2(step, 0);  ClampCamera(); QueueRedraw(); return;
                 case Key.Up:    _camCenter += new Vector2(0, -step);  ClampCamera(); QueueRedraw(); return;
                 case Key.Down:  _camCenter += new Vector2(0, step);   ClampCamera(); QueueRedraw(); return;
+                // Reveal the whole map. A DISPLAY switch only — it cannot show
+                // you anything the simulation would let you act on, because the
+                // orders are gated in Sim/Vision.cs, not here.
+                case Key.F: _fogView = !_fogView; _fogBakedTick = -1; QueueRedraw(); return;
             }
 
             if (_replayMode) return;
@@ -649,7 +691,7 @@ public partial class Main : Node2D
         float bestD2 = 12f * 12f;      // within ~one unit radius of the click
         foreach (var u in _shown.Units)
         {
-            if (u.Owner == _myPlayer) continue;
+            if (u.Owner == _myPlayer || !LitUnit(u)) continue;
             float d2 = WorldToScreen(u).DistanceSquaredTo(screen);
             if (d2 < bestD2) { bestD2 = d2; best = u; }
         }
@@ -669,6 +711,7 @@ public partial class Main : Node2D
         foreach (var b in _shown.Buildings)
         {
             if ((b.Owner == _myPlayer) != mine) continue;
+            if (!mine && !KnownBuilding(b)) continue;
             if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) return b;
         }
         return null;
@@ -693,6 +736,7 @@ public partial class Main : Node2D
         float bestD2 = 12f * 12f;
         foreach (var n in _shown.Nodes)
         {
+            if (!Known(n.X, n.Y)) continue;
             float d2 = (new Vector2(n.X, n.Y) * PxPerUnit).DistanceSquaredTo(screen);
             if (d2 < bestD2) { bestD2 = d2; best = n; }
         }
@@ -735,6 +779,11 @@ public partial class Main : Node2D
 
         foreach (var u in _shown.Units)
         {
+            // An enemy in fog simply is not there as far as the screen is
+            // concerned. Your own units always draw — you always know where your
+            // own army is, whatever it is standing in.
+            if (u.Owner != _myPlayer && !LitUnit(u)) continue;
+
             var p = WorldToScreen(u);
             var color = u.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
             // Radius scales with the design's HP, so a Brute reads as bigger than
@@ -749,6 +798,10 @@ public partial class Main : Node2D
             if (u.CarryAmount > 0)
                 DrawCircle(p + new Vector2(0, -8f), 2f, ResourceColor(u.CarryType));
         }
+        // Last, so it darkens everything drawn above it — terrain, buildings and
+        // any unit that happens to be standing in remembered ground.
+        DrawFog();
+
         if (_boxing)
         {
             var r = new Rect2(_boxStart, Vector2.Zero).Expand(_mouse).Abs();
@@ -771,16 +824,7 @@ public partial class Main : Node2D
                            new Vector2(map.Width * PxPerUnit, map.Height * PxPerUnit)),
                  GroundColor);
 
-        // Only the tiles actually on screen. On a 128x128 map that is a few
-        // hundred instead of sixteen thousand, every frame.
-        var vp = GetViewportRect().Size;
-        var half = vp / (2f * _camZoom * PxPerUnit);
-        var c = _camCenter / PxPerUnit;
-        int x0 = Mathf.Max(0, Mathf.FloorToInt(c.X - half.X) - 1);
-        int x1 = Mathf.Min(map.Width - 1, Mathf.CeilToInt(c.X + half.X) + 1);
-        int y0 = Mathf.Max(0, Mathf.FloorToInt(c.Y - half.Y) - 1);
-        int y1 = Mathf.Min(map.Height - 1, Mathf.CeilToInt(c.Y + half.Y) + 1);
-
+        var (x0, y0, x1, y1) = VisibleTiles();
         for (int y = y0; y <= y1; y++)
             for (int x = x0; x <= x1; x++)
             {
@@ -793,6 +837,42 @@ public partial class Main : Node2D
                              Terrain.Rock => RockColor,
                              _ => MarshColor,
                          });
+            }
+    }
+
+    // The tile range actually on screen. On a 128x128 map that is a few hundred
+    // tiles instead of sixteen thousand — worth having for the terrain, and
+    // essential for the fog, which is drawn tile by tile every frame.
+    (int, int, int, int) VisibleTiles()
+    {
+        var map = _shown.Map;
+        var half = GetViewportRect().Size / (2f * _camZoom * PxPerUnit);
+        var c = _camCenter / PxPerUnit;
+        return (Mathf.Max(0, Mathf.FloorToInt(c.X - half.X) - 1),
+                Mathf.Max(0, Mathf.FloorToInt(c.Y - half.Y) - 1),
+                Mathf.Min(map.Width - 1, Mathf.CeilToInt(c.X + half.X) + 1),
+                Mathf.Min(map.Height - 1, Mathf.CeilToInt(c.Y + half.Y) + 1));
+    }
+
+    // Two shades, and the difference between them is the whole point: solid black
+    // is ground you have never laid eyes on, and the softer veil is ground you
+    // scouted once — you still see the lie of the land and any building you found
+    // there, but not what is moving through it now.
+    static readonly Color Unexplored = new(0.04f, 0.04f, 0.06f, 1f);
+    static readonly Color Remembered = new(0.04f, 0.04f, 0.06f, 0.55f);
+
+    void DrawFog()
+    {
+        if (!FogOn) return;
+        var (x0, y0, x1, y1) = VisibleTiles();
+        var tile = new Vector2(PxPerUnit, PxPerUnit);
+
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+            {
+                if (_shown.Fog.IsVisible(_myPlayer, x, y)) continue;
+                DrawRect(new Rect2(TileCorner(x, y), tile),
+                         _shown.Fog.IsExplored(_myPlayer, x, y) ? Remembered : Unexplored);
             }
     }
 
@@ -830,6 +910,10 @@ public partial class Main : Node2D
     {
         foreach (var n in _shown.Nodes)
         {
+            // A patch you have found stays on your map even when nobody is
+            // watching it — its remaining amount is what you last saw, which is
+            // close enough and is how the genre has always played it.
+            if (!Known(n.X, n.Y)) continue;
             var center = new Vector2(n.X, n.Y) * PxPerUnit;
             float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
             DrawRect(new Rect2(center - new Vector2(s / 2f, s / 2f), new Vector2(s, s)),
@@ -844,6 +928,10 @@ public partial class Main : Node2D
         var stone = new Color(0.55f, 0.55f, 0.58f);
         foreach (var b in _shown.Buildings)
         {
+            // Structures do not move, so scouting one is knowledge you keep — the
+            // fog veil drawn over it afterwards is what marks it as remembered
+            // rather than observed.
+            if (b.Owner != _myPlayer && !KnownBuilding(b)) continue;
             var owner = b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
             var rect = new Rect2(TileCorner(b.X, b.Y),
                                  new Vector2(b.W * PxPerUnit, b.H * PxPerUnit));
@@ -906,6 +994,7 @@ public partial class Main : Node2D
     {
         foreach (var kv in _shown.DropOffs)
         {
+            if (kv.Key != _myPlayer && !Known(kv.Value.X, kv.Value.Y)) continue;
             var p = new Vector2(kv.Value.X, kv.Value.Y) * PxPerUnit;
             var c = kv.Key == 1 ? new Color(0.3f, 0.7f, 1f, 0.8f) : new Color(1f, 0.45f, 0.35f, 0.8f);
             DrawArc(p, 13f, 0, Mathf.Tau, 28, c, 2f);
@@ -1001,6 +1090,11 @@ public partial class Main : Node2D
         {
             int dist = Fixed.VLen(s.ToX - s.FromX, s.ToY - s.FromY);
             if (dist < RangedShotDist) continue;
+            // An arrow gives away a fight you cannot see. Show it only if either
+            // end of it is in sight — you do see the shaft land next to you even
+            // when whatever loosed it is still hidden.
+            if (!Lit(Fixed.ToInt(s.FromX), Fixed.ToInt(s.FromY)) &&
+                !Lit(Fixed.ToInt(s.ToX), Fixed.ToInt(s.ToY))) continue;
             _projectiles.Add(new Projectile
             {
                 From = new Vector2(s.FromX, s.FromY) / (float)Fixed.One * PxPerUnit,
@@ -1039,6 +1133,32 @@ public partial class Main : Node2D
         _miniTerrain = ImageTexture.CreateFromImage(img);
     }
 
+    // The minimap's fog layer: one pixel per tile, rebuilt only when the sim has
+    // actually ticked. Filling a byte array and handing it over in one call keeps
+    // this off the frame budget — 16k per-pixel calls at 60 fps would not.
+    void UpdateMinimapFog()
+    {
+        if (!FogOn) { _miniFog = null; _fogBakedTick = -1; return; }
+        if (_shown.TickNumber == _fogBakedTick && _miniFog != null) return;
+        _fogBakedTick = _shown.TickNumber;
+
+        var map = _shown.Map;
+        _fogPixels ??= new byte[map.Width * map.Height * 4];
+
+        for (int i = 0, y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width; x++, i += 4)
+            {
+                _fogPixels[i] = 10; _fogPixels[i + 1] = 10; _fogPixels[i + 2] = 15;
+                _fogPixels[i + 3] = _shown.Fog.IsVisible(_myPlayer, x, y) ? (byte)0
+                                  : _shown.Fog.IsExplored(_myPlayer, x, y) ? (byte)140
+                                  : (byte)255;
+            }
+
+        var img = Image.CreateFromData(map.Width, map.Height, false, Image.Format.Rgba8, _fogPixels);
+        if (_miniFog == null) _miniFog = ImageTexture.CreateFromImage(img);
+        else _miniFog.Update(img);
+    }
+
     Rect2 MinimapRect()
     {
         var vp = GetViewportRect().Size;
@@ -1061,15 +1181,29 @@ public partial class Main : Node2D
         if (_miniTerrain != null) DrawTextureRect(_miniTerrain, r, false);
         else DrawRect(r, GroundColor);
 
+        // Fog, over the terrain but UNDER the markers, so your own units still
+        // read clearly against dark ground. Rebuilt at the tick rate, not the
+        // frame rate — see UpdateMinimapFog.
+        if (FogOn && _miniFog != null) DrawTextureRect(_miniFog, r, false);
+
         foreach (var n in _shown.Nodes)
+        {
+            if (!Known(n.X, n.Y)) continue;
             DrawRect(new Rect2(At(n.X, n.Y), cell), ResourceColor(n.Type));
+        }
 
         foreach (var b in _shown.Buildings)
+        {
+            if (b.Owner != _myPlayer && !KnownBuilding(b)) continue;
             DrawRect(new Rect2(At(b.X, b.Y), new Vector2(b.W * sx, b.H * sy)),
                      b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f));
+        }
 
+        // The minimap is the easiest place to leak the enemy's whole position, so
+        // it gets the same rule as the main view: hidden means not drawn.
         foreach (var u in _shown.Units)
         {
+            if (u.Owner != _myPlayer && !LitUnit(u)) continue;
             var p = At(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
             DrawRect(new Rect2(p - Vector2.One, new Vector2(3, 3)),
                      u.Owner == 1 ? new Color(0.45f, 0.8f, 1f) : new Color(1f, 0.55f, 0.45f));

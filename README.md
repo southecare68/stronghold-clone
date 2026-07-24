@@ -19,6 +19,7 @@ stronghold-clone/
 │  │  ├─ Rng.cs         seeded integer RNG (System.Random is banned here)
 │  │  ├─ TileMap.cs     terrain grid, integer movement costs
 │  │  ├─ PathFinder.cs  deterministic grid A* (total tie-break order)
+│  │  ├─ Vision.cs      fog of war: per-player sight and explored memory
 │  │  ├─ Skirmish.cs    the 1v1 starting position (so tests can check it)
 │  │  ├─ Simulation.cs  game state + Tick() + checksum
 │  │  └─ Lockstep.cs    client, turns, input delay, ITransport seam
@@ -41,7 +42,8 @@ stronghold-clone/
 │  ├─ Walls/            curtain walls, gatehouse open/close, sync, rejoin
 │  ├─ Siege/            destructible buildings, breaching, sync, rejoin
 │  ├─ PointBuy/         data-driven unit designs within a point budget
-│  └─ Replay/           record a match and replay it bit-for-bit
+│  ├─ Replay/           record a match and replay it bit-for-bit
+│  └─ Fog/              fog of war: sight, memory, and the orders it gates
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
 ```
@@ -77,6 +79,18 @@ anyone taking it, and the outer two are clean going but a long way round. Two
 lakes and a pair of outcrops break up the rest. Each side has safe wood and stone
 behind its base, and there is a richer patch out by each far pass worth leaving
 home for. The camera starts on your own keep.
+
+**Fog of war** is on, and it is a rule rather than a screen effect. You start
+seeing only your own base; ground you have never visited is black, ground you
+scouted but have since left is dimmed and shows the terrain, buildings and
+resource patches you remember but not what is moving through it now. Rock blocks
+line of sight, so the ridge genuinely hides an army massing behind it — but you
+can see clean across water. Because it is enforced in the simulation, you cannot
+order an attack on a unit you cannot see, send a worker to a patch you have never
+found, or build on ground you have never visited; units will not auto-acquire a
+target through fog either, though one they are already fighting is still chased.
+Press `F` to reveal the whole map — a display switch only, which is worth trying
+precisely because the orders stay refused.
 
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
@@ -128,5 +142,8 @@ RNG, in sync across clients and across a mid-fight rejoin), gather resources int
 per-player stockpiles, put up buildings whose footprints block movement, train
 soldiers from a barracks, raise curtain walls with working gatehouses, and win by
 wiping out the other side — all deterministic and cross-architecture-verified.
-Phase 2 (the full RTS core) and Phase 3's pillars (walls, gatehouses, siege, and
-the custom point-buy unit roster) are complete. See `CONTEXT_HANDOFF.md`.
+Fog of war is enforced in the simulation, so it gates orders rather than merely
+dimming the screen, and what each player has explored is checksummed and survives
+a rejoin. Phase 2 (the full RTS core) and Phase 3's pillars (walls, gatehouses,
+siege, and the custom point-buy unit roster) are complete. See
+`CONTEXT_HANDOFF.md`.
