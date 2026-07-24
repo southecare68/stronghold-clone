@@ -544,11 +544,20 @@ detection, and replays — proven bit-identical on ARM and x86 both headlessly
 (SimParity) and in a **live windowed ENet match** between the two machines. 13
 Godot-free test suites guard it all; `0xB1A7A676` still holds.
 
+✅ **Camera (pan & zoom)** added, engine-layer only. Mouse wheel zooms toward the
+cursor, middle-drag or the arrow keys pan; the view is clamped to the map.
+Implemented as a manual transform (`ApplyCameraTransform` via `DrawSetTransform`
+in `_Draw`, inverted by `ScreenToCanvas` for input) rather than a `Camera2D`
+node, so rendering and hit-testing share ONE formula — box-select and orders land
+correctly at any zoom — and the HUD Label, a separate node, stays screen-fixed
+for free. Works while watching a replay too. No sim/test changes.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** an interactive point-buy/roster UI; ranged units (the
    RangeStat already works — a design with a long reach hits from afar, no
    projectile needed, but visuals/balance want attention); a real map/level
-   beyond `TileMap.Demo`; camera/scroll for bigger maps; sound; menus.
+   beyond `TileMap.Demo` (now that there's a camera, maps can be bigger than the
+   window); sound; menus.
 18. **Multiplayer robustness (Phase 4 in ARCHITECTURE.md):** lobby/matchmaking to
    replace hand-typed IPs, lag tolerance/adaptive input delay, spectating (falls
    out of the replay format), reconnect polish. The live cross-arch match and the

@@ -53,6 +53,7 @@ public partial class Main : Node2D
     // stream instead of a client; when recording, _me carries a ReplayRecorder.
     bool _replayMode;
     Replay _replay;
+    ReplayRecorder _recorder;   // records the live match (null in replay mode)
     int _replayIndex;
     string _replayPath = "user://last.shrep";
 
@@ -111,6 +112,16 @@ public partial class Main : Node2D
     readonly Dictionary<int, Vector2> _sepOffset = new();
     const float SepSpacing = 13f;      // ~ unit diameter, so circles just clear
 
+    // ---- Camera (pan & zoom) -----------------------------------------------
+    // A manual transform rather than a Camera2D node: _Draw applies it with
+    // DrawSetTransform, and input inverts the SAME formula, so what you click is
+    // exactly what you see at any zoom. The HUD is a separate Label node, so it
+    // is unaffected and stays pinned to the screen. Works in replay mode too.
+    Vector2 _camCenter;                // the world-pixel point shown at screen centre
+    float _camZoom = 1f;
+    bool _panning;
+    const float MinZoom = 0.35f, MaxZoom = 3.5f;
+
     public override void _Ready()
     {
         // --debug-interp shows where a unit is DRAWN next to where the sim
@@ -163,11 +174,13 @@ public partial class Main : Node2D
         }
 
         _shown = _me.Sim;
+        CenterCamera();
 
         // Record the match we render, so it can be saved and watched back. Started
         // now, after setup, so the recording's initial snapshot is the real
         // starting world (tick 0). Costs nothing but a per-tick command copy.
-        _me.Recorder = new ReplayRecorder(_me.Sim);
+        _recorder = new ReplayRecorder(_me.Sim);
+        _me.Recorder = _recorder;
 
         _hud = new Label { Position = new Vector2(8, 8) };
         AddChild(_hud);
@@ -191,6 +204,7 @@ public partial class Main : Node2D
         _replayMode = true;
         _mode = "REPLAY";
         _shown = _replay.Reconstruct();
+        CenterCamera();
         GD.Print($"[replay] playing {path}: {_replay.Commands.Count} ticks, " +
                  $"expecting final checksum 0x{_replay.FinalChecksum:X8}");
     }
@@ -198,8 +212,8 @@ public partial class Main : Node2D
     // Write the match so far to a replay file.
     void SaveReplay()
     {
-        if (_me?.Recorder == null) return;
-        var replay = _me.Recorder.Finish(_me.Sim);
+        if (_recorder == null || _me == null) return;
+        var replay = _recorder.Finish(_me.Sim);
         using var f = Godot.FileAccess.Open(_replayPath, Godot.FileAccess.ModeFlags.Write);
         if (f == null) { GD.PrintErr($"[replay] could not write {_replayPath}"); return; }
         f.StoreBuffer(replay.Serialize());
@@ -467,7 +481,7 @@ public partial class Main : Node2D
         string name = _trainDesign < DesignNames.Length ? DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3] pick design  [B/K/W/G] build at cursor" +
+               "\n[1/2/3] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack";
     }
 
@@ -519,43 +533,49 @@ public partial class Main : Node2D
     }
 
     // ---- Input: mouse produces COMMANDS, never direct state changes ---------
+    // Camera controls (wheel zoom, middle-drag / arrow-key pan) work in EVERY
+    // mode, replay included. Gameplay orders are gated behind the replay check.
     public override void _UnhandledInput(InputEvent e)
     {
-        // A replay is a passive watch — no orders, no building.
-        if (_replayMode) return;
-
         if (e is InputEventMouseMotion mm)
         {
-            _mouse = mm.Position;
-            if (_boxing) QueueRedraw();
+            _mouse = ScreenToCanvas(mm.Position);
+            if (_panning) { _camCenter -= mm.Relative / _camZoom; ClampCamera(); QueueRedraw(); }
+            else if (_boxing) QueueRedraw();
+            return;
         }
-        else if (e is InputEventMouseButton mb && mb.Pressed)
+
+        if (e is InputEventMouseButton mb)
         {
-            if (mb.ButtonIndex == MouseButton.Left)
+            // Camera: wheel zooms toward the cursor, middle-button drags to pan.
+            if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelUp)   { ZoomAt(1.1f, mb.Position);       QueueRedraw(); return; }
+            if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelDown) { ZoomAt(1f / 1.1f, mb.Position);  QueueRedraw(); return; }
+            if (mb.ButtonIndex == MouseButton.Middle)                 { _panning = mb.Pressed;            return; }
+
+            if (_replayMode) return;   // no orders while watching a replay
+            var at = ScreenToCanvas(mb.Position);
+
+            if (mb.Pressed && mb.ButtonIndex == MouseButton.Left)
             {
                 _boxing = true;
-                _boxStart = mb.Position;
+                _boxStart = at;
             }
-            else if (mb.ButtonIndex == MouseButton.Right)
+            else if (mb.Pressed && mb.ButtonIndex == MouseButton.Right)
             {
                 // Right-click resolves to the most specific thing under the
                 // cursor. Acting on your own building (train / work the gate)
                 // needs no unit selected; orders to units do.
-                var mine = OwnBuildingAt(mb.Position);
+                var mine = OwnBuildingAt(at);
                 if (mine != null && mine.Type == BuildingType.Barracks)
-                {
                     _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id, X = _trainDesign });
-                }
                 else if (mine != null && mine.Type == BuildingType.Gatehouse)
-                {
                     _me.Issue(new Command { Type = CommandType.ToggleGate, TargetId = mine.Id });
-                }
                 else if (_selected.Count > 0)
                 {
                     var ids = new List<int>(_selected).ToArray();
-                    var enemy = EnemyUnitAt(mb.Position);
-                    var enemyBuilding = EnemyBuildingAt(mb.Position);
-                    var node = NodeAt(mb.Position);
+                    var enemy = EnemyUnitAt(at);
+                    var enemyBuilding = EnemyBuildingAt(at);
+                    var node = NodeAt(at);
                     if (enemy != null)
                         _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
                     else if (enemyBuilding != null)
@@ -564,7 +584,7 @@ public partial class Main : Node2D
                         _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = node.Id });
                     else
                     {
-                        var w = ScreenToWorld(mb.Position);
+                        var w = ScreenToWorld(at);
                         _me.Issue(new Command
                         {
                             Type = CommandType.Move, UnitIds = ids,
@@ -573,9 +593,27 @@ public partial class Main : Node2D
                     }
                 }
             }
+            else if (!mb.Pressed && mb.ButtonIndex == MouseButton.Left && _boxing)
+            {
+                _boxing = false;
+                SelectInBox(_boxStart, at);
+            }
+            return;
         }
-        else if (e is InputEventKey k && k.Pressed && !k.Echo)
+
+        if (e is InputEventKey k && k.Pressed && !k.Echo)
         {
+            // Arrow keys pan (all modes). Step is constant in SCREEN space.
+            float step = 40f / _camZoom;
+            switch (k.Keycode)
+            {
+                case Key.Left:  _camCenter += new Vector2(-step, 0); ClampCamera(); QueueRedraw(); return;
+                case Key.Right: _camCenter += new Vector2(step, 0);  ClampCamera(); QueueRedraw(); return;
+                case Key.Up:    _camCenter += new Vector2(0, -step);  ClampCamera(); QueueRedraw(); return;
+                case Key.Down:  _camCenter += new Vector2(0, step);   ClampCamera(); QueueRedraw(); return;
+            }
+
+            if (_replayMode) return;
             // B / K / W / G place a building with its top-left at the cursor tile.
             if (k.Keycode == Key.B) PlaceAtCursor(BuildingType.Barracks);
             else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
@@ -587,12 +625,6 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.Key3) _trainDesign = 2;
             // F5 saves the match so far as a replay.
             else if (k.Keycode == Key.F5) SaveReplay();
-        }
-        else if (e is InputEventMouseButton up && !up.Pressed &&
-                 up.ButtonIndex == MouseButton.Left && _boxing)
-        {
-            _boxing = false;
-            SelectInBox(_boxStart, up.Position);
         }
     }
 
@@ -679,6 +711,8 @@ public partial class Main : Node2D
 
     public override void _Draw()
     {
+        ApplyCameraTransform();   // everything below is drawn in world-pixel space
+
         DrawTerrain();
         DrawNodes();
         DrawBuildings();
@@ -867,7 +901,7 @@ public partial class Main : Node2D
 
     public override void _ExitTree()
     {
-        if (!_replayMode && _me?.Recorder != null) SaveReplay();   // always leave a recording behind
+        if (!_replayMode && _recorder != null) SaveReplay();   // always leave a recording behind
         _enet?.Close();
     }
 
@@ -898,4 +932,43 @@ public partial class Main : Node2D
         DrawWorld(u) * PxPerUnit + (_sepOffset.TryGetValue(u.Id, out var o) ? o : Vector2.Zero);
 
     Vector2 ScreenToWorld(Vector2 screen) => screen / PxPerUnit;
+
+    // ---- Camera helpers ----------------------------------------------------
+    // The world-pixel point under a screen point, inverting the exact transform
+    // _Draw applies. All input goes through this, so hit-testing matches the view.
+    Vector2 ScreenToCanvas(Vector2 screen)
+    {
+        var vp = GetViewportRect().Size;
+        return _camCenter + (screen - vp / 2f) / _camZoom;
+    }
+
+    // The transform _Draw applies: world-pixel -> screen. Kept identical to the
+    // inverse above.
+    void ApplyCameraTransform()
+    {
+        var vp = GetViewportRect().Size;
+        DrawSetTransform(vp / 2f - _camCenter * _camZoom, 0f, new Vector2(_camZoom, _camZoom));
+    }
+
+    void CenterCamera()
+    {
+        _camCenter = new Vector2(_shown.Map.Width, _shown.Map.Height) * (PxPerUnit / 2f);
+    }
+
+    // Zoom keeping the world point under the cursor fixed — the expected feel.
+    void ZoomAt(float factor, Vector2 screen)
+    {
+        var before = ScreenToCanvas(screen);
+        _camZoom = Mathf.Clamp(_camZoom * factor, MinZoom, MaxZoom);
+        var after = ScreenToCanvas(screen);
+        _camCenter += before - after;
+        ClampCamera();
+    }
+
+    // Keep the centre within the map so the battlefield can't be lost off-screen.
+    void ClampCamera()
+    {
+        var max = new Vector2(_shown.Map.Width, _shown.Map.Height) * PxPerUnit;
+        _camCenter = new Vector2(Mathf.Clamp(_camCenter.X, 0, max.X), Mathf.Clamp(_camCenter.Y, 0, max.Y));
+    }
 }

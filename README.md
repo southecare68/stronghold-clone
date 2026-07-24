@@ -64,6 +64,9 @@ budget, so a fast Runner and a tanky Brute cost the same but play differently.
 Units that pile onto the same spot fan out on screen (a render-only effect; the
 simulation is untouched).
 
+Mouse wheel zooms (toward the cursor), and middle-drag or the arrow keys pan the
+camera around the map.
+
 The simulation runs at 20 Hz but draws smoothly: units are rendered between
 their last two tick positions, so motion doesn't step with the tick rate. That
 is a rendering concern only — nothing interpolated ever reaches the sim. Run
