@@ -882,6 +882,16 @@ isometric-RTS approach, and the one that keeps everything already built.
   all IN SYNC; the baked attack and death frames confirmed correct by eye. The
   per-frame swing/topple is deliberately subtle at RTS scale (a unit is ~30 px) —
   it reads as motion in aggregate, not as a posed hero shot.
+
+- ✅ **Dialed up** (on request). The swing is now a big overhead arc — arm hauled
+  up and back (wind up), slammed down-and-forward past the body with a hip lunge
+  (strike) — instead of the previous small punch. The death grew from 4 frames to
+  6 (struck / reeling / balance-lost / collapsing / hitting-ground / settled) with
+  a bigger crumple, and its playback in Main.cs slowed from ~1.25 s to ~2.4 s total
+  (DeathPlaySec 1.0 s + DeathFadeSec 1.4 s) so the fall is watchable and the body
+  lingers before fading. 551 sprites, 4.9 MB; 15 suites still pass, 0xB1A7A676
+  holds. The bigger poses were verified directly in the baked frames (overhead
+  wind-up, lunging strike; mid-collapse with limbs splaying, then flat prone).
 - Two bugs the work shook out, both in the bake tool: type-inference errors on
   `PREFABS + ...` and a transform expression (GDScript `:=` cannot infer those),
   and the FIRST entity baking blank because its camera `look_at` fired before the

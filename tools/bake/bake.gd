@@ -52,8 +52,8 @@ const UNIT_FACINGS := 8
 # and both legs share the same local frame, so the same sign moves them the same
 # way — mirroring is done by hand with per-side phase.
 const WALK_FRAMES := 6
-const ATTACK_FRAMES := 4        # ready -> wind up -> strike -> follow through
-const DEATH_FRAMES := 4         # flinch -> stagger -> fall -> prone (played once)
+const ATTACK_FRAMES := 4        # ready -> wind up (overhead) -> strike (lunge) -> follow
+const DEATH_FRAMES := 6         # a slower, more pronounced collapse (played once)
 const ARM_LOWER_DEG := -72.0    # T-pose arms down to the sides (about Z)
 const LEG_SWING_DEG := 30.0     # hip pitch amplitude
 const ARM_SWING_DEG := 22.0     # shoulder pitch amplitude, counter to the legs
@@ -273,74 +273,102 @@ func _pose_walk(skel: Skeleton3D, phase: float) -> void:
 	_pose(skel, "Shoulder_L", base * _axis(X, ARM_SWING_DEG * leg_opp))
 	_pose(skel, "Shoulder_R", base * _axis(X, ARM_SWING_DEG * leg))
 
-# A melee swing with the right arm. The characters carry no weapon (weapons are
-# separate prefabs in the pack), so this reads as a punch/strike rather than a
-# sword blow — which is plenty at RTS scale. The renderer times the four frames
-# against the unit's attack cooldown so the strike lands roughly when the sim's
-# blow does.
+# A big overhead melee swing with the right arm. The characters carry no weapon
+# (weapons are separate prefabs in the pack), so this reads as a heavy strike
+# rather than a sword blow — plenty at RTS scale, and now a wide enough arc to be
+# obvious. The renderer times the four frames against the unit's attack cooldown
+# so the strike lands roughly when the sim's blow does.
 func _pose_attack(skel: Skeleton3D, f: int) -> void:
 	_reset(skel)
 	var base := _axis(Z, ARM_LOWER_DEG)
-	_pose(skel, "Shoulder_L", base)          # left arm stays at the side
 	match f:
-		0:  # ready
-			_pose(skel, "Shoulder_R", base * _axis(X, 12.0))
-			_pose(skel, "Spine_02", _axis(X, 5.0))
-		1:  # wind up — right arm cocked back and raised
-			_pose(skel, "Shoulder_R", _axis(Z, -28.0) * _axis(X, -58.0))
-			_pose(skel, "Elbow_R", _axis(X, -45.0))
-			_pose(skel, "Spine_02", _axis(X, -10.0))
-		2:  # strike — right arm driven forward and down, torso behind it
-			_pose(skel, "Shoulder_R", base * _axis(X, 82.0))
-			_pose(skel, "Elbow_R", _axis(X, -12.0))
+		0:  # ready — settle back onto the rear foot
+			_pose(skel, "Shoulder_R", base * _axis(X, 18.0))
+			_pose(skel, "Shoulder_L", base * _axis(X, 10.0))
+			_pose(skel, "Spine_02", _axis(X, 6.0))
+			_pose(skel, "Hips", _axis(X, -6.0))
+		1:  # wind up — right arm hauled up OVERHEAD and back, torso coiled
+			_pose(skel, "Shoulder_R", _axis(Z, -38.0) * _axis(X, -82.0))
+			_pose(skel, "Elbow_R", _axis(X, -62.0))
+			_pose(skel, "Shoulder_L", base * _axis(X, -24.0))     # left arm swings back for counterweight
+			_pose(skel, "Spine_02", _axis(X, -18.0))
+			_pose(skel, "Hips", _axis(X, -12.0))
+		2:  # strike — arm slammed down-and-forward past the body, whole frame lunges in
+			_pose(skel, "Shoulder_R", base * _axis(X, 112.0))
+			_pose(skel, "Elbow_R", _axis(X, -8.0))
+			_pose(skel, "Shoulder_L", base * _axis(X, 28.0))
+			_pose(skel, "Spine_02", _axis(X, 30.0))
+			_pose(skel, "Hips", _axis(X, 16.0))                   # the lunge
+		_:  # follow through — arm carried on down, body still pitched over the blow
+			_pose(skel, "Shoulder_R", base * _axis(X, 66.0))
+			_pose(skel, "Shoulder_L", base * _axis(X, 12.0))
 			_pose(skel, "Spine_02", _axis(X, 18.0))
-		_:  # follow through
-			_pose(skel, "Shoulder_R", base * _axis(X, 42.0))
-			_pose(skel, "Spine_02", _axis(X, 11.0))
+			_pose(skel, "Hips", _axis(X, 6.0))
 
 # How far the whole body has laid down at each death frame (degrees about the
 # across-screen axis). The bones below only CRUMPLE; this schedule does the
-# falling. Kept as a separate function so _bake can apply it to _pivot.
+# falling. Spread across six frames so the fall is slow enough to watch. Kept as
+# a separate function so _bake can apply it to _pivot.
 func _death_topple(f: int) -> float:
 	match f:
-		0: return 8.0      # knees just starting to go
-		1: return 34.0     # tipping over
-		2: return 64.0     # most of the way down
-		_: return 87.0     # flat on the ground
-	return 87.0
+		0: return 4.0      # struck — barely started
+		1: return 16.0     # reeling back
+		2: return 38.0     # tipping past balance
+		3: return 62.0     # going down hard
+		4: return 80.0     # nearly flat
+		_: return 90.0     # flat on the ground
+	return 90.0
 
-# The limb crumple that rides on top of the topple: a flinch, then arms flung
-# out, knees buckling, spine curling. The topple (above) lays the body down; this
-# is what keeps it from looking like a rigid plank rotating.
+# The limb crumple that rides on top of the topple: a hard flinch, arms thrown
+# out, knees giving way, then everything going slack. The topple (above) lays the
+# body down; this keeps it from looking like a rigid plank rotating. Bigger and
+# slower than the first pass, so a death is something you can actually watch.
 func _pose_death(skel: Skeleton3D, f: int) -> void:
 	_reset(skel)
 	match f:
-		0:  # flinch — head back, arms jerk out
+		0:  # the hit lands — head snaps back, arms fly up and out
+			_pose(skel, "Spine_02", _axis(X, -20.0))
+			_pose(skel, "Neck", _axis(X, -18.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -30.0) * _axis(X, -20.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -30.0) * _axis(X, -20.0))
+		1:  # reeling — arms flail wide, one knee starts to fold
 			_pose(skel, "Spine_02", _axis(X, -14.0))
-			_pose(skel, "Shoulder_L", _axis(Z, -38.0))
-			_pose(skel, "Shoulder_R", _axis(Z, -38.0))
-		1:  # arms flung, knees loosening
-			_pose(skel, "Spine_02", _axis(X, -10.0))
-			_pose(skel, "Shoulder_L", _axis(Z, -18.0) * _axis(X, -36.0))
-			_pose(skel, "Shoulder_R", _axis(Z, -18.0) * _axis(X, -30.0))
-			_pose(skel, "UpperLeg_L", _axis(X, 12.0))
-			_pose(skel, "LowerLeg_L", _axis(X, -26.0))
-		2:  # crumpling — knees buckle under
-			_pose(skel, "Spine_02", _axis(X, 12.0))
-			_pose(skel, "UpperLeg_L", _axis(X, 30.0))
-			_pose(skel, "UpperLeg_R", _axis(X, 22.0))
-			_pose(skel, "LowerLeg_L", _axis(X, -58.0))
-			_pose(skel, "LowerLeg_R", _axis(X, -48.0))
-			_pose(skel, "Shoulder_L", _axis(Z, -28.0) * _axis(X, 20.0))
-			_pose(skel, "Shoulder_R", _axis(Z, -28.0))
-		_:  # settled — limbs slack on the ground
-			_pose(skel, "Spine_02", _axis(X, 8.0))
-			_pose(skel, "UpperLeg_L", _axis(X, 18.0))
-			_pose(skel, "UpperLeg_R", _axis(X, 14.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -12.0) * _axis(X, -44.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -12.0) * _axis(X, -38.0))
+			_pose(skel, "UpperLeg_L", _axis(X, 16.0))
 			_pose(skel, "LowerLeg_L", _axis(X, -34.0))
-			_pose(skel, "LowerLeg_R", _axis(X, -22.0))
-			_pose(skel, "Shoulder_L", _axis(Z, -34.0) * _axis(X, 24.0))
-			_pose(skel, "Shoulder_R", _axis(Z, -40.0))
+		2:  # balance lost — knees buckling, arms dropping
+			_pose(skel, "Spine_02", _axis(X, 6.0))
+			_pose(skel, "UpperLeg_L", _axis(X, 34.0))
+			_pose(skel, "UpperLeg_R", _axis(X, 24.0))
+			_pose(skel, "LowerLeg_L", _axis(X, -66.0))
+			_pose(skel, "LowerLeg_R", _axis(X, -50.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -22.0) * _axis(X, -10.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -22.0))
+		3:  # collapsing — folding down onto the back
+			_pose(skel, "Spine_02", _axis(X, 16.0))
+			_pose(skel, "UpperLeg_L", _axis(X, 40.0))
+			_pose(skel, "UpperLeg_R", _axis(X, 30.0))
+			_pose(skel, "LowerLeg_L", _axis(X, -72.0))
+			_pose(skel, "LowerLeg_R", _axis(X, -58.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -30.0) * _axis(X, 24.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -30.0) * _axis(X, 14.0))
+		4:  # hitting the ground — limbs splaying out
+			_pose(skel, "Spine_02", _axis(X, 10.0))
+			_pose(skel, "UpperLeg_L", _axis(X, 26.0))
+			_pose(skel, "UpperLeg_R", _axis(X, 20.0))
+			_pose(skel, "LowerLeg_L", _axis(X, -48.0))
+			_pose(skel, "LowerLeg_R", _axis(X, -34.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -40.0) * _axis(X, 28.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -46.0))
+		_:  # settled — everything slack on the ground
+			_pose(skel, "Spine_02", _axis(X, 6.0))
+			_pose(skel, "UpperLeg_L", _axis(X, 16.0))
+			_pose(skel, "UpperLeg_R", _axis(X, 12.0))
+			_pose(skel, "LowerLeg_L", _axis(X, -30.0))
+			_pose(skel, "LowerLeg_R", _axis(X, -20.0))
+			_pose(skel, "Shoulder_L", _axis(Z, -36.0) * _axis(X, 26.0))
+			_pose(skel, "Shoulder_R", _axis(Z, -42.0))
 
 func _aabb_of(root_node: Node) -> AABB:
 	var acc := AABB()

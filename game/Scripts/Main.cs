@@ -158,7 +158,7 @@ public partial class Main : Node2D
     // never touches the simulation, exactly like interpolation.
     readonly Dictionary<int, float> _animPhase = new();
     const float WalkCadence = 9f;      // walk frames per second at full stride
-    const float AttackCadence = 7f;    // attack frames per second while engaged
+    const float AttackCadence = 8f;    // attack frames per second — one full swing per ~0.5s blow
     // Last-seen design per living unit, so a corpse knows which sprite set to use
     // after the simulation has removed the unit.
     readonly Dictionary<int, int> _lastDesign = new();
@@ -169,8 +169,8 @@ public partial class Main : Node2D
     // death SOUND — it only appears where the player could see the kill.
     sealed class Corpse { public int Design, Facing; public Vector2 Feet; public float Age; }
     readonly List<Corpse> _corpses = new();
-    const float DeathPlaySec = 0.55f;  // time to play the topple frames
-    const float DeathFadeSec = 0.7f;   // then fade the settled body out
+    const float DeathPlaySec = 1.0f;   // play the topple slowly enough to watch
+    const float DeathFadeSec = 1.4f;   // then let the body lie a while before fading
 
     // ---- Fog of war (the DRAWING half) --------------------------------------
     // The rule lives in the simulation (Sim/Vision.cs) — what you may attack,
