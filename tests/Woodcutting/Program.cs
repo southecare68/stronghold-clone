@@ -26,6 +26,7 @@ static class Program
         AHutRebreedsAKilledWoodcutter();
         RazingTheHutStopsItsWorker();
         AHutOnTheRealSkirmishForestProduces();
+        AQuarryMinesStoneTheSameWay();
         TwoClientsAgreeOnTheWoodChain();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -58,7 +59,7 @@ static class Program
         Check("the hut knows its worker", hut.WorkerId != 0);
         var worker = Find(sim, hut.WorkerId);
         Check("the worker is set to woodcutting with no order given",
-              worker != null && worker.Job == Job.Woodcutting);
+              worker != null && worker.Job == Job.Working);
 
         Check("nothing banked yet", sim.Stockpile(1, ResourceType.Wood) == 0);
         for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
@@ -82,7 +83,7 @@ static class Program
 
         Check($"it cut more than one tree's worth ({sim.Stockpile(1, ResourceType.Wood)})",
               sim.Stockpile(1, ResourceType.Wood) >= treeStock * 2);
-        Check("and it is still on the job", worker.Job == Job.Woodcutting);
+        Check("and it is still on the job", worker.Job == Job.Working);
     }
 
     static void StorehouseIsACloserDropOff()
@@ -125,7 +126,7 @@ static class Program
         for (int i = 0; i < 200 && hut.WorkerId == 0; i++) sim.Tick(Array.Empty<Command>());
         Check("the hut bred a replacement", hut.WorkerId != 0 && hut.WorkerId != firstWorker);
         var repl = Find(sim, hut.WorkerId);
-        Check("which is back to cutting", repl != null && repl.Job == Job.Woodcutting);
+        Check("which is back to cutting", repl != null && repl.Job == Job.Working);
     }
 
     static void RazingTheHutStopsItsWorker()
@@ -168,6 +169,30 @@ static class Program
         Check($"wood climbed over 2000 ticks ({before} -> {after})", after > before);
     }
 
+    // A quarry is the same self-running machine as a hut, pointed at stone. The
+    // generalisation must hold: build it on a stone deposit and stone banks with
+    // no orders, and it does NOT touch wood (it harvests only its own resource).
+    static void AQuarryMinesStoneTheSameWay()
+    {
+        Console.WriteLine("\na quarry mines stone the same way a hut cuts wood:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        // A stone deposit and, right beside it, a forest — to prove the quarry
+        // takes stone and leaves the trees alone.
+        for (int i = 0; i < 6; i++) sim.SpawnNode(ResourceType.Stone, 22 + (i % 3) * 3, 18 + (i / 3) * 3, 120);
+        sim.SpawnNode(ResourceType.Wood, 24, 24, 200);
+
+        var quarry = sim.PlaceBuilding(BuildingType.Quarry, 1, 20, 20);
+        Check("the quarry bred a worker", quarry.WorkerId != 0);
+        Check("its worker is a peasant on the job (Job.Working)",
+              Find(sim, quarry.WorkerId)?.Job == Job.Working);
+
+        for (int i = 0; i < 900; i++) sim.Tick(Array.Empty<Command>());
+        Check($"stone is accumulating on its own ({sim.Stockpile(1, ResourceType.Stone)})",
+              sim.Stockpile(1, ResourceType.Stone) > 0);
+        Check("and it left the wood alone", sim.Stockpile(1, ResourceType.Wood) == 0);
+    }
+
     // The one that matters most: the whole self-running chain, computed twice,
     // must agree every tick.
     static void TwoClientsAgreeOnTheWoodChain()
@@ -182,9 +207,11 @@ static class Program
         {
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
             c.Sim.PlaceBuilding(BuildingType.Storehouse, 1, 24, 20);
-            c.Sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
-            c.Sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 30, 24);   // two huts competing for trees
             PlantForest(c.Sim);
+            for (int i = 0; i < 4; i++) c.Sim.SpawnNode(ResourceType.Stone, 30 + (i % 2) * 3, 30 + (i / 2) * 3, 120);
+            c.Sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+            c.Sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 22, 24);   // two huts competing for trees
+            c.Sim.PlaceBuilding(BuildingType.Quarry, 1, 31, 28);          // a quarry, working stone alongside
         }
 
         int desyncs = 0, first = -1;

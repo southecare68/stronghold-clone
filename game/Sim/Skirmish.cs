@@ -52,27 +52,29 @@ namespace Sim
         {
             int w = West(size), e = East(size), m = MidY(size);
 
-            // Stone patches behind each base, and a contested pair by the passes.
-            yield return (ResourceType.Stone, w + 6, m + 8, 400);
-            yield return (ResourceType.Stone, e - 4, m + 8, 400);
+            // A contested pair of stone patches out by the passes.
             yield return (ResourceType.Stone, size / 2 - 8, size * 25 / 100, 500);
             yield return (ResourceType.Stone, size / 2 + 6, size * 75 / 100, 500);
 
-            // A forest by each base — a cluster of trees (Wood nodes) for a
-            // woodcutter's hut to work. Kept in the keep's opening sight so you
-            // can build a hut there from tick 0. A grid rather than a scatter, so
-            // both machines plant the identical trees in the identical order.
-            foreach (var t in Forest(w + 7, m - 9)) yield return t;
-            foreach (var t in Forest(e - 5, m - 9)) yield return t;
+            // A forest and a stone deposit by each base — clusters for a
+            // woodcutter's hut and a quarry to work. Kept in the keep's opening
+            // sight so you can build both from tick 0. A grid rather than a
+            // scatter, so both machines plant the identical nodes in the identical
+            // order (id assignment is part of the deterministic contract).
+            foreach (var t in Cluster(ResourceType.Wood, w + 7, m - 9, 120)) yield return t;
+            foreach (var t in Cluster(ResourceType.Stone, w + 6, m + 9, 160)) yield return t;
+            foreach (var t in Cluster(ResourceType.Wood, e - 5, m - 9, 120)) yield return t;
+            foreach (var t in Cluster(ResourceType.Stone, e - 4, m + 9, 160)) yield return t;
         }
 
-        // A 3x3 block of trees around (cx, cy), each a Wood node. 120 wood a tree
-        // is a couple of loads — a forest is worked down over a match, not endless.
-        static IEnumerable<(ResourceType, int, int, int)> Forest(int cx, int cy)
+        // A 3x3 block of a resource around (cx, cy), each a node. A cluster is
+        // worked down over a match, not endless — a forest of ~1000 wood, a stone
+        // deposit of ~1400.
+        static IEnumerable<(ResourceType, int, int, int)> Cluster(ResourceType res, int cx, int cy, int per)
         {
             for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++)
-                    yield return (ResourceType.Wood, cx + dx * 2, cy + dy * 2, 120);
+                    yield return (res, cx + dx * 2, cy + dy * 2, per);
         }
 
         // Build the starting world. The ORDER of these calls is part of the

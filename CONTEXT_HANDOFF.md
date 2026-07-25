@@ -918,9 +918,18 @@ scale because a true-size mote is invisible at RTS zoom. All 15 suites pass,
 0xB1A7A676 holds. Verified it runs clean through thousands of ticks in sync; the
 transient effects are hard to freeze in a screenshot but the code paths all fire.
 
-✅ **Self-running wood chain** (first slice of the Stronghold economy). The model
-is the key thing: you place a WORK BUILDING and it runs itself, instead of
-micro-managing gatherers.
+✅ **Self-running work buildings** (the Stronghold economy). You place a WORK
+BUILDING and it runs itself, instead of micro-managing gatherers. Two exist so
+far — the woodcutter's hut (wood) and the quarry (stone) — and they share ONE
+code path: `WorkResource(type)` maps a building to the resource it harvests,
+`ResolveWorkBuildings` feeds each one's peasant the nearest node of that kind, and
+the shared harvest/haul cycle does the rest. Adding the next work building (a
+farm) is a couple of lines. `Job.Woodcutting` was generalised to `Job.Working`;
+peasants (not soldiers) do the work; build with H (hut), Q (quarry), J
+(storehouse). tests/Woodcutting covers both, including a quarry mining stone while
+leaving wood alone, and two clients agreeing for 900 ticks with two huts AND a
+quarry running at once. All 16 suites pass; verified live, stone climbing 100 to
+160 with no orders. The original wood-chain detail:
 
 - New `BuildingType.WoodcutterHut` and `Storehouse`; new `Job.Woodcutting`; a
   `Building.WorkerId` linking a hut to its one woodcutter. All deterministic and

@@ -802,7 +802,7 @@ public partial class Main : Node2D
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3/4] pick design  build: [B]arracks [K]eep [W]all [G]ate [H]ut [J] storehouse  ([Z/X] zoom)" +
+               "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store  ([Z/X] zoom)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
@@ -998,6 +998,7 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.W) PlaceAtCursor(BuildingType.Wall);
             else if (k.Keycode == Key.G) PlaceAtCursor(BuildingType.Gatehouse);
             else if (k.Keycode == Key.H) PlaceAtCursor(BuildingType.WoodcutterHut);   // Hut, in a forest
+            else if (k.Keycode == Key.Q) PlaceAtCursor(BuildingType.Quarry);          // Quarry, on stone
             else if (k.Keycode == Key.J) PlaceAtCursor(BuildingType.Storehouse);      // storage (J, next to H)
             // 1 / 2 / 3 / 4 choose which design a barracks trains.
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
@@ -1538,7 +1539,7 @@ public partial class Main : Node2D
     // (Job.Gathering) keeps its soldier sprite; only the hut-bred worker is a
     // peasant.
     static int SpriteIndex(Unit u) =>
-        u.Job == Job.Woodcutting ? SpriteBank.PeasantSprite : u.DesignId;
+        u.Job == Job.Working ? SpriteBank.PeasantSprite : u.DesignId;
 
     // Is the unit travelling toward a waypoint (as opposed to standing)? The sim
     // sets Tx=X, Ty=Y on arrival, so a gap means motion.

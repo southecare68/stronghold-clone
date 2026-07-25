@@ -72,9 +72,10 @@ wiped out. Right-click a resource node to send workers to gather it — they hau
 loads back to the drop-off and your stockpile (shown in the HUD) grows. The HUD
 also shows the tick, state checksum, and sync state. Press `B`/`K` to place a
 barracks/keep at the cursor; right-click your own barracks to train soldiers.
-Press `H` to raise a **woodcutter's hut** in a forest — it runs itself, breeding a
-woodcutter who fells the nearest trees and hauls the wood back with no orders from
-you — and `J` for a **storehouse**, a closer drop-off so the round trip is shorter.
+Press `H` to raise a **woodcutter's hut** in a forest and `Q` for a **quarry** on a
+stone deposit — each runs itself, breeding a peasant who harvests the nearest nodes
+and hauls the goods back with no orders from you — and `J` for a **storehouse**, a
+closer drop-off so the round trip is shorter.
 Buildings block movement, so units path around them; lay `W`alls into a curtain
 and drop a `G`atehouse in the gap, then right-click your gate to open or close it.
 Buildings have HP — right-click an enemy structure with soldiers selected to

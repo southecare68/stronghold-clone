@@ -66,6 +66,7 @@ const ENTITIES := [
 	{ "out": "buildings/gatehouse", "prefab": "Castle/SM_Bld_Castle_Wall_Gate_01",                          "turns": false, "fit": 1.10 },
 	{ "out": "buildings/woodcutter", "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_03_Optimized",       "turns": false, "fit": 1.15 },
 	{ "out": "buildings/storehouse", "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_Blacksmith_01_Optimized", "turns": false, "fit": 1.15 },
+	{ "out": "buildings/quarry",     "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_08_Optimized",     "turns": false, "fit": 1.15 },
 	{ "out": "units/soldier", "prefab": "Characters/SM_Chr_Soldier_Male_01",   "turns": true, "fit": 1.25 },
 	{ "out": "units/runner",  "prefab": "Characters/SM_Chr_Soldier_Female_01", "turns": true, "fit": 1.25 },
 	{ "out": "units/brute",   "prefab": "Characters/SM_Chr_Rider_01",          "turns": true, "fit": 1.25 },
