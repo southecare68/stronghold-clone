@@ -595,6 +595,12 @@ namespace Sim
             // woodcutter: its nearest tree sat under its own hut.)
             Nodes.RemoveAll(n => n.X >= x && n.X < x + b.W && n.Y >= y && n.Y < y + b.H);
 
+            // And shove any UNIT out of the footprint. A building blocks its
+            // tiles, and a unit left standing on a blocked tile can path nowhere —
+            // it is trapped forever. This is exactly what stranded a woodcutter
+            // when a storehouse was dropped on top of it.
+            EvictUnitsFrom(b);
+
             // A keep is where its owner's gatherers deposit — at a REACHABLE tile
             // just outside its footprint, not the walled-in centre (which no
             // worker could path to or stand on).
@@ -609,6 +615,41 @@ namespace Sim
             if (WorkResource(type) != null) BreedWorker(b);
 
             return b;
+        }
+
+        // Move any unit standing inside a building's footprint to the nearest
+        // free tile just outside it, and stop it where it lands. Deterministic:
+        // units in id order, tiles scanned in a fixed spiral, so every machine
+        // relocates each unit to the same tile.
+        void EvictUnitsFrom(Building b)
+        {
+            foreach (var u in Units)                // id order
+            {
+                int ux = Fixed.ToInt(u.X), uy = Fixed.ToInt(u.Y);
+                if (ux < b.X || ux >= b.X + b.W || uy < b.Y || uy >= b.Y + b.H) continue;
+
+                var spot = NearestFreeTile(b.CenterX, b.CenterY) ?? SpawnPointAround(b);
+                if (spot.HasValue)
+                {
+                    u.X = Fixed.FromInt(spot.Value.X); u.Y = Fixed.FromInt(spot.Value.Y);
+                    u.Tx = u.X; u.Ty = u.Y;
+                    u.Path = null; u.PathIndex = 0;   // its old route started inside the wall; drop it
+                }
+            }
+        }
+
+        // Nearest passable tile to (cx,cy), searched in growing rings. Ties broken
+        // by the fixed scan order, so it is the same on every machine.
+        Tile? NearestFreeTile(int cx, int cy)
+        {
+            for (int r = 1; r <= 6; r++)
+                for (int dy = -r; dy <= r; dy++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r) continue;   // ring edge only
+                        if (Map.Passable(cx + dx, cy + dy)) return new Tile(cx + dx, cy + dy);
+                    }
+            return null;
         }
 
         void BlockFootprint(Building b, bool blocked)

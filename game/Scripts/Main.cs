@@ -1424,9 +1424,19 @@ public partial class Main : Node2D
                 DrawCircle(c + new Vector2(-4.5f, 0), 1.9f, new Color(0.63f, 0.48f, 0.32f));
                 DrawCircle(c + new Vector2(4.5f, 0), 1.9f, new Color(0.63f, 0.48f, 0.32f));
                 break;
-            case ResourceType.Stone:  // a lumpy grey rock
-                DrawCircle(c + new Vector2(1.6f, 0.6f), 3.2f, RockDark);
-                DrawCircle(c + new Vector2(-1.8f, -0.4f), 2.6f, RockLight);
+            case ResourceType.Stone:  // an angular, faceted grey rock (not a blob)
+                var rock = new Vector2[]
+                {
+                    c + new Vector2(-4.5f, 1.5f), c + new Vector2(-2.5f, -2.5f),
+                    c + new Vector2(1.5f, -3f),   c + new Vector2(4.5f, 0f),
+                    c + new Vector2(3f, 3.5f),    c + new Vector2(-1.5f, 4f),
+                };
+                DrawColoredPolygon(rock, RockLight);
+                DrawColoredPolygon(new Vector2[]   // a darker facet along the lower-left
+                {
+                    c + new Vector2(-4.5f, 1.5f), c + new Vector2(-1.5f, 4f),
+                    c + new Vector2(3f, 3.5f),    c + new Vector2(0.5f, 0.6f),
+                }, RockDark);
                 break;
             default:                  // food — an apple
                 DrawCircle(c, 2.8f, new Color(0.78f, 0.18f, 0.14f));

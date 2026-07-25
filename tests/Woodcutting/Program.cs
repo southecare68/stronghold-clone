@@ -26,6 +26,8 @@ static class Program
         AHutRebreedsAKilledWoodcutter();
         RazingTheHutStopsItsWorker();
         AHutOnTheRealSkirmishForestProduces();
+        AStorehouseByTheForestDoesNotStrandTheWorker();
+        ABuildingDroppedOnAUnitDoesNotTrapIt();
         AQuarryMinesStoneTheSameWay();
         TwoClientsAgreeOnTheWoodChain();
 
@@ -167,6 +169,55 @@ static class Program
         for (int i = 0; i < 2000; i++) sim.Tick(Array.Empty<Command>());
         int after = sim.Stockpile(1, ResourceType.Wood);
         Check($"wood climbed over 2000 ticks ({before} -> {after})", after > before);
+    }
+
+    // Reported bug: dropping a storehouse right by the forest left the woodcutter
+    // stuck. Reproduce it on the real map — hut in the forest, storehouse jammed
+    // in beside it — and prove the worker still banks wood.
+    static void AStorehouseByTheForestDoesNotStrandTheWorker()
+    {
+        Console.WriteLine("\na storehouse by the forest does not strand the worker:");
+        const int size = Skirmish.DefaultSize;
+        int w = Skirmish.West(size), m = Skirmish.MidY(size);
+
+        // Try the storehouse at a spread of spots around the forest — one of them
+        // is what the player did, and any that strands the worker is the bug.
+        foreach (var (sx, sy) in new[] { (w + 3, m - 12), (w + 10, m - 9), (w + 7, m - 12), (w + 4, m - 6) })
+        {
+            var sim = new Simulation(TileMap.Skirmish(size));
+            Skirmish.Setup(sim, size);
+            sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, w + 6, m - 10);
+            sim.PlaceBuilding(BuildingType.Storehouse, 1, sx, sy);
+
+            int before = sim.Stockpile(1, ResourceType.Wood);
+            for (int i = 0; i < 1500; i++) sim.Tick(Array.Empty<Command>());
+            Check($"storehouse at ({sx},{sy}): wood still banks ({before} -> {sim.Stockpile(1, ResourceType.Wood)})",
+                  sim.Stockpile(1, ResourceType.Wood) > before);
+        }
+    }
+
+    // The actual bug behind "the peasant got stuck": a building placed ON a unit
+    // blocked the unit's tile, and a unit on a blocked tile can path nowhere. The
+    // fix shoves any unit out of a new building's footprint, so it is never
+    // trapped — this is what the live storehouse-on-the-woodcutter hit.
+    static void ABuildingDroppedOnAUnitDoesNotTrapIt()
+    {
+        Console.WriteLine("\na building dropped on a unit does not trap it:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 4, 4);
+        var u = sim.SpawnUnit(1, 20, 20);
+
+        // A 2x2 storehouse whose footprint (19,19)-(20,20) covers the unit.
+        sim.PlaceBuilding(BuildingType.Storehouse, 1, 19, 19);
+        int ux = u.X >> 16, uy = u.Y >> 16;
+        Check($"the unit was shoved out of the footprint (now at {ux},{uy})",
+              ux < 19 || ux > 20 || uy < 19 || uy > 20);
+        Check("and it stands on passable ground", sim.Map.Passable(ux, uy));
+
+        // And it can actually move afterwards — the real test of "not trapped".
+        sim.Tick(new List<Command> { new Command { Owner = 1, Type = CommandType.Move, UnitIds = new[] { u.Id }, X = 30, Y = 20 } });
+        for (int i = 0; i < 500 && u.HasPath; i++) sim.Tick(Array.Empty<Command>());
+        Check($"it can walk away ({u.X >> 16},{u.Y >> 16})", (u.X >> 16) == 30 && (u.Y >> 16) == 20);
     }
 
     // A quarry is the same self-running machine as a hut, pointed at stone. The
