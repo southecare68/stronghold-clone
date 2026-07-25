@@ -28,9 +28,13 @@ using Sim;
 
 public sealed class SpriteBank
 {
-    // Design id -> the sprite basename under Art/units/. The order matches the
-    // roster registered in Skirmish.Setup: 0 Soldier, 1 Runner, 2 Brute, 3 Archer.
-    static readonly string[] UnitArt = { "soldier", "runner", "brute", "archer" };
+    // Sprite index -> the sprite basename under Art/units/. Indices 0..3 are the
+    // point-buy designs (0 Soldier, 1 Runner, 2 Brute, 3 Archer, matching
+    // Skirmish.Setup). Index 4 is the Peasant — NOT a design; it is a render-only
+    // sprite the game picks for a hut's woodcutter, so the worker felling trees
+    // looks like a peasant rather than a soldier, without changing the sim.
+    static readonly string[] UnitArt = { "soldier", "runner", "brute", "archer", "peasant" };
+    public const int PeasantSprite = 4;
 
     static readonly Dictionary<BuildingType, string> BuildingArt = new()
     {

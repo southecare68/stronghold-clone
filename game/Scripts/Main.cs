@@ -1141,7 +1141,8 @@ public partial class Main : Node2D
             float r = Mathf.Clamp(4f + u.MaxHp * 0.03f, 4f, 9f);
 
             var state = UnitState(u);
-            var sprite = _art?.Unit(u.DesignId, UnitFacing(u), state, UnitFrame(u, state));
+            int spriteIx = SpriteIndex(u);
+            var sprite = _art?.Unit(spriteIx, UnitFacing(u), state, UnitFrame(u, spriteIx, state));
             if (sprite != null)
             {
                 // A team-coloured disc UNDER the feet — the sprite carries no
@@ -1524,12 +1525,20 @@ public partial class Main : Node2D
         return SpriteBank.Anim.Idle;
     }
 
-    int UnitFrame(Unit u, SpriteBank.Anim state)
+    int UnitFrame(Unit u, int spriteIx, SpriteBank.Anim state)
     {
-        int n = _art.FrameCount(u.DesignId, state);
+        int n = _art.FrameCount(spriteIx, state);
         if (n <= 0) return 0;
         return Mathf.PosMod((int)_animPhase.GetValueOrDefault(u.Id), n);
     }
+
+    // Which sprite set to draw a unit with. A hut's woodcutter (Job.Woodcutting)
+    // is drawn as a peasant, not a soldier — a render-only distinction, the unit
+    // is unchanged in the simulation. A soldier the player sends to gather by hand
+    // (Job.Gathering) keeps its soldier sprite; only the hut-bred worker is a
+    // peasant.
+    static int SpriteIndex(Unit u) =>
+        u.Job == Job.Woodcutting ? SpriteBank.PeasantSprite : u.DesignId;
 
     // Is the unit travelling toward a waypoint (as opposed to standing)? The sim
     // sets Tx=X, Ty=Y on arrival, so a gap means motion.

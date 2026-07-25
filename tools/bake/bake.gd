@@ -70,6 +70,7 @@ const ENTITIES := [
 	{ "out": "units/runner",  "prefab": "Characters/SM_Chr_Soldier_Female_01", "turns": true, "fit": 1.25 },
 	{ "out": "units/brute",   "prefab": "Characters/SM_Chr_Rider_01",          "turns": true, "fit": 1.25 },
 	{ "out": "units/archer",  "prefab": "Characters/SM_Chr_King_01",           "turns": true, "fit": 1.25 },
+	{ "out": "units/peasant", "prefab": "Characters/SM_Chr_Peasant_Male_01",  "turns": true, "fit": 1.25 },
 ]
 
 var _viewport: SubViewport
