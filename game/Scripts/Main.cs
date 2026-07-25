@@ -152,6 +152,17 @@ public partial class Main : Node2D
     readonly System.Random _fx = new(0xBEEF);      // render jitter only, not the sim
     const int MaxParticles = 1400;                  // a hard cap so a long siege can't unbound it
 
+    // ---- Floating "+N" popups (render-only) --------------------------------
+    // A little number that rises and fades where a peasant drops a load, so a
+    // delivery is legible even when the stockpile counter is off at the edge of
+    // the screen. Found by diffing each unit's carried load between ticks — the
+    // same observe-don't-hook approach the sounds use. A worker whose load went
+    // from full to nothing, at a drop-off, just delivered it.
+    sealed class Popup { public Vector2 Pos; public string Text; public Color Color; public float Age; public float Life; }
+    readonly List<Popup> _popups = new();
+    readonly Dictionary<int, (int amt, ResourceType type)> _prevCarry = new();
+    Font _popupFont;
+
     // ---- Minimap ------------------------------------------------------------
     // Drawn in SCREEN space (the camera transform is reset first), so it stays
     // pinned to the corner at any zoom. Shows the whole battlefield, the current
@@ -303,6 +314,7 @@ public partial class Main : Node2D
     void StartArt()
     {
         _art = new SpriteBank();
+        _popupFont = ThemeDB.FallbackFont;      // the engine's built-in font, for "+N" popups
     }
 
     void StartSound()
@@ -476,7 +488,26 @@ public partial class Main : Node2D
         if (stock > _prevStockTotal && _shown.DropOffs.TryGetValue(_myPlayer, out var drop))
             _sound.Play(Sfx.Deposit, Aud(drop.X, drop.Y));
 
+        // A "+N" popup for each of YOUR workers that just emptied its load — it
+        // reached a drop-off and delivered. Found by diffing carried loads: a
+        // worker that was carrying last tick and isn't now has banked it.
+        foreach (var u in _shown.Units)
+        {
+            if (u.Owner != _myPlayer) continue;
+            if (_prevCarry.TryGetValue(u.Id, out var prev) && prev.amt > 0 && u.CarryAmount == 0)
+                _popups.Add(new Popup
+                {
+                    Pos = WorldToScreenSim(u) + new Vector2(0, -14f),
+                    Text = $"+{prev.amt}",
+                    Color = ResourceColor(prev.type),
+                    Age = 0f, Life = 1.1f,
+                });
+        }
+
         // Roll the record forward for the next tick.
+        _prevCarry.Clear();
+        foreach (var u in _shown.Units)
+            if (u.CarryAmount > 0) _prevCarry[u.Id] = (u.CarryAmount, u.CarryType);
         _prevUnitIds.Clear();
         foreach (var u in _shown.Units) _prevUnitIds.Add(u.Id);
         _prevBuildingIds.Clear();
@@ -649,6 +680,7 @@ public partial class Main : Node2D
         AgeProjectiles(delta);
         EmitAmbientParticles(delta);
         AdvanceParticles(delta);
+        AdvancePopups(delta);
         ComputeSeparation();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -720,6 +752,7 @@ public partial class Main : Node2D
         AgeProjectiles(delta);
         EmitAmbientParticles(delta);
         AdvanceParticles(delta);
+        AdvancePopups(delta);
         ComputeSeparation();
         AdvanceAnimation(delta);
         UpdateMinimapFog();
@@ -1163,9 +1196,10 @@ public partial class Main : Node2D
 
             if (u.MaxHp > 0 && u.Hp < u.MaxHp)
                 DrawHealthBar(p, u.Hp, u.MaxHp);
-            // A worker hauling a load shows a small dot of the resource's colour.
+            // A worker hauling a load carries a little icon of what it's carrying —
+            // a log, a rock — so at a glance you can read who's supplying what.
             if (u.CarryAmount > 0)
-                DrawCircle(p + new Vector2(0, -8f), 2f, ResourceColor(u.CarryType));
+                DrawCarryIcon(p + new Vector2(0, -11f), u.CarryType);
         }
         // Sparks, flame and smoke over the units, so an impact reads in front of
         // the fighter and smoke rises past the building. Still under the fog.
@@ -1173,6 +1207,7 @@ public partial class Main : Node2D
         // Last, so it darkens everything drawn above it — terrain, buildings and
         // any unit that happens to be standing in remembered ground.
         DrawFog();
+        DrawPopups();   // over the fog — delivery feedback should never be dimmed
 
         if (_boxing)
         {
@@ -1375,6 +1410,29 @@ public partial class Main : Node2D
         float r = 6.5f * f;
         DrawCircle(center + new Vector2(1.5f, 1f), r, RockDark);
         DrawCircle(center + new Vector2(-1.5f, -0.5f), r * 0.9f, RockLight);
+    }
+
+    // The load a hauling peasant carries over its head: a bound log for wood, a
+    // rock for stone, an apple for food. Small procedural icons — legible at a
+    // glance, no baked art needed.
+    void DrawCarryIcon(Vector2 c, ResourceType type)
+    {
+        switch (type)
+        {
+            case ResourceType.Wood:   // a short log lying across, with paler cut ends
+                DrawRect(new Rect2(c - new Vector2(4.5f, 1.7f), new Vector2(9f, 3.4f)), TrunkColor);
+                DrawCircle(c + new Vector2(-4.5f, 0), 1.9f, new Color(0.63f, 0.48f, 0.32f));
+                DrawCircle(c + new Vector2(4.5f, 0), 1.9f, new Color(0.63f, 0.48f, 0.32f));
+                break;
+            case ResourceType.Stone:  // a lumpy grey rock
+                DrawCircle(c + new Vector2(1.6f, 0.6f), 3.2f, RockDark);
+                DrawCircle(c + new Vector2(-1.8f, -0.4f), 2.6f, RockLight);
+                break;
+            default:                  // food — an apple
+                DrawCircle(c, 2.8f, new Color(0.78f, 0.18f, 0.14f));
+                DrawRect(new Rect2(c.X - 0.4f, c.Y - 4.5f, 0.8f, 2f), new Color(0.3f, 0.2f, 0.1f));
+                break;
+        }
     }
 
     // Buildings: a filled footprint in the owner's colour, keeps darker and
@@ -1849,6 +1907,36 @@ public partial class Main : Node2D
         {
             float t = p.Age / p.Life;
             DrawCircle(p.Pos, Mathf.Lerp(p.R0, p.R1, t), p.C0.Lerp(p.C1, t));
+        }
+    }
+
+    void AdvancePopups(double delta)
+    {
+        float dt = (float)delta;
+        for (int i = _popups.Count - 1; i >= 0; i--)
+        {
+            var p = _popups[i];
+            p.Age += dt;
+            if (p.Age >= p.Life) { _popups.RemoveAt(i); continue; }
+            p.Pos.Y -= 22f * dt;      // drift upward as it fades
+        }
+    }
+
+    void DrawPopups()
+    {
+        if (_popupFont == null) return;
+        foreach (var p in _popups)
+        {
+            float a = 1f - p.Age / p.Life;
+            // A dark outline drawn behind, so the number reads over any terrain.
+            var col = new Color(p.Color.R, p.Color.G, p.Color.B, a);
+            var shadow = new Color(0, 0, 0, a * 0.7f);
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    if (dx != 0 || dy != 0)
+                        DrawString(_popupFont, p.Pos + new Vector2(dx, dy), p.Text,
+                                   HorizontalAlignment.Center, -1, 11, shadow);
+            DrawString(_popupFont, p.Pos, p.Text, HorizontalAlignment.Center, -1, 11, col);
         }
     }
 

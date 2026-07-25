@@ -254,11 +254,13 @@ namespace Sim
 
         // --- Economy tuning ---------------------------------------------------
         static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
-        // Bigger than GatherRange because a drop-off can be a building's CENTRE,
-        // and the middle of a 3x3 keep is two tiles from the nearest tile a
-        // worker can actually stand on — a 1.5-tile deposit range could never be
-        // met there, so workers would circle a keep forever without depositing.
-        static readonly int DropOffRange = Fixed.FromInt(3);
+        // A drop-off point is always a reachable tile right beside its building
+        // (SpawnPointAround / SetDropOff pick one), never the walled-in centre —
+        // so the worker can walk RIGHT UP to it. Matching GatherRange means it
+        // deposits only when it has arrived at the door, instead of dumping the
+        // load from a few tiles out (which read as the peasant not bothering to
+        // reach the keep).
+        static readonly int DropOffRange = Fixed.One * 3 / 2;   // 1.5 tiles
         const int CarryCapacity = 10;                           // load a worker hauls
         const int GatherInterval = 5;                           // ticks per 1 unit gathered
 
