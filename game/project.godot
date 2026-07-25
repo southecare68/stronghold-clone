@@ -1,6 +1,10 @@
-; Godot 4 project file. If the editor complains about the version, open it in
-; your installed Godot 4.x .NET build and let it upgrade/regenerate — the
-; scripts are what matter.
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
@@ -12,15 +16,9 @@ config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 
 [display]
 
-; Sized to fit the demo map (Main.DemoSize tiles * Main.PxPerUnit px) with room
-; for the HUD. The networked launch commands override this with --resolution.
 window/size/viewport_width=720
 window/size/viewport_height=720
 
 [dotnet]
 
 project/assembly_name="StrongholdClone"
-
-[rendering]
-
-renderer/rendering_method="forward_plus"

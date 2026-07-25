@@ -802,7 +802,7 @@ public partial class Main : Node2D
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  ([Z/X] or pinch zoom, mid-drag/arrows pan)" +
+               "\n[1/2/3/4] pick design  build: [B]arracks [K]eep [W]all [G]ate [H]ut [J] storehouse  ([Z/X] zoom)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
@@ -992,11 +992,13 @@ public partial class Main : Node2D
             }
 
             if (_replayMode) return;
-            // B / K / W / G place a building with its top-left at the cursor tile.
+            // Place a building with its top-left at the cursor tile.
             if (k.Keycode == Key.B) PlaceAtCursor(BuildingType.Barracks);
             else if (k.Keycode == Key.K) PlaceAtCursor(BuildingType.Keep);
             else if (k.Keycode == Key.W) PlaceAtCursor(BuildingType.Wall);
             else if (k.Keycode == Key.G) PlaceAtCursor(BuildingType.Gatehouse);
+            else if (k.Keycode == Key.H) PlaceAtCursor(BuildingType.WoodcutterHut);   // Hut, in a forest
+            else if (k.Keycode == Key.J) PlaceAtCursor(BuildingType.Storehouse);      // storage (J, next to H)
             // 1 / 2 / 3 / 4 choose which design a barracks trains.
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
             else if (k.Keycode == Key.Key2) _trainDesign = 1;
@@ -1333,10 +1335,44 @@ public partial class Main : Node2D
             // close enough and is how the genre has always played it.
             if (!Known(n.X, n.Y)) continue;
             var center = new Vector2(n.X, n.Y) * PxPerUnit;
-            float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
-            DrawRect(new Rect2(center - new Vector2(s / 2f, s / 2f), new Vector2(s, s)),
-                     ResourceColor(n.Type));
+
+            if (n.Type == ResourceType.Wood) DrawTree(center, n.Amount);
+            else if (n.Type == ResourceType.Stone) DrawRock(center, n.Amount);
+            else
+            {
+                float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
+                DrawRect(new Rect2(center - new Vector2(s / 2f, s / 2f), new Vector2(s, s)),
+                         ResourceColor(n.Type));
+            }
         }
+    }
+
+    // A tree: a brown trunk and a couple of green canopy blobs, shrinking as the
+    // tree is felled so a worked-out forest visibly thins. Drawn procedurally —
+    // a forest of these reads instantly at RTS scale without any baked art.
+    static readonly Color TrunkColor = new(0.36f, 0.26f, 0.16f);
+    static readonly Color LeafDark = new(0.16f, 0.34f, 0.14f);
+    static readonly Color LeafLight = new(0.26f, 0.46f, 0.20f);
+    void DrawTree(Vector2 center, int amount)
+    {
+        float f = Mathf.Clamp(amount / 120f, 0.35f, 1f);     // full tree at ~120 wood
+        float canopy = 7f * f;
+        var baseY = center + new Vector2(0, 5f);             // trunk foot on the tile
+        DrawRect(new Rect2(baseY.X - 1.3f, center.Y - 1f, 2.6f, 7f), TrunkColor);
+        DrawCircle(center + new Vector2(-2f, -2f), canopy, LeafDark);
+        DrawCircle(center + new Vector2(2.4f, -1f), canopy * 0.85f, LeafDark);
+        DrawCircle(center + new Vector2(0, -5f), canopy, LeafLight);
+    }
+
+    // A rock outcrop: a couple of grey lumps, shrinking as it is mined.
+    static readonly Color RockLight = new(0.55f, 0.54f, 0.52f);
+    static readonly Color RockDark = new(0.38f, 0.37f, 0.36f);
+    void DrawRock(Vector2 center, int amount)
+    {
+        float f = Mathf.Clamp(amount / 400f, 0.3f, 1f);
+        float r = 6.5f * f;
+        DrawCircle(center + new Vector2(1.5f, 1f), r, RockDark);
+        DrawCircle(center + new Vector2(-1.5f, -0.5f), r * 0.9f, RockLight);
     }
 
     // Buildings: a filled footprint in the owner's colour, keeps darker and

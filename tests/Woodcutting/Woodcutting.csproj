@@ -1,0 +1,23 @@
+<!-- Woodcutting — the self-running wood chain: a hut breeds a woodcutter that
+     finds its own trees, cuts them, and hauls wood to the nearest drop-off, with
+     no per-worker orders. The failures that matter are determinism ones — a hut
+     that picks a different tree, or delivers to a different storehouse, on two
+     machines desyncs a few ticks later — so the two-client check is the point.
+
+     Sim-only, like the other economy tests. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>WoodcuttingTests</RootNamespace>
+    <AssemblyName>WoodcuttingTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

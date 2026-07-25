@@ -265,15 +265,16 @@ static class Program
         Check("each player can see their own keep",
               sim.Fog.IsVisible(1, w + 1, m) && sim.Fog.IsVisible(2, e + 1, m));
 
-        // Both home patches must be workable from the first tick.
+        // Each player must open with resources in sight — their forest and their
+        // stone patch — so they can gather from tick 0 without scouting home.
         int home1 = 0, home2 = 0;
         foreach (var n in sim.Nodes)
         {
             if (sim.Fog.IsVisible(1, n.X, n.Y)) home1++;
             if (sim.Fog.IsVisible(2, n.X, n.Y)) home2++;
         }
-        Check($"player 1 opens with 2 workable patches in sight (has {home1})", home1 == 2);
-        Check($"player 2 opens with 2 workable patches in sight (has {home2})", home2 == 2);
+        Check($"player 1 opens with resources in sight (has {home1})", home1 >= 2);
+        Check($"player 2 opens with resources in sight (has {home2})", home2 >= 2);
 
         // And a gather order on one is actually accepted, which is the thing that
         // matters — visibility is only interesting because of what it permits.

@@ -30,7 +30,7 @@ extends SceneTree
 
 # Absolute path into the game repo. Godot writes to an OS-absolute path, which is
 # what lets a tool running in one project deposit output in another.
-const OUT_DIR := "/Users/jamesparker/Desktop/stronghold-clone/game/Art"
+const OUT_DIR := "/Users/jamesparker/stronghold-clone/game/Art"
 const PREFABS := "res://Assets/PolygonFantasyKingdom/Prefabs/"
 
 const ELEVATION_DEG := 52.0     # steep 3/4 view; flatter hides building tops
@@ -64,6 +64,8 @@ const ENTITIES := [
 	{ "out": "buildings/barracks",  "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_01_A_Optimized", "turns": false, "fit": 1.15 },
 	{ "out": "buildings/wall",      "prefab": "Castle/SM_Bld_Castle_Battlements_01",                        "turns": false, "fit": 1.05 },
 	{ "out": "buildings/gatehouse", "prefab": "Castle/SM_Bld_Castle_Wall_Gate_01",                          "turns": false, "fit": 1.10 },
+	{ "out": "buildings/woodcutter", "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_03_Optimized",       "turns": false, "fit": 1.15 },
+	{ "out": "buildings/storehouse", "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_Blacksmith_01_Optimized", "turns": false, "fit": 1.15 },
 	{ "out": "units/soldier", "prefab": "Characters/SM_Chr_Soldier_Male_01",   "turns": true, "fit": 1.25 },
 	{ "out": "units/runner",  "prefab": "Characters/SM_Chr_Soldier_Female_01", "turns": true, "fit": 1.25 },
 	{ "out": "units/brute",   "prefab": "Characters/SM_Chr_Rider_01",          "turns": true, "fit": 1.25 },

@@ -918,6 +918,41 @@ scale because a true-size mote is invisible at RTS zoom. All 15 suites pass,
 0xB1A7A676 holds. Verified it runs clean through thousands of ticks in sync; the
 transient effects are hard to freeze in a screenshot but the code paths all fire.
 
+✅ **Self-running wood chain** (first slice of the Stronghold economy). The model
+is the key thing: you place a WORK BUILDING and it runs itself, instead of
+micro-managing gatherers.
+
+- New `BuildingType.WoodcutterHut` and `Storehouse`; new `Job.Woodcutting`; a
+  `Building.WorkerId` linking a hut to its one woodcutter. All deterministic and
+  OPT-IN (no hut placed = the woodcutting phase is a no-op), so 0xB1A7A676 and
+  every pre-existing scenario are untouched.
+- `PlaceBuilding(WoodcutterHut)` breeds a woodcutter (Job.Woodcutting). Each tick
+  `ResolveWoodcutting` (run just before the shared gather cycle) hands any idle
+  hut-worker the nearest standing tree in range; the existing walk/chop/haul loop
+  — now shared by Gathering and Woodcutting — does the rest, delivering to the
+  NEAREST drop-off (keep or storehouse; this also improved manual gathering). A
+  hut re-breeds a killed woodcutter on a timer; razing a hut stands its worker
+  down.
+- Trees are Wood ResourceNodes; `Skirmish` now plants a 3x3 forest by each base
+  (in opening sight, so you can build a hut from tick 0). Rendered procedurally as
+  trunk+canopy (shrinking as felled); stone nodes as grey lumps. Hut and
+  storehouse got real baked sprites (a thatched cottage and a workshop, from the
+  fantasy-kingdom pack). Build keys `H` (hut) and `J` (storehouse).
+- **The bug this shook out, and its test:** the forest plants a tree on the very
+  tile the hut lands on, so the hut's NEAREST tree was one buried under itself —
+  a blocked tile the woodcutter could never path to, so it froze. Fixed two ways:
+  building over resources now CLEARS them (`PlaceBuilding` removes nodes under the
+  footprint), and `NearestTree` skips any tree on a non-passable tile. The
+  Woodcutting suite gained a case that runs the REAL Skirmish map + a hut in the
+  real forest for 2000 ticks and asserts wood actually banks — which is what
+  caught it (the earlier unit-tests used a tiny open map and passed).
+- `tests/Woodcutting` (16th suite): opt-in (no hut, no effect), a hut breeds a
+  cutter and wood flows, it moves to the next tree on its own, a storehouse banks
+  faster than a distant keep, a killed cutter is replaced, razing frees the
+  worker, the real-map case above, and two clients agree for 900 ticks with two
+  competing huts. All 16 suites pass; verified live: place a hut, wood climbs
+  185 -> 335 with no orders given, IN SYNC.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** the particle-fx pack (fire on burning
    buildings, dust under marching units) if the renderer ever goes 3D; more baked

@@ -17,7 +17,7 @@ set -e
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 ASSET="$REPO/polygon-fantasy-kingdom"
-GODOT="${GODOT:-/Users/jamesparker/Downloads/Godot_mono.app/Contents/MacOS/Godot}"
+GODOT="${GODOT:-/Applications/Godot_mono.app/Contents/MacOS/Godot}"
 
 if [ ! -d "$ASSET" ]; then
 	echo "asset project not found at $ASSET" >&2

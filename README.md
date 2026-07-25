@@ -56,6 +56,7 @@ stronghold-clone/
 │  ├─ PointBuy/         data-driven unit designs within a point budget
 │  ├─ Replay/           record a match and replay it bit-for-bit
 │  ├─ Fog/              fog of war: sight, memory, and the orders it gates
+│  ├─ Woodcutting/      the self-running wood chain (hut -> cutter -> storage)
 │  └─ Audio/            synth and score, checked numerically (no speakers needed)
 └─ prototype-node/      the verified Node proof of the netcode (reference)
    ├─ src/  test/
@@ -71,6 +72,9 @@ wiped out. Right-click a resource node to send workers to gather it — they hau
 loads back to the drop-off and your stockpile (shown in the HUD) grows. The HUD
 also shows the tick, state checksum, and sync state. Press `B`/`K` to place a
 barracks/keep at the cursor; right-click your own barracks to train soldiers.
+Press `H` to raise a **woodcutter's hut** in a forest — it runs itself, breeding a
+woodcutter who fells the nearest trees and hauls the wood back with no orders from
+you — and `J` for a **storehouse**, a closer drop-off so the round trip is shorter.
 Buildings block movement, so units path around them; lay `W`alls into a curtain
 and drop a `G`atehouse in the gap, then right-click your gate to open or close it.
 Buildings have HP — right-click an enemy structure with soldiers selected to

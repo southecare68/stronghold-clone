@@ -34,3 +34,8 @@ node_modules/
 /Source_Files/
 /particle-fx/
 /polygon-fantasy-kingdom/
+
+# Godot regenerates texture .import metadata on editor open. The game loads its
+# sprites at runtime via Image.Load (see SpriteBank), so these are not needed and
+# would add 500+ files; ignore them.
+*.import

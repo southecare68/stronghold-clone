@@ -186,6 +186,7 @@ namespace Netcode
                 foreach (int did in b.TrainQueue) PutInt(buf, did);
                 PutInt(buf, b.BuildTimer);
                 PutInt(buf, b.Open ? 1 : 0);
+                PutInt(buf, b.WorkerId);
             }
 
             PutInt(buf, snap.Designs.Length);
@@ -347,6 +348,7 @@ namespace Netcode
                     for (int j = 0; j < qn; j++) buildings[i].TrainQueue.Add(GetInt(data, ref p));
                     buildings[i].BuildTimer = GetInt(data, ref p);
                     buildings[i].Open = GetInt(data, ref p) != 0;
+                    buildings[i].WorkerId = GetInt(data, ref p);
                 }
                 snap.Buildings = buildings;
 

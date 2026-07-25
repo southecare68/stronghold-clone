@@ -51,12 +51,28 @@ namespace Sim
         public static IEnumerable<(ResourceType Type, int X, int Y, int Amount)> Nodes(int size)
         {
             int w = West(size), e = East(size), m = MidY(size);
-            yield return (ResourceType.Wood, w + 6, m - 8, 400);
+
+            // Stone patches behind each base, and a contested pair by the passes.
             yield return (ResourceType.Stone, w + 6, m + 8, 400);
-            yield return (ResourceType.Wood, e - 4, m - 8, 400);
             yield return (ResourceType.Stone, e - 4, m + 8, 400);
-            yield return (ResourceType.Wood, size / 2 - 8, size * 25 / 100, 500);
+            yield return (ResourceType.Stone, size / 2 - 8, size * 25 / 100, 500);
             yield return (ResourceType.Stone, size / 2 + 6, size * 75 / 100, 500);
+
+            // A forest by each base — a cluster of trees (Wood nodes) for a
+            // woodcutter's hut to work. Kept in the keep's opening sight so you
+            // can build a hut there from tick 0. A grid rather than a scatter, so
+            // both machines plant the identical trees in the identical order.
+            foreach (var t in Forest(w + 7, m - 9)) yield return t;
+            foreach (var t in Forest(e - 5, m - 9)) yield return t;
+        }
+
+        // A 3x3 block of trees around (cx, cy), each a Wood node. 120 wood a tree
+        // is a couple of loads — a forest is worked down over a match, not endless.
+        static IEnumerable<(ResourceType, int, int, int)> Forest(int cx, int cy)
+        {
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                    yield return (ResourceType.Wood, cx + dx * 2, cy + dy * 2, 120);
         }
 
         // Build the starting world. The ORDER of these calls is part of the

@@ -20,12 +20,15 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5 }
 
     public enum ResourceType { Wood = 0, Stone = 1, Food = 2 }
 
     // What a unit is currently doing beyond just moving/fighting.
-    public enum Job { None = 0, Gathering = 1 }
+    // Gathering = a worker sent to a node by hand. Woodcutting = a worker BOUND
+    // to a woodcutter's hut, which finds it a fresh tree whenever it runs out —
+    // the self-running economy. Both share the same walk/chop/haul cycle.
+    public enum Job { None = 0, Gathering = 1, Woodcutting = 2 }
 
     // A harvestable deposit sitting on a tile. Depletes as it is gathered and is
     // removed when empty. Position is in whole tiles (a node occupies a cell),
@@ -111,6 +114,11 @@ namespace Sim
         // like a wall. Ignored by every other building type.
         public bool Open;
 
+        // A woodcutter's hut owns one woodcutter (WorkerId). The hut assigns it
+        // trees; if the worker dies the hut breeds a new one. Zero for every other
+        // building type.
+        public int WorkerId;
+
         public bool Alive => Hp > 0;
         public int CenterX => X + W / 2;
         public int CenterY => Y + H / 2;
@@ -119,7 +127,7 @@ namespace Sim
         {
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
             Hp = Hp, MaxHp = MaxHp, TrainQueue = new List<int>(TrainQueue),
-            BuildTimer = BuildTimer, Open = Open,
+            BuildTimer = BuildTimer, Open = Open, WorkerId = WorkerId,
         };
     }
 
@@ -252,6 +260,14 @@ namespace Sim
         const int CarryCapacity = 10;                           // load a worker hauls
         const int GatherInterval = 5;                           // ticks per 1 unit gathered
 
+        // --- Woodcutting (the self-running wood chain) ------------------------
+        // How far from its hut a woodcutter will roam for a tree. Beyond this the
+        // hut sits idle — so you place it IN the forest, which is the point.
+        const int HutRange = 18;                                // tiles
+        // A hut whose woodcutter has died breeds a new one, but not instantly —
+        // otherwise a hut next to enemies would spew a stream of free bodies.
+        const int WoodcutterRespawn = 120;                      // ticks (6s)
+
         // --- Buildings --------------------------------------------------------
         const int TrainTime = 60;                               // ticks to produce one unit (3s)
         const int TrainCostWood = 15;                           // per unit trained at a Barracks
@@ -260,18 +276,20 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1 };           // Keep, Barracks, Wall, Gatehouse
-        static readonly int[] FootH = { 3, 2, 1, 1 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2 };     // Keep, Barracks, Wall, Gatehouse, Hut, Storehouse
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
             new[] { 40, 0, 0 },    // Barracks
             new[] { 0, 5, 0 },     // Wall — cheap stone, meant to be spammed
             new[] { 10, 10, 0 },   // Gatehouse
+            new[] { 15, 0, 0 },    // Woodcutter's Hut — cheap, so the wood economy bootstraps
+            new[] { 20, 5, 0 },    // Storehouse — a drop-off closer to the trees
         };
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -556,6 +574,12 @@ namespace Sim
             Buildings.Add(b);
             BlockFootprint(b, true);
 
+            // Building over resources clears them — the trees you raised your hut
+            // on are gone, not buried under it where no worker could ever reach
+            // them. (That buried-tree case is exactly what froze the first
+            // woodcutter: its nearest tree sat under its own hut.)
+            Nodes.RemoveAll(n => n.X >= x && n.X < x + b.W && n.Y >= y && n.Y < y + b.H);
+
             // A keep is where its owner's gatherers deposit — at a REACHABLE tile
             // just outside its footprint, not the walled-in centre (which no
             // worker could path to or stand on).
@@ -564,6 +588,11 @@ namespace Sim
                 var drop = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
                 SetDropOff(owner, drop.X, drop.Y);
             }
+
+            // A woodcutter's hut comes with its woodcutter. It runs itself from
+            // here on — see ResolveWoodcutting.
+            if (type == BuildingType.WoodcutterHut) BreedWoodcutter(b);
+
             return b;
         }
 
@@ -856,7 +885,8 @@ namespace Sim
             ResolveCombat();
             RemoveDead();
             RemoveDestroyedBuildings();
-            ResolveEconomy();
+            ResolveWoodcutting();   // hand idle woodcutters their next tree...
+            ResolveEconomy();       // ...before the shared walk/chop/haul cycle runs
             ResolveProduction();
             TickNumber++;
         }
@@ -906,15 +936,16 @@ namespace Sim
         }
 
         // The gathering loop, iterated in id order (no RNG, pure integer state).
-        // A worker cycles: walk to its node, gather to a full load, walk to its
-        // owner's drop-off, deposit, repeat — until the node is empty. Only a unit
-        // with Job.Gathering runs the body, so a match with no Gather orders (the
-        // parity scenario) is untouched.
+        // A worker cycles: walk to its node, gather to a full load, walk to the
+        // NEAREST drop-off, deposit, repeat. Runs for both hand-assigned gatherers
+        // (Job.Gathering) and hut-bound woodcutters (Job.Woodcutting) — the cycle
+        // is identical; only what happens when the node runs out differs. A match
+        // with neither job (the parity scenario) is untouched.
         void ResolveEconomy()
         {
             foreach (var u in Units)
             {
-                if (u.Job != Job.Gathering) continue;
+                if (u.Job != Job.Gathering && u.Job != Job.Woodcutting) continue;
 
                 var node = Nodes.Find(n => n.Id == u.GatherNodeId);
                 bool nodeGone = node == null || node.Amount <= 0;
@@ -922,15 +953,16 @@ namespace Sim
 
                 if (full || (nodeGone && u.CarryAmount > 0))
                 {
-                    // Haul the load home. If the drop-off is gone (its keep was
-                    // razed mid-haul), there is nowhere to bank — stand down.
-                    if (!_dropOff.TryGetValue(u.Owner, out var drop)) { EndJob(u); continue; }
+                    // Haul the load to the closest drop-off — a keep or a
+                    // storehouse. If the owner has none (all razed mid-haul), there
+                    // is nowhere to bank, so stand down.
+                    if (!NearestDropOff(u.Owner, u.X, u.Y, out var drop)) { EndJob(u); continue; }
                     if (WithinRange(u, drop.X, drop.Y, DropOffRange))
                     {
                         StockOf(u.Owner)[(int)u.CarryType] += u.CarryAmount;
                         u.CarryAmount = 0;
-                        if (nodeGone) EndJob(u);
-                        else Order(u, node.X, node.Y);      // back for another load
+                        if (nodeGone) FinishNode(u);          // tree/node exhausted
+                        else Order(u, node.X, node.Y);        // back for another load
                     }
                     else ChaseTo(u, drop.X, drop.Y);
                 }
@@ -952,11 +984,117 @@ namespace Sim
                 }
                 else
                 {
-                    EndJob(u);   // node gone and empty-handed
+                    FinishNode(u);   // node gone and empty-handed
                 }
             }
 
             Nodes.RemoveAll(n => n.Amount <= 0);
+        }
+
+        // A worker's node ran out. A hand-assigned gatherer stands down; a
+        // woodcutter just clears its assignment and waits — ResolveWoodcutting
+        // hands it the next tree, so the hut keeps working forever.
+        void FinishNode(Unit u)
+        {
+            if (u.Job == Job.Woodcutting) { u.GatherNodeId = 0; u.GatherTimer = 0; }
+            else EndJob(u);
+        }
+
+        // The nearest place owner can deposit goods: their keep's drop-off tile,
+        // or a tile beside any storehouse they own — whichever is closest to
+        // (fx,fy). Iterated in id order with a strict compare, so every machine
+        // picks the same one.
+        bool NearestDropOff(int owner, int fx, int fy, out Tile best)
+        {
+            best = default;
+            long bestD = long.MaxValue;
+            bool found = false;
+
+            if (_dropOff.TryGetValue(owner, out var keep))
+            {
+                bestD = DropDist(keep.X, keep.Y, fx, fy); best = keep; found = true;
+            }
+            foreach (var b in Buildings)               // id order
+            {
+                if (b.Type != BuildingType.Storehouse || b.Owner != owner || !b.Alive) continue;
+                var t = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
+                long d = DropDist(t.X, t.Y, fx, fy);
+                if (d < bestD) { bestD = d; best = t; found = true; }
+            }
+            return found;
+        }
+
+        static long DropDist(int tx, int ty, int fx, int fy)
+        {
+            long dx = Fixed.FromInt(tx) - fx, dy = Fixed.FromInt(ty) - fy;
+            return dx * dx + dy * dy;
+        }
+
+        // ---- Woodcutting: the self-running wood chain --------------------------
+        // Each hut keeps one woodcutter fed with trees. This runs BEFORE the
+        // gather cycle so a worker that just emptied a tree is handed the next one
+        // in the same tick and never stalls.
+        void ResolveWoodcutting()
+        {
+            foreach (var hut in Buildings)             // id order
+            {
+                if (hut.Type != BuildingType.WoodcutterHut || !hut.Alive) continue;
+
+                var worker = hut.WorkerId != 0 ? Units.Find(u => u.Id == hut.WorkerId) : null;
+                if (worker == null || !worker.Alive)
+                {
+                    // The woodcutter is gone. Breed a replacement, on a timer so a
+                    // hut cannot be a free-body fountain. (BuildTimer is unused by
+                    // huts, so it doubles as the respawn clock.)
+                    hut.WorkerId = 0;
+                    if (hut.BuildTimer > 0) { hut.BuildTimer--; continue; }
+                    BreedWoodcutter(hut);
+                    continue;
+                }
+
+                // Idle (no tree, empty-handed): find the nearest standing tree in
+                // range and send the worker to it.
+                if (worker.GatherNodeId == 0 && worker.CarryAmount == 0)
+                {
+                    var tree = NearestTree(hut);
+                    if (tree != null)
+                    {
+                        worker.Job = Job.Woodcutting;
+                        worker.GatherNodeId = tree.Id;
+                        worker.GatherTimer = 0;
+                    }
+                }
+            }
+        }
+
+        void BreedWoodcutter(Building hut)
+        {
+            var spot = SpawnPointAround(hut);
+            if (!spot.HasValue) { hut.BuildTimer = 1; return; }   // no room this tick; try next
+            var w = SpawnUnit(hut.Owner, spot.Value.X, spot.Value.Y, 0);
+            w.Job = Job.Woodcutting;
+            hut.WorkerId = w.Id;
+            hut.BuildTimer = WoodcutterRespawn;       // arm the clock for the NEXT death
+        }
+
+        // Nearest Wood node within the hut's reach, ties broken by node id.
+        ResourceNode NearestTree(Building hut)
+        {
+            ResourceNode best = null;
+            long bestD = long.MaxValue;
+            long reach = (long)HutRange * HutRange;
+            foreach (var n in Nodes)                  // id order
+            {
+                if (n.Type != ResourceType.Wood || n.Amount <= 0) continue;
+                // A tree the worker could never reach — one buried under a
+                // building — is no tree at all. Skip it, or the hut hands its
+                // worker an assignment it can only stand and stare at.
+                if (!Map.Passable(n.X, n.Y)) continue;
+                long dx = n.X - hut.CenterX, dy = n.Y - hut.CenterY;
+                long d = dx * dx + dy * dy;
+                if (d <= reach && d < bestD) { bestD = d; best = n; }
+            }
+            return best;
         }
 
         bool WithinRange(Unit u, int tileX, int tileY, int range) =>
@@ -1093,6 +1231,13 @@ namespace Sim
                 if (b.Alive) continue;
                 BlockFootprint(b, false);
                 if (b.Type == BuildingType.Keep) _dropOff.Remove(b.Owner);
+                // A razed hut lets its woodcutter go — it stops working and just
+                // stands where it was, rather than serving a building that's gone.
+                if (b.Type == BuildingType.WoodcutterHut && b.WorkerId != 0)
+                {
+                    var w = Units.Find(u => u.Id == b.WorkerId);
+                    if (w != null) EndJob(w);
+                }
                 Buildings.RemoveAt(i);
             }
         }
@@ -1260,6 +1405,7 @@ namespace Sim
                 foreach (int did in b.TrainQueue) Mix(did);
                 Mix(b.BuildTimer);
                 Mix(b.Open ? 1 : 0);
+                Mix(b.WorkerId);
             }
 
             // Fog. Only the EXPLORED half — see Vision.cs for why the currently
