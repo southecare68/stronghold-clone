@@ -132,6 +132,26 @@ public partial class Main : Node2D
     readonly List<Projectile> _projectiles = new();
     static readonly int RangedShotDist = Fixed.FromInt(2);   // shots longer than this get an arrow
 
+    // ---- Particles (render-only spectacle) ---------------------------------
+    // Fire and smoke off burning buildings, sparks where blows land, dust under
+    // marching feet, debris when a wall comes down. Pure decoration, in exactly
+    // the category as the projectiles and the fog overlay: driven off sim events
+    // the renderer already watches, never feeding back, so no checksum moves and
+    // it all replays for free. Jitter comes from a PRIVATE Random — never Sim.Rng,
+    // which the simulation guards — so nothing here can nudge a damage roll.
+    //
+    // Drawn in world space and fog-gated at the source: a fire you cannot see
+    // makes no smoke, the same rule the sounds follow.
+    sealed class Particle
+    {
+        public Vector2 Pos, Vel, Accel;
+        public float Age, Life, R0, R1;
+        public Color C0, C1;
+    }
+    readonly List<Particle> _particles = new();
+    readonly System.Random _fx = new(0xBEEF);      // render jitter only, not the sim
+    const int MaxParticles = 1400;                  // a hard cap so a long siege can't unbound it
+
     // ---- Minimap ------------------------------------------------------------
     // Drawn in SCREEN space (the camera transform is reset first), so it stays
     // pinned to the corner at any zoom. Shows the whole battlefield, the current
@@ -435,7 +455,10 @@ public partial class Main : Node2D
             if (_shown.Buildings.Find(x => x.Id == id) != null) continue;
             if (!_prevBuildingWhere.TryGetValue(id, out var where)) continue;
             if (Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Y)))
+            {
                 _sound.Play(Sfx.Collapse, Aud(where.X, where.Y));
+                CollapseBurst(where * PxPerUnit);   // smoke and stone chips where it stood
+            }
         }
 
         foreach (var b in _shown.Buildings)
@@ -624,6 +647,8 @@ public partial class Main : Node2D
             ? (float)Mathf.Clamp(_accum / Step, 0.0, 1.0) : 1f;
 
         AgeProjectiles(delta);
+        EmitAmbientParticles(delta);
+        AdvanceParticles(delta);
         ComputeSeparation();
         _hud.Text = BuildHud();
         QueueRedraw();
@@ -693,6 +718,8 @@ public partial class Main : Node2D
         _alpha = (float)Mathf.Clamp(_accum / Step, 0.0, 1.0);
 
         AgeProjectiles(delta);
+        EmitAmbientParticles(delta);
+        AdvanceParticles(delta);
         ComputeSeparation();
         AdvanceAnimation(delta);
         UpdateMinimapFog();
@@ -1136,6 +1163,9 @@ public partial class Main : Node2D
             if (u.CarryAmount > 0)
                 DrawCircle(p + new Vector2(0, -8f), 2f, ResourceColor(u.CarryType));
         }
+        // Sparks, flame and smoke over the units, so an impact reads in front of
+        // the fighter and smoke rises past the building. Still under the fog.
+        DrawParticles();
         // Last, so it darkens everything drawn above it — terrain, buildings and
         // any unit that happens to be standing in remembered ground.
         DrawFog();
@@ -1635,8 +1665,9 @@ public partial class Main : Node2D
             if (dist < RangedShotDist)
             {
                 // Close quarters: no arrow to draw, but very much something to
-                // hear, and it belongs at the unit being hit.
+                // hear — and a spray of sparks where the blow lands.
                 _sound?.Play(Sfx.MeleeHit, to);
+                if (sawTarget) Sparks(to, 6);
                 continue;
             }
 
@@ -1645,7 +1676,7 @@ public partial class Main : Node2D
             // if that END is visible.
             if (sawShooter)
                 _sound?.Play(Sfx.BowShot, new Vector2(s.FromX, s.FromY) / (float)Fixed.One * PxPerUnit);
-            if (sawTarget) _sound?.Play(Sfx.ArrowHit, to);
+            if (sawTarget) { _sound?.Play(Sfx.ArrowHit, to); Sparks(to, 3); }
 
             _projectiles.Add(new Projectile
             {
@@ -1665,6 +1696,120 @@ public partial class Main : Node2D
             if (_projectiles[i].Age >= _projectiles[i].Life) _projectiles.RemoveAt(i);
         }
     }
+
+    // ---- Particles ----------------------------------------------------------
+
+    float Jit(float lo, float hi) => lo + (float)_fx.NextDouble() * (hi - lo);
+
+    void Add(Vector2 posPx, Vector2 vel, Vector2 accel, float life, float r0, float r1, Color c0, Color c1)
+    {
+        if (_particles.Count >= MaxParticles) return;
+        _particles.Add(new Particle { Pos = posPx, Vel = vel, Accel = accel, Life = life, R0 = r0, R1 = r1, C0 = c0, C1 = c1 });
+    }
+
+    // A quick shower of bright sparks where a blow lands. `n` scales with how hard.
+    void Sparks(Vector2 posPx, int n)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            var v = new Vector2(Jit(-70, 70), Jit(-90, 10));   // up-and-out
+            Add(posPx, v, new Vector2(0, 260), Jit(0.16f, 0.34f), Jit(2.2f, 3.4f), 0.3f,
+                new Color(1f, Jit(0.8f, 1f), 0.4f), new Color(1f, 0.4f, 0.1f, 0f));
+        }
+    }
+
+    // A low puff kicked up under a moving foot. A pale, slightly larger cloud
+    // than realism wants, because at RTS zoom a true-scale dust mote is invisible
+    // against the grass — it needs to read as "movement" at a glance.
+    void Dust(Vector2 posPx)
+    {
+        var v = new Vector2(Jit(-16, 16), Jit(-24, -8));
+        Add(posPx, v, new Vector2(0, 26), Jit(0.4f, 0.7f), 3f, Jit(10f, 14f),
+            new Color(0.78f, 0.72f, 0.58f, 0.6f), new Color(0.78f, 0.72f, 0.58f, 0f));
+    }
+
+    // One tongue of flame plus its smoke, rising off a burning structure.
+    void FirePuff(Vector2 posPx)
+    {
+        Add(posPx + new Vector2(Jit(-6, 6), Jit(-4, 4)), new Vector2(Jit(-8, 8), Jit(-52, -30)),
+            new Vector2(0, -30), Jit(0.4f, 0.7f), Jit(3.5f, 6f), 1.2f,
+            new Color(1f, Jit(0.75f, 0.95f), 0.25f), new Color(0.8f, 0.15f, 0.05f, 0f));
+        if (_fx.NextDouble() < 0.5)   // less smoke than flame, so the fire reads
+            Add(posPx + new Vector2(Jit(-4, 4), -6), new Vector2(Jit(-10, 10), Jit(-34, -20)),
+                new Vector2(0, -12), Jit(0.9f, 1.6f), 4f, Jit(12f, 20f),
+                new Color(0.22f, 0.2f, 0.2f, 0.5f), new Color(0.3f, 0.3f, 0.3f, 0f));
+    }
+
+    // A wall or keep coming down: a gout of smoke and a spray of stone chips.
+    void CollapseBurst(Vector2 posPx)
+    {
+        for (int i = 0; i < 18; i++)
+            Add(posPx + new Vector2(Jit(-10, 10), Jit(-8, 8)), new Vector2(Jit(-40, 40), Jit(-70, -10)),
+                new Vector2(0, 30), Jit(0.8f, 1.6f), Jit(9f, 18f), 2f,
+                new Color(0.28f, 0.27f, 0.26f, 0.7f), new Color(0.35f, 0.35f, 0.35f, 0f));
+        for (int i = 0; i < 14; i++)   // stone chips, gravity-bound
+            Add(posPx, new Vector2(Jit(-90, 90), Jit(-120, -20)), new Vector2(0, 340),
+                Jit(0.4f, 0.9f), Jit(2f, 3.5f), 1.2f,
+                new Color(0.5f, 0.48f, 0.46f), new Color(0.4f, 0.38f, 0.36f, 0f));
+    }
+
+    // Emit the continuous effects — building fires and marching dust — at rates
+    // scaled by frame time, so they look the same whatever the frame rate. Only
+    // where the player can see, exactly like the sounds.
+    void EmitAmbientParticles(double delta)
+    {
+        if (_art == null) return;   // particles ride with the art layer
+
+        foreach (var b in _shown.Buildings)
+        {
+            if (b.MaxHp <= 0 || b.Hp >= b.MaxHp) continue;      // undamaged: no fire
+            if (!Lit(b.CenterX, b.CenterY)) continue;
+            // The more hurt, the more it burns.
+            float hurt = 1f - Mathf.Clamp((float)b.Hp / b.MaxHp, 0f, 1f);
+            float rate = hurt * hurt * 26f;                     // puffs/sec
+            if (_fx.NextDouble() < rate * delta)
+            {
+                var p = new Vector2(b.CenterX + Jit(-b.W * 0.4f, b.W * 0.4f),
+                                    b.CenterY + Jit(-b.H * 0.4f, b.H * 0.4f)) * PxPerUnit;
+                FirePuff(p);
+            }
+        }
+
+        foreach (var u in _shown.Units)
+        {
+            if (!Moving(u)) continue;
+            if (u.Owner != _myPlayer && !LitUnit(u)) continue;
+            if (_fx.NextDouble() < 11.0 * delta)                // a scuff now and then
+                Dust(WorldToScreenSim(u) + new Vector2(0, 4));
+        }
+    }
+
+    void AdvanceParticles(double delta)
+    {
+        float dt = (float)delta;
+        for (int i = _particles.Count - 1; i >= 0; i--)
+        {
+            var p = _particles[i];
+            p.Age += dt;
+            if (p.Age >= p.Life) { _particles.RemoveAt(i); continue; }
+            p.Vel += p.Accel * dt;
+            p.Pos += p.Vel * dt;
+        }
+    }
+
+    void DrawParticles()
+    {
+        foreach (var p in _particles)
+        {
+            float t = p.Age / p.Life;
+            DrawCircle(p.Pos, Mathf.Lerp(p.R0, p.R1, t), p.C0.Lerp(p.C1, t));
+        }
+    }
+
+    // A unit's sim position in world pixels (feet), not interpolated — good enough
+    // for spawning a dust puff.
+    Vector2 WorldToScreenSim(Unit u) =>
+        new Vector2(u.X, u.Y) / (float)Fixed.One * PxPerUnit;
 
     // The minimap panel, in screen coordinates, pinned to the bottom-right.
     // One pixel per tile. Terrain is sealed for the life of the match, so this

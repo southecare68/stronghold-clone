@@ -905,6 +905,19 @@ isometric-RTS approach, and the one that keeps everything already built.
   (`Godot --headless --path polygon-fantasy-kingdom --editor --quit-after 4000`)
   before the bake can load prefabs; the character FBX is the slow part.
 
+✅ **Particle FX** (first slice of "content & spectacle"). A render-only particle
+system (`_particles` in Main.cs), same category as the projectiles and fog: driven
+off sim events the renderer already watches, jitter from a PRIVATE Random (never
+Sim.Rng), fog-gated at the source, nothing feeding back — so no checksum moves and
+it replays for free. Four effects: **sparks** where a blow lands (melee and arrow
+hits, in CaptureShots), **fire + smoke** off any damaged building at a rate scaled
+by how hurt it is (EmitAmbientParticles), **dust** under moving feet, and a
+**collapse burst** of smoke and stone chips when a building is destroyed. Hard cap
+of 1400 particles so a long siege can't unbound it. Dust was bumped past realistic
+scale because a true-size mote is invisible at RTS zoom. All 15 suites pass,
+0xB1A7A676 holds. Verified it runs clean through thousands of ticks in sync; the
+transient effects are hard to freeze in a screenshot but the code paths all fire.
+
 ## Immediate next tasks (choose by taste — the core is done)
 17. **Polish & depth:** the particle-fx pack (fire on burning
    buildings, dust under marching units) if the renderer ever goes 3D; more baked
