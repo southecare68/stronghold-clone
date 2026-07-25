@@ -775,7 +775,7 @@ public partial class Main : Node2D
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  (wheel zoom, mid-drag/arrows pan)" +
+               "\n[1/2/3/4] pick design  [B/K/W/G] build at cursor  ([Z/X] or pinch zoom, mid-drag/arrows pan)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
@@ -843,9 +843,20 @@ public partial class Main : Node2D
             return;
         }
 
+        // Trackpad pinch — the natural zoom gesture on a laptop or a wheel-less
+        // mouse. Factor is the magnification for this event (slightly above 1 to
+        // zoom in, below to zoom out); ZoomAt keeps the pinch point fixed.
+        if (e is InputEventMagnifyGesture mg)
+        {
+            ZoomAt(mg.Factor, mg.Position);
+            QueueRedraw();
+            return;
+        }
+
         if (e is InputEventMouseButton mb)
         {
-            // Camera: wheel zooms toward the cursor, middle-button drags to pan.
+            // Camera: wheel (or two-finger trackpad scroll) zooms toward the
+            // cursor, middle-button drags to pan.
             if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelUp)   { ZoomAt(1.1f, mb.Position);       QueueRedraw(); return; }
             if (mb.Pressed && mb.ButtonIndex == MouseButton.WheelDown) { ZoomAt(1f / 1.1f, mb.Position);  QueueRedraw(); return; }
             if (mb.ButtonIndex == MouseButton.Middle)                 { _panning = mb.Pressed;            return; }
@@ -938,6 +949,10 @@ public partial class Main : Node2D
                 case Key.Right: _camCenter += new Vector2(step, 0);  ClampCamera(); QueueRedraw(); return;
                 case Key.Up:    _camCenter += new Vector2(0, -step);  ClampCamera(); QueueRedraw(); return;
                 case Key.Down:  _camCenter += new Vector2(0, step);   ClampCamera(); QueueRedraw(); return;
+                // Z / X zoom (toward the screen centre) for anyone without a
+                // wheel or a trackpad handy.
+                case Key.Z: ZoomAt(1.12f, GetViewportRect().Size / 2f);      QueueRedraw(); return;
+                case Key.X: ZoomAt(1f / 1.12f, GetViewportRect().Size / 2f); QueueRedraw(); return;
                 // Reveal the whole map. A DISPLAY switch only — it cannot show
                 // you anything the simulation would let you act on, because the
                 // orders are gated in Sim/Vision.cs, not here.
