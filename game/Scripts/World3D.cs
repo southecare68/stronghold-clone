@@ -8,6 +8,7 @@
 
 using Godot;
 using Sim;
+using Netcode;
 using System.Collections.Generic;
 
 public partial class World3D : Node3D
@@ -37,7 +38,18 @@ public partial class World3D : Node3D
     PackedScene _wallBody, _wallBat;
     readonly HashSet<(int, int)> _wallSet = new();
 
-    Simulation _sim;
+    // Netcode. The renderer no longer owns a bare Simulation; it drives a lockstep
+    // Client (see Lockstep.cs), exactly as the 2D Main did. LOCAL mode runs two
+    // in-process clients over a LoopbackTransport so the whole lockstep path — turn
+    // exchange, input delay, checksum agreement — runs even in a single window;
+    // --host / --join swap in the real socket transport. `_sim` is just the render
+    // view onto the client we control (`_me.Sim`).
+    Client _me;                 // the client we render and command
+    Client _other;             // LOCAL only: the second in-process client
+    ITransport _net;
+    EnetTransport _enet;       // networked modes only
+    string _mode = "LOCAL";
+    Simulation _sim;           // == _me.Sim, kept for the rendering code to read
     Camera3D _cam;
     double _accum;
     float _alpha;
@@ -68,9 +80,8 @@ public partial class World3D : Node3D
     float _camDist = 16f, _camYaw = 0.6f, _camPitch = 0.85f;   // radians
 
     // Selection & orders (local play; netcode comes in a later milestone).
-    const int MyPlayer = 1;
+    int MyPlayer = 1;   // which side we command; 2 when we joined a host
     readonly HashSet<int> _selected = new();
-    readonly List<Command> _pending = new();
     readonly Dictionary<int, MeshInstance3D> _rings = new();
     Mesh _ringMesh;
     Material _ringMine, _ringEnemy;
@@ -83,6 +94,7 @@ public partial class World3D : Node3D
     // stockpiles and headcounts, rebuilt each frame — no state of its own.
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
+    Label _netInfo;
     const int StatCount = 7;   // wood, stone, food, grain, flour, pop, army
 
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
@@ -114,8 +126,12 @@ public partial class World3D : Node3D
 
     public override void _Ready()
     {
-        _sim = new Simulation(Sim.TileMap.Skirmish(MapSize));
-        Skirmish.Setup(_sim, MapSize);
+        SetUpTransport();          // builds the client(s); _sim = _me.Sim
+        // The starting world and the demo scaffold are built IDENTICALLY on every
+        // client, before tick 0 — like Skirmish.Setup itself. Ids are handed out in
+        // the same order on each, so a wall or a garrisoned man has the same id
+        // everywhere and StateChecksum agrees from the first comparison.
+        foreach (var c in Clients()) { Skirmish.Setup(c.Sim, MapSize); ScaffoldWall(c.Sim); }
 
         LoadModels();
         SetupEnvironment();
@@ -131,27 +147,94 @@ public partial class World3D : Node3D
         _camTarget = new Vector3(Skirmish.West(MapSize) + 9, 0, MapSize / 2f);   // the wall
         UpdateCamera();
 
-        // A stretch of wall at the base, with the starting soldiers already manning
-        // it so men-on-the-walls is visible the moment you launch. You can still
-        // garrison by hand too: select soldiers and right-click a wall. (A proper
-        // build UI comes in M5.)
+        // The staircase is render-only, so build it once on our side.
+        BuildStaircase(Skirmish.West(MapSize) + 7, MapSize / 2);
+
+        SnapshotPositions();
+        GD.Print("[3d] world ready — mode ", _mode, ", player ", MyPlayer, ", ",
+                 _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
+    }
+
+    // A stretch of wall at the base with the starting soldiers already manning it,
+    // so men-on-the-walls shows the moment you launch. Sim state, so it is applied
+    // to EVERY client identically (walls get ids in the same order on each).
+    static void ScaffoldWall(Simulation sim)
+    {
         int wy = MapSize / 2, wx = Skirmish.West(MapSize) + 6;
         var walls = new List<Building>();
-        for (int i = 0; i < 6; i++) walls.Add(_sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
-        // A stone stair up to the walkway on the inner face, near the west end.
-        BuildStaircase(wx + 1, wy);
+        for (int i = 0; i < 6; i++) walls.Add(sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
 
         int k = 1;   // spread them along the wall, leaving the near tiles clear
-        foreach (var u in _sim.Units)
+        foreach (var u in sim.Units)
         {
             if (u.Owner != 1 || u.IsPeasant || k >= walls.Count) continue;
             var w = walls[k]; k += 2;
             if (w != null) u.GarrisonId = w.Id;   // no snap — they walk to the stair and climb up
         }
-
-        SnapshotPositions();
-        GD.Print("[3d] world ready — ", _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
     }
+
+    // Build the lockstep client(s) and the transport under them, mirroring the 2D
+    // Main. LOCAL runs both sides in-process over a loopback; --host / --join use
+    // the real socket. Afterwards `_sim` points at the client we control.
+    void SetUpTransport()
+    {
+        var (mode, address, port) = ParseCommandLine();
+        _mode = mode;
+
+        if (mode == "LOCAL")
+        {
+            var loop = new LoopbackTransport();
+            _net = loop;
+            _me = new Client(1, loop, Sim.TileMap.Skirmish(MapSize));
+            _other = new Client(2, loop, Sim.TileMap.Skirmish(MapSize));
+            loop.Connect(_me);
+            loop.Connect(_other);
+            MyPlayer = 1;
+        }
+        else
+        {
+            _enet = mode == "HOST" ? EnetTransport.Host(port) : EnetTransport.Join(address, port);
+            _net = _enet;
+            MyPlayer = _enet.PlayerId;
+            _me = new Client(MyPlayer, _enet, Sim.TileMap.Skirmish(MapSize));
+            _enet.Attach(_me);
+        }
+        _sim = _me.Sim;
+    }
+
+    IEnumerable<Client> Clients()
+    {
+        yield return _me;
+        if (_other != null) yield return _other;
+    }
+
+    // Godot swallows its own flags; anything after a bare `--` arrives via
+    // GetCmdlineUserArgs. Check both lists. `--host`, `--join=addr[:port]`, or a
+    // `--code=` match code; otherwise a single-window LOCAL game.
+    static (string Mode, string Address, int Port) ParseCommandLine()
+    {
+        var args = new List<string>(OS.GetCmdlineUserArgs());
+        args.AddRange(OS.GetCmdlineArgs());
+        foreach (var arg in args)
+        {
+            string value = arg.Contains('=') ? arg.Substring(arg.IndexOf('=') + 1) : null;
+            if (arg == "--host" || arg.StartsWith("--host="))
+                return ("HOST", null, ParsePort(value, EnetTransport.DefaultPort));
+            if (arg.StartsWith("--join="))
+            {
+                string addr = value;
+                int p = EnetTransport.DefaultPort, colon = addr?.LastIndexOf(':') ?? -1;
+                if (colon > 0) { p = ParsePort(addr.Substring(colon + 1), EnetTransport.DefaultPort); addr = addr.Substring(0, colon); }
+                return ("JOIN", addr, p);
+            }
+            if (arg.StartsWith("--code=") && MatchCode.TryDecode(value, out string ip, out int codePort))
+                return ("JOIN", ip, codePort);
+        }
+        return ("LOCAL", null, EnetTransport.DefaultPort);
+    }
+
+    static int ParsePort(string s, int fallback) =>
+        int.TryParse(s, out int p) && p > 0 && p < 65536 ? p : fallback;
 
     // The union AABB of a model's meshes in its own space — used to size and place
     // the wall pieces and to know how high the ramparts stand.
@@ -561,6 +644,19 @@ public partial class World3D : Node3D
         _selInfo.AddThemeColorOverride("font_color", new Color(0.82f, 0.86f, 0.92f));
         _selInfo.AddThemeFontSizeOverride("font_size", 14);
         selMargin.AddChild(_selInfo);
+
+        // Net status, top-right: the match mode and whether lockstep is healthy —
+        // in sync, stalled waiting on a peer, or desynced.
+        var netPanel = new PanelContainer { AnchorLeft = 1, AnchorRight = 1, AnchorTop = 0, OffsetLeft = -220, OffsetRight = -12, OffsetTop = 10 };
+        netPanel.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.86f)));
+        layer.AddChild(netPanel);
+        var netMargin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) netMargin.AddThemeConstantOverride("margin_" + s, 12);
+        foreach (var s in new[] { "top", "bottom" }) netMargin.AddThemeConstantOverride("margin_" + s, 8);
+        netPanel.AddChild(netMargin);
+        _netInfo = new Label { HorizontalAlignment = HorizontalAlignment.Right };
+        _netInfo.AddThemeFontSizeOverride("font_size", 14);
+        netMargin.AddChild(_netInfo);
     }
 
     static StyleBoxFlat Panel(Color bg) => new()
@@ -589,6 +685,13 @@ public partial class World3D : Node3D
 
         _selInfo.Text = _selected.Count == 0 ? "No selection"
             : _selected.Count == 1 ? DescribeUnit(_selected) : $"{_selected.Count} units selected";
+
+        string state; Color tint;
+        if (_me.Desync != null)     { state = $"DESYNC @ {_me.Desync.Tick}"; tint = new Color(0.95f, 0.4f, 0.35f); }
+        else if (_me.Stalled)       { state = "waiting for peer…";           tint = new Color(0.92f, 0.78f, 0.35f); }
+        else                        { state = "in sync";                     tint = new Color(0.5f, 0.8f, 0.55f); }
+        _netInfo.Text = $"{_mode}  ·  tick {_sim.TickNumber}  ·  {state}";
+        _netInfo.AddThemeColorOverride("font_color", tint);
     }
 
     // A one-line description of a single selected unit.
@@ -611,15 +714,22 @@ public partial class World3D : Node3D
 
     public override void _Process(double delta)
     {
+        // Fixed-timestep lockstep: a tick runs only when every player's input for
+        // it is in hand. Each client publishes its turn (InputDelay ahead), then we
+        // try to step. A stall — a peer's turn hasn't arrived — holds at the tick
+        // boundary rather than banking wall-clock time to fast-forward through later.
         _accum += delta;
         int ran = 0;
         while (_accum >= Step && ran < MaxTicksPerFrame)
         {
+            foreach (var c in Clients()) c.SendInput();
             SnapshotPositions();
-            // This frame's orders ride the FIRST tick only, then it is empty.
-            _sim.Tick(ran == 0 ? _pending : (IReadOnlyList<Command>)System.Array.Empty<Command>());
-            SpawnShots();   // drain this tick's blows before the next Tick clears them
-            if (ran == 0) _pending.Clear();
+
+            bool advanced = _me.TryStep();
+            foreach (var c in Clients()) if (c != _me) c.TryStep();
+            if (advanced) SpawnShots();   // drain this tick's blows before the next clears them
+
+            if (!advanced) { _accum = Step; break; }
             _accum -= Step;
             ran++;
         }
@@ -985,10 +1095,13 @@ public partial class World3D : Node3D
         if (_selected.Count == 0) return;
         var ids = new List<int>(_selected).ToArray();
 
+        // Orders go through the lockstep client: Issue queues them, and this
+        // frame's SendInput publishes them to run InputDelay ticks from now, on
+        // every machine at once. Issue stamps the owner, so we don't set it here.
         var enemy = UnitAtScreen(screen, mine: false);
         if (enemy != null)
         {
-            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+            _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
             return;
         }
 
@@ -998,11 +1111,11 @@ public partial class World3D : Node3D
         var wall = WallUnderCursor(screen);
         if (wall != null)
         {
-            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
+            _me.Issue(new Command { Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
             return;
         }
         if (GroundTile(screen, out int tx, out int ty))
-            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+            _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
     }
 
     // The friendly rampart whose body sits nearest the cursor — projected at mid
