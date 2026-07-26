@@ -24,13 +24,17 @@ public partial class World3D : Node3D
     // them down to size; tuned by eye.
     const float CharScale = 0.42f;
 
-    // Wall pieces. The battlement model is 5 long x 1.38 tall x 0.5 deep, running
-    // along its local X with its base at y=0. Scaled to fill a tile along the run,
-    // a little taller, a little deeper. A garrison stands on the walkway just below
-    // the merlon tops.
-    static readonly Vector3 WallScale = new(0.22f, 0.95f, 1.5f);   // (run, up, depth) in local space
-    const float WallWalkY = 0.95f;                                  // rampart walkway height
+    // Wall assembly. The pack's pieces are 5-unit modules: Wall_01 is a solid
+    // 5x5x0.5 body with a FLAT top; Battlements is the 5x1.38x0.5 crenellated
+    // parapet that stands on it. Scaled to one tile wide, a rampart's height, with
+    // a walkway men stand and walk on. All in local space; the run is local X.
+    static readonly Vector3 WallBodyScale = new(0.202f, 0.34f, 1.5f);  // -> 1.01 wide x 1.7 tall x 0.75 deep
+    const float WallTopY = 5f * 0.34f;                                 // 1.7 — flat walkway height
+    static readonly Vector3 WallBatScale = new(0.202f, 0.32f, 0.7f);   // parapet, thinner, on the outer edge
+    const float WallBatZ = 0.26f;                                      // parapet offset to one long edge
+    const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
+    PackedScene _wallBody, _wallBat;
     readonly HashSet<(int, int)> _wallSet = new();
 
     Simulation _sim;
@@ -44,7 +48,9 @@ public partial class World3D : Node3D
     readonly Dictionary<int, float> _yaw = new();
     readonly Dictionary<int, Skeleton3D> _skel = new();
     readonly Dictionary<int, float> _phase = new();
+    readonly Dictionary<int, float> _yEase = new();   // eased height, for climbing on/off the wall
     const float WalkCadence = 11f;   // how fast the legs cycle while marching
+    const float ClimbSpeed = 2.4f;   // how fast a unit rises onto / drops off the rampart
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
@@ -89,6 +95,8 @@ public partial class World3D : Node3D
         int wy = MapSize / 2, wx = Skirmish.West(MapSize) + 6;
         var walls = new List<Building>();
         for (int i = 0; i < 6; i++) walls.Add(_sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
+        // A stone stair up to the walkway on the inner face, near the west end.
+        BuildStaircase(wx + 1 + 0.5f, wy + 0.5f);
 
         int k = 1;   // leave the first tile empty so the wall isn't wall-to-wall men
         foreach (var u in _sim.Units)
@@ -149,7 +157,10 @@ public partial class World3D : Node3D
         B(BuildingType.Bakery,        "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.5f);
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
-        B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Battlements_01", 0.5f);
+        B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
+
+        _wallBody = Load("Castle/SM_Bld_Castle_Wall_01");
+        _wallBat  = Load("Castle/SM_Bld_Castle_Battlements_01");
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -261,16 +272,18 @@ public partial class World3D : Node3D
             var now = SimXZ(u);
             var prev = _prevPos.TryGetValue(u.Id, out var p) ? p : now;
             var draw = prev.Lerp(now, _alpha);
-            // A garrisoned soldier rises onto the rampart ONLY once it has reached
-            // the wall's tile — while it is still marching up to the wall it stays
-            // on the ground, so it does not float across the field.
-            float yUp = 0f;
+            // A garrisoned soldier rises onto the rampart once it reaches the wall's
+            // tile — eased up rather than popped, so it reads as climbing.
+            float target = 0f;
             if (u.GarrisonId != 0)
             {
                 var w = BuildingById(u.GarrisonId);
-                if (w != null && (u.X >> 16) == w.X && (u.Y >> 16) == w.Y) yUp = WallWalkY;
+                if (w != null && (u.X >> 16) == w.X && (u.Y >> 16) == w.Y) target = WallWalkY;
             }
-            node.Position = new Vector3(draw.X, yUp, draw.Y);
+            float yNow = _yEase.TryGetValue(u.Id, out var ye) ? ye : target;
+            yNow = Mathf.MoveToward(yNow, target, (float)delta * ClimbSpeed);
+            _yEase[u.Id] = yNow;
+            node.Position = new Vector3(draw.X, yNow, draw.Y);
 
             // Face the way it is moving; hold the last heading when standing.
             var vel = now - prev;
@@ -327,23 +340,68 @@ public partial class World3D : Node3D
 
                 if (b.Type == BuildingType.Wall)
                 {
-                    // Run east-west or north-south to match the wall line; the model
-                    // runs along local X, so a north-south run turns a quarter.
-                    bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
-                    bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
-                    node.Scale = WallScale;
-                    node.Rotation = new Vector3(0, vert && !horiz ? Mathf.Pi / 2f : 0f, 0);
+                    node.QueueFree();          // the generic instance isn't used for walls
+                    node = MakeWall(b);
                 }
                 else
                 {
                     node.Scale = Vector3.One * _bldScale[b.Type];
+                    node.Position = new Vector3(b.X + b.W / 2f, 0, b.Y + b.H / 2f);
                 }
-                node.Position = new Vector3(b.X + b.W / 2f, 0, b.Y + b.H / 2f);
                 AddChild(node);
                 _buildingNodes[b.Id] = node;
             }
         }
         Prune(_buildingNodes, live);
+    }
+
+    // A stone staircase from the ground up to the walkway, on the inner (south)
+    // face of the wall at column `tileX`. Built from stacked steps so a unit
+    // climbing it reads as walking up.
+    const int StairSteps = 8;
+    const float StairRun = 2.0f;   // how far south of the wall the stair reaches
+    void BuildStaircase(float tileX, float wallZ)
+    {
+        var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f) };
+        float stepH = WallTopY / StairSteps;
+        float stepDepth = StairRun / StairSteps;
+        for (int i = 0; i < StairSteps; i++)
+        {
+            float topY = stepH * (i + 1);
+            float z = wallZ + StairRun - (i + 0.5f) * stepDepth;   // nearest step is furthest from the wall
+            var step = new MeshInstance3D
+            {
+                Mesh = new BoxMesh { Size = new Vector3(0.9f, topY, stepDepth + 0.02f) },
+                MaterialOverride = mat,
+                Position = new Vector3(tileX, topY * 0.5f, z),   // grow up from the ground
+            };
+            AddChild(step);
+        }
+    }
+
+    // A wall tile: a solid body with a flat walkway top and a crenellated parapet
+    // along the outer edge, turned to run with the wall line. Men stand on the top.
+    Node3D MakeWall(Building b)
+    {
+        bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
+        bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
+
+        var root = new Node3D
+        {
+            Position = new Vector3(b.X + 0.5f, 0, b.Y + 0.5f),
+            Rotation = new Vector3(0, vert && !horiz ? Mathf.Pi / 2f : 0f, 0),
+        };
+
+        var body = _wallBody.Instantiate<Node3D>();
+        body.Scale = WallBodyScale;
+        root.AddChild(body);
+
+        var parapet = _wallBat.Instantiate<Node3D>();
+        parapet.Scale = WallBatScale;
+        parapet.Position = new Vector3(0, WallTopY, WallBatZ);   // on top, along the outer edge
+        root.AddChild(parapet);
+
+        return root;
     }
 
     static void Prune(Dictionary<int, Node3D> nodes, HashSet<int> live)
