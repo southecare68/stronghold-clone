@@ -1668,20 +1668,51 @@ public partial class Main : Node2D
         // north-south (the same piece rotated keeps a matching thickness, where the
         // baked into-screen piece would foreshorten to a sliver).
         if ((horiz && vert) || (!horiz && !vert))
-            DrawWallPiece(pillar, rect, 0f);
+            DrawWallPiece(pillar, rect, 0f, 1.34f);
         else if (vert)
-            DrawWallPiece(hSprite, rect, Mathf.Pi / 2f);
+            // A north-south run reads edge-on to this camera, so the baked (or
+            // rotated) battlement collapses to a thin crenellated line. Draw it
+            // instead as a solid stone curtain between the towers, matched to the
+            // piece's palette — a clean wall rather than a dotted one.
+            DrawWallVertical(rect);
         else
-            DrawWallPiece(hSprite, rect, 0f);
+            DrawWallPiece(hSprite, rect, 0f, 1.34f);
     }
 
-    // Draw one wall piece on its tile, a touch oversized so adjacent runs overlap
+    // A solid vertical curtain-wall segment in the baked pieces' stone colours,
+    // crenellated down both faces, overlapping its neighbours so a north-south run
+    // is one unbroken wall linking the corner towers.
+    static readonly Color WallStone = new(0.49f, 0.44f, 0.39f);   // matched to the baked brick
+    static readonly Color WallMerlon = new(0.78f, 0.72f, 0.60f);
+    void DrawWallVertical(Rect2 tile)
+    {
+        float sz = tile.Size.X;
+        float th = sz * 0.58f;                       // wall thickness
+        float cx = tile.Position.X + sz * 0.5f;
+        float top = tile.Position.Y - sz * 0.20f;    // overlap into the neighbour above
+        float bot = tile.Position.Y + tile.Size.Y + sz * 0.20f;
+        var band = new Rect2(cx - th * 0.5f, top, th, bot - top);
+
+        DrawRect(band, WallStone);
+        DrawRect(new Rect2(cx + th * 0.12f, top, th * 0.38f, band.Size.Y), WallStone.Darkened(0.22f)); // shaded east face
+        DrawRect(band, WallStone.Darkened(0.42f), false, 1f);
+
+        // Merlon teeth marching down both edges — the crenellations of the rampart.
+        float step = sz * 0.34f, tooth = sz * 0.16f;
+        for (float y = top + step * 0.4f; y < bot - tooth; y += step)
+        {
+            DrawRect(new Rect2(band.Position.X - tooth * 0.4f, y, tooth * 0.7f, tooth), WallMerlon);
+            DrawRect(new Rect2(band.End.X - tooth * 0.3f, y, tooth * 0.7f, tooth), WallMerlon.Darkened(0.12f));
+        }
+    }
+
+    // Draw one wall piece on its tile, oversized by `over` so adjacent runs overlap
     // and join into a seamless curtain, optionally rotated a quarter-turn for a
     // vertical run. Centred on the tile so the stone sits on its ground.
-    void DrawWallPiece(Texture2D sprite, Rect2 tile, float rot)
+    void DrawWallPiece(Texture2D sprite, Rect2 tile, float rot, float over)
     {
         var texSize = sprite.GetSize();
-        float drawW = tile.Size.X * 1.34f;
+        float drawW = tile.Size.X * over;
         float drawH = drawW * texSize.Y / texSize.X;
         var center = tile.Position + tile.Size * 0.5f;
         DrawSetTransform(center, rot, Vector2.One);
