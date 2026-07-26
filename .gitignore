@@ -39,3 +39,6 @@ node_modules/
 # sprites at runtime via Image.Load (see SpriteBank), so these are not needed and
 # would add 500+ files; ignore them.
 *.import
+
+# 3D asset pack copied into the game project for runtime use (licensed art, like the source)
+/game/Assets/
