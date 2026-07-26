@@ -33,6 +33,9 @@ public partial class World3D : Node3D
     readonly Dictionary<int, Node3D> _buildingNodes = new();
     readonly Dictionary<int, Vector2> _prevPos = new();
     readonly Dictionary<int, float> _yaw = new();
+    readonly Dictionary<int, Skeleton3D> _skel = new();
+    readonly Dictionary<int, float> _phase = new();
+    const float WalkCadence = 11f;   // how fast the legs cycle while marching
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
@@ -173,7 +176,7 @@ public partial class World3D : Node3D
         }
         _alpha = (float)Mathf.Clamp(_accum / Step, 0.0, 1.0);
 
-        SyncUnits();
+        SyncUnits(delta);
         SyncBuildings();
         UpdateRings();
         CameraInput(delta);
@@ -186,7 +189,7 @@ public partial class World3D : Node3D
 
     static Vector2 SimXZ(Unit u) => new Vector2(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
 
-    void SyncUnits()
+    void SyncUnits(double delta)
     {
         var live = new HashSet<int>();
         foreach (var u in _sim.Units)
@@ -198,6 +201,10 @@ public partial class World3D : Node3D
                 node.Scale = Vector3.One * CharScale;
                 AddChild(node);
                 _unitNodes[u.Id] = node;
+                DisableBakedAnimation(node);            // the prefab's AnimationPlayer would clobber our posing
+                var sk = Anim3D.Find(node);
+                if (sk != null) BindToSkeleton(node, sk);   // the modular meshes ship unbound — bind them so posing shows
+                _skel[u.Id] = sk;
             }
 
             var now = SimXZ(u);
@@ -207,11 +214,38 @@ public partial class World3D : Node3D
 
             // Face the way it is moving; hold the last heading when standing.
             var vel = now - prev;
-            if (vel.LengthSquared() > 1e-5f)
-                _yaw[u.Id] = Mathf.Atan2(vel.X, vel.Y);
+            bool moving = vel.LengthSquared() > 1e-5f;
+            if (moving) _yaw[u.Id] = Mathf.Atan2(vel.X, vel.Y);
             node.Rotation = new Vector3(0, _yaw.TryGetValue(u.Id, out var y) ? y : 0f, 0);
+
+            Animate(u, moving, delta);
         }
         Prune(_unitNodes, live);
+        foreach (var id in new List<int>(_skel.Keys)) if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); }
+    }
+
+    // Pick and drive the pose from the unit's state: marching legs while moving,
+    // a timed swing while fighting in place, otherwise standing.
+    void Animate(Unit u, bool moving, double delta)
+    {
+        if (!_skel.TryGetValue(u.Id, out var s) || s == null) return;
+
+        if (moving)
+        {
+            _phase[u.Id] = (_phase.TryGetValue(u.Id, out var ph) ? ph : 0f) + (float)delta * WalkCadence;
+            Anim3D.Walk(s, _phase[u.Id]);
+        }
+        else if (u.TargetId != 0)
+        {
+            var d = _sim.DesignOf(u.DesignId);
+            float prog = d.Cooldown > 0 ? 1f - u.AttackTimer / (float)d.Cooldown : 0f;
+            int frame = Mathf.Clamp((int)(prog * Anim3D.AttackFrames), 0, Anim3D.AttackFrames - 1);
+            Anim3D.Attack(s, frame);
+        }
+        else
+        {
+            Anim3D.Idle(s);
+        }
     }
 
     void SyncBuildings()
@@ -239,6 +273,31 @@ public partial class World3D : Node3D
         var gone = new List<int>();
         foreach (var kv in nodes) if (!live.Contains(kv.Key)) gone.Add(kv.Key);
         foreach (var id in gone) { nodes[id].QueueFree(); nodes.Remove(id); }
+    }
+
+    // Remove any AnimationPlayer the prefab ships with — it drives the skeleton to
+    // its bind pose every frame and would overwrite the poses we set.
+    static void DisableBakedAnimation(Node n)
+    {
+        var kill = new List<Node>();
+        Collect(n, kill);
+        foreach (var ap in kill) { ap.GetParent().RemoveChild(ap); ap.QueueFree(); }
+
+        static void Collect(Node node, List<Node> into)
+        {
+            if (node is AnimationPlayer) into.Add(node);
+            foreach (var c in node.GetChildren()) Collect(c, into);
+        }
+    }
+
+    // Synty modular characters ship every body mesh under one skeleton with its
+    // skeleton binding left empty, so they don't follow the pose. Point each skinned
+    // mesh at the skeleton so our posing actually deforms it.
+    static void BindToSkeleton(Node n, Skeleton3D skel)
+    {
+        if (n is MeshInstance3D mi && mi.Skin != null)
+            mi.Skeleton = mi.GetPathTo(skel);
+        foreach (var c in n.GetChildren()) BindToSkeleton(c, skel);
     }
 
     PackedScene ModelFor(Unit u)
