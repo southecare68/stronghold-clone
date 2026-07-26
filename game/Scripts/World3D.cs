@@ -48,9 +48,16 @@ public partial class World3D : Node3D
     readonly Dictionary<int, float> _yaw = new();
     readonly Dictionary<int, Skeleton3D> _skel = new();
     readonly Dictionary<int, float> _phase = new();
-    readonly Dictionary<int, float> _yEase = new();   // eased height, for climbing on/off the wall
     const float WalkCadence = 11f;   // how fast the legs cycle while marching
-    const float ClimbSpeed = 2.4f;   // how fast a unit rises onto / drops off the rampart
+
+    // Climbing the wall: a garrisoned soldier is routed on foot from the ground, to
+    // the stair, up it and along the walkway to its spot — a render path, since the
+    // sim just treats it as garrisoned.
+    sealed class Climb { public Vector3[] Pts; public float Dist; }
+    readonly Dictionary<int, Climb> _climb = new();
+    readonly HashSet<int> _onWall = new();
+    Vector3 _stairBase, _stairTop;   // set by BuildStaircase
+    const float ClimbSpeed = 2.6f;   // units per second up the path
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
@@ -98,15 +105,12 @@ public partial class World3D : Node3D
         // A stone stair up to the walkway on the inner face, near the west end.
         BuildStaircase(wx + 1, wy);
 
-        int k = 1;   // leave the first tile empty so the wall isn't wall-to-wall men
+        int k = 1;   // spread them along the wall, leaving the near tiles clear
         foreach (var u in _sim.Units)
         {
             if (u.Owner != 1 || u.IsPeasant || k >= walls.Count) continue;
             var w = walls[k]; k += 2;
-            if (w == null) continue;
-            u.GarrisonId = w.Id;
-            u.X = Fixed.FromInt(w.X); u.Y = Fixed.FromInt(w.Y);   // snap straight onto the rampart
-            u.Tx = u.X; u.Ty = u.Y;
+            if (w != null) u.GarrisonId = w.Id;   // no snap — they walk to the stair and climb up
         }
 
         SnapshotPositions();
@@ -272,53 +276,88 @@ public partial class World3D : Node3D
             var now = SimXZ(u);
             var prev = _prevPos.TryGetValue(u.Id, out var p) ? p : now;
             var draw = prev.Lerp(now, _alpha);
-            // A garrisoned soldier rises onto the rampart once it reaches the wall's
-            // tile — eased up rather than popped, so it reads as climbing.
-            float target = 0f;
-            if (u.GarrisonId != 0)
-            {
-                var w = BuildingById(u.GarrisonId);
-                if (w != null && (u.X >> 16) == w.X && (u.Y >> 16) == w.Y) target = WallWalkY;
-            }
-            float yNow = _yEase.TryGetValue(u.Id, out var ye) ? ye : target;
-            yNow = Mathf.MoveToward(yNow, target, (float)delta * ClimbSpeed);
-            _yEase[u.Id] = yNow;
-            node.Position = new Vector3(draw.X, yNow, draw.Y);
-
-            // Face the way it is moving; hold the last heading when standing.
             var vel = now - prev;
-            bool moving = vel.LengthSquared() > 1e-5f;
-            if (moving) _yaw[u.Id] = Mathf.Atan2(vel.X, vel.Y);
-            node.Rotation = new Vector3(0, _yaw.TryGetValue(u.Id, out var y) ? y : 0f, 0);
 
-            Animate(u, moving, delta);
+            Vector3 pos, face;
+            bool walking, attacking = false;
+
+            var wall = u.GarrisonId != 0 ? BuildingById(u.GarrisonId) : null;
+            if (wall != null)
+            {
+                var top = new Vector3(wall.X + (wall.W - 1) / 2f, WallTopY, wall.Y + (wall.H - 1) / 2f);
+                if (_onWall.Contains(u.Id))
+                {
+                    // Up and stood to. Hold the spot; keep the heading it arrived on.
+                    pos = top; face = Vector3.Zero; walking = false;
+                }
+                else
+                {
+                    // March to the stair, up it, and along the walkway to the spot.
+                    if (!_climb.TryGetValue(u.Id, out var cl))
+                        cl = _climb[u.Id] = new Climb { Pts = new[] { new Vector3(draw.X, 0, draw.Y), _stairBase, _stairTop, top } };
+                    cl.Dist += (float)delta * ClimbSpeed;
+                    pos = SamplePath(cl.Pts, cl.Dist, out face, out bool done);
+                    walking = true;
+                    if (done) { _onWall.Add(u.Id); _climb.Remove(u.Id); pos = top; walking = false; }
+                }
+            }
+            else
+            {
+                // Field unit: on the ground, moving where the sim moves it.
+                _onWall.Remove(u.Id); _climb.Remove(u.Id);
+                pos = new Vector3(draw.X, 0, draw.Y);
+                face = new Vector3(vel.X, 0, vel.Y);
+                walking = vel.LengthSquared() > 1e-5f;
+                attacking = !walking && u.TargetId != 0;
+            }
+
+            node.Position = pos;
+            if (face.LengthSquared() > 1e-5f) _yaw[u.Id] = Mathf.Atan2(face.X, face.Z);
+            node.Rotation = new Vector3(0, _yaw.TryGetValue(u.Id, out var yy) ? yy : 0f, 0);
+
+            if (_skel.TryGetValue(u.Id, out var s) && s != null)
+            {
+                if (walking)
+                {
+                    _phase[u.Id] = (_phase.TryGetValue(u.Id, out var ph) ? ph : 0f) + (float)delta * WalkCadence;
+                    Anim3D.Walk(s, _phase[u.Id]);
+                }
+                else if (attacking)
+                {
+                    var d = _sim.DesignOf(u.DesignId);
+                    float prog = d.Cooldown > 0 ? 1f - u.AttackTimer / (float)d.Cooldown : 0f;
+                    Anim3D.Attack(s, Mathf.Clamp((int)(prog * Anim3D.AttackFrames), 0, Anim3D.AttackFrames - 1));
+                }
+                else Anim3D.Idle(s);
+            }
         }
         Prune(_unitNodes, live);
-        foreach (var id in new List<int>(_skel.Keys)) if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); }
+        foreach (var id in new List<int>(_skel.Keys))
+            if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); }
     }
 
-    // Pick and drive the pose from the unit's state: marching legs while moving,
-    // a timed swing while fighting in place, otherwise standing.
-    void Animate(Unit u, bool moving, double delta)
+    // Point at distance `dist` along a polyline, with the segment direction and
+    // whether the end has been reached.
+    static Vector3 SamplePath(Vector3[] pts, float dist, out Vector3 dir, out bool done)
     {
-        if (!_skel.TryGetValue(u.Id, out var s) || s == null) return;
-
-        if (moving)
+        done = false;
+        float rem = dist;
+        for (int i = 0; i < pts.Length - 1; i++)
         {
-            _phase[u.Id] = (_phase.TryGetValue(u.Id, out var ph) ? ph : 0f) + (float)delta * WalkCadence;
-            Anim3D.Walk(s, _phase[u.Id]);
+            var seg = pts[i + 1] - pts[i];
+            float len = seg.Length();
+            bool last = i == pts.Length - 2;
+            if (rem <= len || last)
+            {
+                dir = len > 1e-4f ? seg / len : Vector3.Forward;
+                if (last && rem >= len) done = true;
+                return pts[i] + seg * (len > 1e-4f ? Mathf.Clamp(rem / len, 0f, 1f) : 1f);
+            }
+            rem -= len;
         }
-        else if (u.TargetId != 0)
-        {
-            var d = _sim.DesignOf(u.DesignId);
-            float prog = d.Cooldown > 0 ? 1f - u.AttackTimer / (float)d.Cooldown : 0f;
-            int frame = Mathf.Clamp((int)(prog * Anim3D.AttackFrames), 0, Anim3D.AttackFrames - 1);
-            Anim3D.Attack(s, frame);
-        }
-        else
-        {
-            Anim3D.Idle(s);
-        }
+        dir = Vector3.Forward;
+        done = true;
+        return pts[^1];
     }
 
     void SyncBuildings()
@@ -365,6 +404,8 @@ public partial class World3D : Node3D
     const float StairRun = 2.0f;   // how far south of the wall the stair reaches
     void BuildStaircase(float tileX, float wallZ)
     {
+        _stairBase = new Vector3(tileX, 0, wallZ + StairRun);   // foot of the stair, on the ground
+        _stairTop = new Vector3(tileX, WallTopY, wallZ);        // where it meets the walkway
         var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f) };
         float stepH = WallTopY / StairSteps;
         float stepDepth = StairRun / StairSteps;
