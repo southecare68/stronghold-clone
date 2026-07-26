@@ -835,6 +835,10 @@ namespace Sim
                     int designId = cmd.X >= 0 && cmd.X < _designs.Count ? cmd.X : 0;
                     var trainCost = new[] { TrainCostWood, 0, 0 };
                     if (!CanAfford(cmd.Owner, trainCost)) break;
+                    // Every soldier is an armed peasant. You need a spare one to
+                    // recruit, and the queue may not outrun your idle population —
+                    // so army size is ultimately gated by food and housing.
+                    if (IdlePeasantCount(cmd.Owner) <= barracks.TrainQueue.Count) break;
                     Pay(cmd.Owner, trainCost);
                     barracks.TrainQueue.Add(designId);
                     break;
@@ -1034,10 +1038,14 @@ namespace Sim
                 {
                     b.BuildTimer = 0;
                     var spot = SpawnPointAround(b);
-                    // No free tile this tick: leave the unit queued and try again
-                    // next tick, rather than dropping it.
-                    if (spot.HasValue)
+                    // A soldier is an armed peasant: take the nearest idle one and
+                    // march it out of the barracks as the trained design. If there
+                    // is no free tile OR no peasant to arm this tick, leave the unit
+                    // queued and try again next tick, rather than dropping it.
+                    var recruit = HireIdlePeasant(b);
+                    if (spot.HasValue && recruit != null)
                     {
+                        Units.Remove(recruit);          // the peasant becomes the soldier
                         int designId = b.TrainQueue[0];
                         b.TrainQueue.RemoveAt(0);
                         SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y, designId);
@@ -1292,6 +1300,16 @@ namespace Sim
         {
             int n = 0;
             foreach (var u in Units) if (u.IsPeasant && u.Owner == owner && u.Alive) n++;
+            return n;
+        }
+
+        // Idle peasants — those with no job, free to be armed at a barracks or hired
+        // by a work building. This is your spare manpower.
+        public int IdlePeasantCount(int owner)
+        {
+            int n = 0;
+            foreach (var u in Units)
+                if (u.IsPeasant && u.Owner == owner && u.Alive && u.Job == Job.None) n++;
             return n;
         }
 

@@ -848,7 +848,7 @@ public partial class Main : Node2D
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
                "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store [O] house  ([Z/X] zoom)" +
                "\nfood chain: [R] farm → [T] mill → [Y] bakery  (bread breeds peasants; a house holds 10)" +
-               "\nright-click your barracks to train, gate to open/close, enemy to attack" +
+               "\nright-click your barracks to train (each soldier arms 1 idle peasant), gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
                                   : "") +
@@ -1124,8 +1124,11 @@ public partial class Main : Node2D
         return Known(x, y);
     }
 
+    // Training needs wood AND a spare peasant to arm — a soldier is a recruited
+    // peasant, so no idle population means no new troops.
     bool CanAffordTraining() =>
-        _shown.Stockpile(_myPlayer, ResourceType.Wood) >= 15;
+        _shown.Stockpile(_myPlayer, ResourceType.Wood) >= 15 &&
+        _shown.IdlePeasantCount(_myPlayer) > 0;
 
     // The resource node under the cursor, or null.
     ResourceNode NodeAt(Vector2 screen)

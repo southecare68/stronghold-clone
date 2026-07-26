@@ -140,12 +140,14 @@ static class Program
 
     static void ABarracksTrainsSoldiers()
     {
-        Console.WriteLine("\na barracks turns resources into soldiers:");
+        Console.WriteLine("\na barracks arms peasants into soldiers:");
         var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 5, 5);                    // where seeded peasants appear
         Give(sim, 1, wood: 200, stone: 0);
+        for (int i = 0; i < 4; i++) sim.SpawnPeasant(1);   // the manpower to arm
         var barracks = sim.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
 
-        int before = CountUnitsOf(sim, 1);
+        int pBefore = sim.PeasantCount(1);          // 4
         Order(sim, Train(1, barracks.Id));
         Order(sim, Train(1, barracks.Id));
         Check("training charged wood (200 - 2*15 = 170)", sim.Stockpile(1, ResourceType.Wood) == 170);
@@ -153,11 +155,32 @@ static class Program
 
         for (int i = 0; i < 200; i++) sim.Tick(Array.Empty<Command>());
 
-        Check($"two soldiers were produced (had {before}, now {CountUnitsOf(sim, 1)})",
-              CountUnitsOf(sim, 1) == before + 2);
+        Check($"two soldiers marched out ({CountSoldiers(sim, 1)})", CountSoldiers(sim, 1) == 2);
+        Check($"and two peasants were armed to make them ({sim.PeasantCount(1)} of {pBefore})",
+              sim.PeasantCount(1) == pBefore - 2);
         Check("the queue has drained", barracks.TrainQueue.Count == 0);
-        Check("training with too little wood is refused",
-              RefusedTrain(sim, barracks));
+
+        // Arm the last two, emptying the pool.
+        Order(sim, Train(1, barracks.Id));
+        Order(sim, Train(1, barracks.Id));
+        for (int i = 0; i < 200; i++) sim.Tick(Array.Empty<Command>());
+        Check("all four peasants are now soldiers",
+              sim.PeasantCount(1) == 0 && CountSoldiers(sim, 1) == 4);
+
+        // No idle peasant left: training is refused even with wood to spare,
+        // and nothing is charged.
+        int woodNow = sim.Stockpile(1, ResourceType.Wood);
+        Order(sim, Train(1, barracks.Id));
+        Check("training with no idle peasant is refused (wood untouched)",
+              sim.Stockpile(1, ResourceType.Wood) == woodNow && barracks.TrainQueue.Count == 0);
+
+        // And the wood gate still bites: a fresh sim with a peasant but no wood.
+        var poor = new Simulation(TileMap.Open(48));
+        poor.SetDropOff(1, 5, 5);
+        poor.SpawnPeasant(1);
+        var bk = poor.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
+        Order(poor, Train(1, bk.Id));
+        Check("training with no wood is refused too", bk.TrainQueue.Count == 0);
     }
 
     static void MoveOnlyBuildsNothing()
@@ -185,6 +208,7 @@ static class Program
         {
             Give(c.Sim, 1, wood: 300, stone: 100);
             c.Sim.SpawnUnit(1, 5, 5);          // id 1
+            for (int i = 0; i < 2; i++) c.Sim.SpawnPeasant(1);   // manpower for the two soldiers
         }
 
         var script = new Dictionary<int, Action>
@@ -222,6 +246,7 @@ static class Program
         var host = new Simulation(TileMap.Open(48));
         Give(host, 1, wood: 300, stone: 100);
         host.PlaceBuilding(BuildingType.Keep, 1, 10, 10);
+        for (int i = 0; i < 2; i++) host.SpawnPeasant(1);   // a peasant for the training to arm
         var barracks = host.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
         Order(host, Train(1, barracks.Id));
         for (int i = 0; i < 30; i++) host.Tick(Array.Empty<Command>());
@@ -279,23 +304,12 @@ static class Program
     static Command TrainIds(int buildingId) => new Command
     { Type = CommandType.Train, TargetId = buildingId };
 
-    static int CountUnitsOf(Simulation sim, int owner)
+    // Soldiers = non-peasant units (a trained unit is no longer a peasant).
+    static int CountSoldiers(Simulation sim, int owner)
     {
         int n = 0;
-        foreach (var u in sim.Units) if (u.Owner == owner) n++;
+        foreach (var u in sim.Units) if (u.Owner == owner && !u.IsPeasant) n++;
         return n;
-    }
-
-    static bool RefusedTrain(Simulation sim, Building barracks)
-    {
-        // Drain wood below cost, then a train order should place nothing new.
-        int qBefore = barracks.TrainQueue.Count;
-        int woodBefore = sim.Stockpile(1, ResourceType.Wood);
-        // Spend down to under 15 by training while we can, then assert a refusal.
-        while (sim.Stockpile(1, ResourceType.Wood) >= 15) Order(sim, Train(1, barracks.Id));
-        int wood = sim.Stockpile(1, ResourceType.Wood);
-        Order(sim, Train(1, barracks.Id));   // can't afford
-        return sim.Stockpile(1, ResourceType.Wood) == wood && wood < 15 && woodBefore >= 0 && qBefore >= 0;
     }
 
     static void Check(string what, bool ok)
