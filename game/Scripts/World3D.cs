@@ -9,6 +9,7 @@
 using Godot;
 using Sim;
 using Netcode;
+using Audio;
 using System.Collections.Generic;
 
 public partial class World3D : Node3D
@@ -124,6 +125,14 @@ public partial class World3D : Node3D
     StandardMaterial3D _barBgMat, _bitMat;
     const float BarW = 0.9f, BarH = 0.13f, BarLift = 1.05f;
 
+    // Audio: positional SFX (Camera3D is the listener) plus adaptive music. Both
+    // observe the sim and never feed back. `_battle` counts down from the last blow
+    // heard; while it is running the score is Battle, otherwise Calm.
+    Sound3D _sound;
+    MusicPlayer _music;
+    float _battle;
+    const float BattleHold = 5f;   // seconds of quiet before the music stands down
+
     public override void _Ready()
     {
         SetUpTransport();          // builds the client(s); _sim = _me.Sim
@@ -140,6 +149,15 @@ public partial class World3D : Node3D
         SetupCombatFx();
         SetupSelectionUi();
         SetupHud();
+
+        // Audio. A current Camera3D is the 3D audio listener, so the SFX player
+        // needs no explicit listener. --audio-log prints each voice for headless
+        // checks; --mute silences everything.
+        bool mute = HasFlag("--mute");
+        _sound = new Sound3D { LogPlays = HasFlag("--audio-log"), Muted = mute };
+        AddChild(_sound);
+        _music = new MusicPlayer { Enabled = !mute };
+        AddChild(_music);
 
         _cam = new Camera3D { Current = true };
         AddChild(_cam);
@@ -235,6 +253,14 @@ public partial class World3D : Node3D
 
     static int ParsePort(string s, int fallback) =>
         int.TryParse(s, out int p) && p > 0 && p < 65536 ? p : fallback;
+
+    // Whether a bare flag was passed (either arg list — Godot splits them at `--`).
+    static bool HasFlag(string flag)
+    {
+        foreach (var a in OS.GetCmdlineUserArgs()) if (a == flag) return true;
+        foreach (var a in OS.GetCmdlineArgs()) if (a == flag) return true;
+        return false;
+    }
 
     // The union AABB of a model's meshes in its own space — used to size and place
     // the wall pieces and to know how high the ramparts stand.
@@ -494,8 +520,11 @@ public partial class World3D : Node3D
             if (_sim.FogEnabled && !_sim.CanSee(MyPlayer, tx, ty)) continue;
             var to = new Vector3(s.ToX / (float)Fixed.One, 0.7f, s.ToY / (float)Fixed.One);
             var from = new Vector3(s.FromX / (float)Fixed.One, 0.7f, s.FromY / (float)Fixed.One);
-            if ((to - from).LengthSquared() > 1.6f * 1.6f) Tracer(from, to);   // a ranged shot flies
+            bool ranged = (to - from).LengthSquared() > 1.6f * 1.6f;
+            if (ranged) { Tracer(from, to); _sound.Play(Sfx.BowShot, from); _sound.Play(Sfx.ArrowHit, to); }
+            else _sound.Play(Sfx.MeleeHit, to);
             Spark(to, new Color(0.9f, 0.25f, 0.2f), 7, 2.6f);                 // blood/impact
+            _battle = BattleHold;   // a blow was heard; keep the score on Battle
         }
     }
 
@@ -741,12 +770,23 @@ public partial class World3D : Node3D
         UpdateRings();
         UpdateHud();
         UpdateFx(delta);
+        UpdateMusic(delta);
         CameraInput(delta);
     }
 
     void SnapshotPositions()
     {
         foreach (var u in _sim.Units) _prevPos[u.Id] = SimXZ(u);
+    }
+
+    // Adaptive score: SpawnShots refreshes _battle whenever a blow is heard. While
+    // it runs the music is Battle; when the fighting stops for BattleHold seconds it
+    // stands back down to Calm. MusicPlayer cross-fades the change.
+    void UpdateMusic(double delta)
+    {
+        if (_music == null) return;
+        if (_battle > 0f) _battle -= (float)delta;
+        _music.SetMood(_battle > 0f ? Mood.Battle : Mood.Calm);
     }
 
     static Vector2 SimXZ(Unit u) => new Vector2(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
@@ -860,7 +900,7 @@ public partial class World3D : Node3D
             var (at, peasant) = _lastSeen[id];
             _lastSeen.Remove(id);
             if (_bars.Remove(id, out var b)) b.Root.QueueFree();
-            if (!peasant) Spark(at + Vector3.Up * 0.5f, new Color(0.7f, 0.16f, 0.13f), 16, 3.2f);
+            if (!peasant) { Spark(at + Vector3.Up * 0.5f, new Color(0.7f, 0.16f, 0.13f), 16, 3.2f); _sound.Play(Sfx.UnitDeath, at); }
         }
     }
 
@@ -1086,6 +1126,7 @@ public partial class World3D : Node3D
                 if (sp.X >= tl.X && sp.X <= br.X && sp.Y >= tl.Y && sp.Y <= br.Y) _selected.Add(kv.Key);
             }
         }
+        if (_selected.Count > 0) _sound.PlayUi(Sfx.Select);
     }
 
     // Right-click: attack an enemy under the cursor, else march the selection to
@@ -1102,6 +1143,7 @@ public partial class World3D : Node3D
         if (enemy != null)
         {
             _me.Issue(new Command { Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+            _sound.PlayUi(Sfx.AttackOrder);
             return;
         }
 
@@ -1112,10 +1154,15 @@ public partial class World3D : Node3D
         if (wall != null)
         {
             _me.Issue(new Command { Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
+            _sound.PlayUi(Sfx.MoveOrder);
             return;
         }
         if (GroundTile(screen, out int tx, out int ty))
+        {
             _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+            _sound.PlayUi(Sfx.MoveOrder);
+        }
+        else _sound.PlayUi(Sfx.Denied);
     }
 
     // The friendly rampart whose body sits nearest the cursor — projected at mid
