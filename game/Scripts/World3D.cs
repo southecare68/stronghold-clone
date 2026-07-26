@@ -42,6 +42,18 @@ public partial class World3D : Node3D
     Vector3 _camTarget;
     float _camDist = 16f, _camYaw = 0.6f, _camPitch = 0.85f;   // radians
 
+    // Selection & orders (local play; netcode comes in a later milestone).
+    const int MyPlayer = 1;
+    readonly HashSet<int> _selected = new();
+    readonly List<Command> _pending = new();
+    readonly Dictionary<int, MeshInstance3D> _rings = new();
+    Mesh _ringMesh;
+    Material _ringMine, _ringEnemy;
+
+    bool _boxing;
+    Vector2 _boxStart, _boxEnd;
+    ColorRect _box;
+
     public override void _Ready()
     {
         _sim = new Simulation(Sim.TileMap.Skirmish(MapSize));
@@ -50,6 +62,7 @@ public partial class World3D : Node3D
         LoadModels();
         SetupEnvironment();
         SetupGround();
+        SetupSelectionUi();
 
         _cam = new Camera3D { Current = true };
         AddChild(_cam);
@@ -121,6 +134,28 @@ public partial class World3D : Node3D
         AddChild(ground);
     }
 
+    void SetupSelectionUi()
+    {
+        // A flat ground ring under a selected unit, team-coloured and unshaded so
+        // it reads at any camera angle.
+        _ringMesh = new TorusMesh { InnerRadius = 0.42f, OuterRadius = 0.55f, Rings = 6, RingSegments = 20 };
+        _ringMine = Unshaded(new Color(0.35f, 0.75f, 1f));
+        _ringEnemy = Unshaded(new Color(1f, 0.45f, 0.35f));
+
+        // A 2D marquee for box-select, on its own layer above the 3D view.
+        var layer = new CanvasLayer();
+        AddChild(layer);
+        _box = new ColorRect { Color = new Color(0.4f, 0.8f, 1f, 0.18f), Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
+        layer.AddChild(_box);
+    }
+
+    static Material Unshaded(Color c) => new StandardMaterial3D
+    {
+        AlbedoColor = c,
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+    };
+
     // ---- per-frame ---------------------------------------------------------
 
     public override void _Process(double delta)
@@ -130,7 +165,9 @@ public partial class World3D : Node3D
         while (_accum >= Step && ran < MaxTicksPerFrame)
         {
             SnapshotPositions();
-            _sim.Tick(System.Array.Empty<Command>());
+            // This frame's orders ride the FIRST tick only, then it is empty.
+            _sim.Tick(ran == 0 ? _pending : (IReadOnlyList<Command>)System.Array.Empty<Command>());
+            if (ran == 0) _pending.Clear();
             _accum -= Step;
             ran++;
         }
@@ -138,6 +175,7 @@ public partial class World3D : Node3D
 
         SyncUnits();
         SyncBuildings();
+        UpdateRings();
         CameraInput(delta);
     }
 
@@ -227,11 +265,133 @@ public partial class World3D : Node3D
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e is InputEventMouseButton mb && mb.Pressed)
+        if (e is InputEventMouseButton mb)
         {
-            if (mb.ButtonIndex == MouseButton.WheelUp)   { _camDist = Mathf.Max(8f, _camDist * 0.9f); UpdateCamera(); }
-            if (mb.ButtonIndex == MouseButton.WheelDown) { _camDist = Mathf.Min(90f, _camDist * 1.1f); UpdateCamera(); }
+            if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed)   { _camDist = Mathf.Max(6f, _camDist * 0.9f); UpdateCamera(); }
+            if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) { _camDist = Mathf.Min(90f, _camDist * 1.1f); UpdateCamera(); }
+
+            if (mb.ButtonIndex == MouseButton.Left)
+            {
+                if (mb.Pressed) { _boxing = true; _boxStart = _boxEnd = mb.Position; }
+                else if (_boxing) { _boxing = false; _box.Visible = false; FinishSelect(mb.Position); }
+            }
+            else if (mb.ButtonIndex == MouseButton.Right && mb.Pressed)
+            {
+                RightClick(mb.Position);
+            }
         }
+        else if (e is InputEventMouseMotion mm && _boxing)
+        {
+            _boxEnd = mm.Position;
+            var tl = new Vector2(Mathf.Min(_boxStart.X, _boxEnd.X), Mathf.Min(_boxStart.Y, _boxEnd.Y));
+            var sz = (_boxEnd - _boxStart).Abs();
+            _box.Position = tl; _box.Size = sz;
+            _box.Visible = sz.Length() > 6f;   // hide until it is actually a drag
+        }
+    }
+
+    // Left-release: a small movement is a click (pick one unit); a real drag is a
+    // marquee (every own unit inside it).
+    void FinishSelect(Vector2 end)
+    {
+        bool additive = Input.IsKeyPressed(Key.Shift);
+        if (!additive) _selected.Clear();
+
+        if ((end - _boxStart).Length() <= 6f)
+        {
+            var u = UnitAtScreen(_boxStart, mine: true);
+            if (u != null) _selected.Add(u.Id);
+        }
+        else
+        {
+            var tl = new Vector2(Mathf.Min(_boxStart.X, end.X), Mathf.Min(_boxStart.Y, end.Y));
+            var br = new Vector2(Mathf.Max(_boxStart.X, end.X), Mathf.Max(_boxStart.Y, end.Y));
+            foreach (var kv in _unitNodes)
+            {
+                var unit = FindUnit(kv.Key);
+                if (unit == null || unit.Owner != MyPlayer) continue;
+                var sp = _cam.UnprojectPosition(kv.Value.Position + Vector3.Up * 0.6f);
+                if (sp.X >= tl.X && sp.X <= br.X && sp.Y >= tl.Y && sp.Y <= br.Y) _selected.Add(kv.Key);
+            }
+        }
+    }
+
+    // Right-click: attack an enemy under the cursor, else march the selection to
+    // the ground point.
+    void RightClick(Vector2 screen)
+    {
+        if (_selected.Count == 0) return;
+        var ids = new List<int>(_selected).ToArray();
+
+        var enemy = UnitAtScreen(screen, mine: false);
+        if (enemy != null)
+        {
+            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
+            return;
+        }
+        if (GroundTile(screen, out int tx, out int ty))
+            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+    }
+
+    // The unit whose model sits nearest the cursor, of the wanted side, within a
+    // small pixel radius. Projection-based, so no colliders are needed.
+    Unit UnitAtScreen(Vector2 screen, bool mine)
+    {
+        Unit best = null;
+        float bestD = 26f * 26f;
+        foreach (var kv in _unitNodes)
+        {
+            var u = FindUnit(kv.Key);
+            if (u == null) continue;
+            if (mine ? u.Owner != MyPlayer : u.Owner == MyPlayer) continue;
+            var sp = _cam.UnprojectPosition(kv.Value.Position + Vector3.Up * 0.6f);
+            float d = sp.DistanceSquaredTo(screen);
+            if (d < bestD) { bestD = d; best = u; }
+        }
+        return best;
+    }
+
+    // Where the cursor ray meets the ground, as a whole sim tile.
+    bool GroundTile(Vector2 screen, out int tx, out int ty)
+    {
+        tx = ty = 0;
+        var o = _cam.ProjectRayOrigin(screen);
+        var n = _cam.ProjectRayNormal(screen);
+        if (Mathf.Abs(n.Y) < 1e-4f) return false;
+        float t = -o.Y / n.Y;
+        if (t < 0) return false;
+        var p = o + n * t;
+        tx = Mathf.RoundToInt(p.X);
+        ty = Mathf.RoundToInt(p.Z);
+        return true;
+    }
+
+    Unit FindUnit(int id)
+    {
+        foreach (var u in _sim.Units) if (u.Id == id) return u;
+        return null;
+    }
+
+    // A ring under each selected unit; created and freed as the selection changes.
+    void UpdateRings()
+    {
+        foreach (var id in _selected)
+        {
+            if (!_unitNodes.TryGetValue(id, out var node)) continue;
+            if (!_rings.TryGetValue(id, out var ring))
+            {
+                var u = FindUnit(id);
+                ring = new MeshInstance3D { Mesh = _ringMesh, MaterialOverride = u != null && u.Owner == MyPlayer ? _ringMine : _ringEnemy };
+                AddChild(ring);
+                _rings[id] = ring;
+            }
+            ring.Position = node.Position + new Vector3(0, 0.06f, 0);
+        }
+        // Drop rings for anything no longer selected or gone.
+        var stale = new List<int>();
+        foreach (var kv in _rings)
+            if (!_selected.Contains(kv.Key) || !_unitNodes.ContainsKey(kv.Key)) stale.Add(kv.Key);
+        foreach (var id in stale) { _rings[id].QueueFree(); _rings.Remove(id); if (!_unitNodes.ContainsKey(id)) _selected.Remove(id); }
     }
 
     void UpdateCamera()
