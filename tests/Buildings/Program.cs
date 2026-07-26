@@ -13,6 +13,7 @@ static class Program
         Console.WriteLine("Buildings — placement, blocking, cost, production\n");
 
         PlacementCostsAndValidates();
+        TheMillAndBakeryCostGrain();
         AFootprintBlocksPathing();
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
@@ -57,6 +58,31 @@ static class Program
         Check("a build on water is refused", watery.Buildings.Count == 0);
 
         _ = worker;
+    }
+
+    // The mill and bakery are gated behind a working grain supply: they cost
+    // grain to build, not just wood and stone, so you must farm before you mill.
+    static void TheMillAndBakeryCostGrain()
+    {
+        Console.WriteLine("\nthe mill and bakery cost grain, not just wood and stone:");
+        var sim = new Simulation(TileMap.Open(48));
+
+        // Wood and stone to spare, but no grain: the mill is refused.
+        Give(sim, 1, wood: 200, stone: 200);
+        Order(sim, Build(1, BuildingType.Mill, 10, 10));
+        Check("a mill with no grain is refused", sim.Buildings.Count == 0);
+
+        // With grain banked (from a farm), it goes up and grain is charged.
+        sim.AddResource(1, ResourceType.Grain, 50);
+        Order(sim, Build(1, BuildingType.Mill, 10, 10));
+        Check("with grain in store, the mill is built", sim.Buildings.Count == 1);
+        Check($"grain was charged (50 - 15 = 35, got {sim.Stockpile(1, ResourceType.Grain)})",
+              sim.Stockpile(1, ResourceType.Grain) == 35);
+
+        // The bakery is gated the same way.
+        Order(sim, Build(1, BuildingType.Bakery, 20, 20));
+        Check($"the bakery too spends grain (35 - 20 = 15, got {sim.Stockpile(1, ResourceType.Grain)})",
+              sim.Stockpile(1, ResourceType.Grain) == 15 && sim.Buildings.Count == 2);
     }
 
     static void AFootprintBlocksPathing()

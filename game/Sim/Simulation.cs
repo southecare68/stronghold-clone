@@ -355,11 +355,14 @@ namespace Sim
             new[] { 15, 0, 0 },    // Woodcutter's Hut — cheap, so the wood economy bootstraps
             new[] { 20, 5, 0 },    // Storehouse — a drop-off closer to the trees
             new[] { 20, 0, 0 },    // Quarry — built from wood, then it pays back in stone
-            new[] { 15, 0, 0 },    // Farm — cheap; the field feeds the whole chain
-            new[] { 20, 15, 0 },   // Mill — a stone workshop that grinds grain to flour
-            new[] { 25, 15, 0 },   // Bakery — turns flour into bread (Food)
-            new[] { 15, 0, 0 },    // House — cheap timber; each one shelters ten more peasants
+            new[] { 15, 0, 0 },       // Farm — cheap; the field feeds the whole chain
+            new[] { 20, 15, 0, 15 },  // Mill — costs GRAIN too, so you must farm before you can mill
+            new[] { 25, 15, 0, 20 },  // Bakery — likewise gated behind a working grain supply
+            new[] { 15, 0, 0 },       // House — cheap timber; each one shelters ten more peasants
         };
+        // Costs are [wood, stone, food, grain]. Most buildings list only the first
+        // three (grain 0); the mill and bakery add a fourth entry, and CanAfford/Pay
+        // iterate each cost's own length, so the shorter rows charge no grain.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
         static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160 };
