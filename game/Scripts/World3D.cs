@@ -85,6 +85,18 @@ public partial class World3D : Node3D
     Label _selInfo;
     const int StatCount = 7;   // wood, stone, food, grain, flour, pop, army
 
+    // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
+    // over the ground — near-black where we've never been, a dim haze over ground
+    // we've seen but can't see now, clear where a unit or building has eyes right
+    // now. Enemy units and unseen enemy buildings are hidden outright. Purely a
+    // read of _sim.CanSee / HasExplored; the sim owns the actual visibility.
+    MeshInstance3D _fogPlane;
+    Image _fogImg;
+    ImageTexture _fogTex;
+    byte[] _fogBytes;
+    static readonly (byte R, byte G, byte B, byte A) FogUnexplored = (6, 8, 11, 236);
+    static readonly (byte R, byte G, byte B, byte A) FogExplored = (14, 18, 26, 120);
+
     public override void _Ready()
     {
         _sim = new Simulation(Sim.TileMap.Skirmish(MapSize));
@@ -93,6 +105,7 @@ public partial class World3D : Node3D
         LoadModels();
         SetupEnvironment();
         SetupGround();
+        SetupFog();
         SetupSelectionUi();
         SetupHud();
 
@@ -208,6 +221,50 @@ public partial class World3D : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.45f, 0.28f) },
         };
         AddChild(ground);
+    }
+
+    void SetupFog()
+    {
+        _fogImg = Image.CreateEmpty(MapSize, MapSize, false, Image.Format.Rgba8);
+        _fogTex = ImageTexture.CreateFromImage(_fogImg);
+        _fogBytes = new byte[MapSize * MapSize * 4];
+
+        var mat = new StandardMaterial3D
+        {
+            AlbedoTexture = _fogTex,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,   // crisp tile blocks
+            AlbedoColor = Colors.White,
+        };
+        _fogPlane = new MeshInstance3D
+        {
+            // A hair above the ground so it veils terrain without z-fighting, and
+            // below the ramparts (1.7) so a manned wall still reads through haze.
+            Mesh = new PlaneMesh { Size = new Vector2(MapSize, MapSize) },
+            Position = new Vector3(MapSize / 2f, 0.06f, MapSize / 2f),
+            MaterialOverride = mat,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        AddChild(_fogPlane);
+        _fogPlane.Visible = _sim.FogEnabled;
+    }
+
+    // Repaint the veil from current vision. Cheap: one buffer fill + one upload.
+    void UpdateFog()
+    {
+        if (!_sim.FogEnabled) { _fogPlane.Visible = false; return; }
+        for (int y = 0; y < MapSize; y++)
+            for (int x = 0; x < MapSize; x++)
+            {
+                int o = (y * MapSize + x) * 4;
+                (byte R, byte G, byte B, byte A) c =
+                    _sim.CanSee(MyPlayer, x, y) ? default :
+                    _sim.HasExplored(MyPlayer, x, y) ? FogExplored : FogUnexplored;
+                _fogBytes[o] = c.R; _fogBytes[o + 1] = c.G; _fogBytes[o + 2] = c.B; _fogBytes[o + 3] = c.A;
+            }
+        _fogImg.SetData(MapSize, MapSize, false, Image.Format.Rgba8, _fogBytes);
+        _fogTex.Update(_fogImg);
     }
 
     void SetupSelectionUi()
@@ -366,6 +423,7 @@ public partial class World3D : Node3D
 
         SyncUnits(delta);
         SyncBuildings();
+        UpdateFog();
         UpdateRings();
         UpdateHud();
         CameraInput(delta);
@@ -395,6 +453,17 @@ public partial class World3D : Node3D
                 if (sk != null) BindToSkeleton(node, sk);   // the modular meshes ship unbound — bind them so posing shows
                 _skel[u.Id] = sk;
             }
+
+            // Fog: an enemy is on screen only while one of ours can actually see its
+            // tile. Ours are always drawn. (Buildings persist once explored; a unit
+            // does not — it has moved on.)
+            if (u.Owner != MyPlayer && _sim.FogEnabled)
+            {
+                bool seen = _sim.CanSee(MyPlayer, u.X >> 16, u.Y >> 16);
+                node.Visible = seen;
+                if (!seen) continue;
+            }
+            else node.Visible = true;
 
             var now = SimXZ(u);
             var prev = _prevPos.TryGetValue(u.Id, out var p) ? p : now;
@@ -516,6 +585,11 @@ public partial class World3D : Node3D
                 AddChild(node);
                 _buildingNodes[b.Id] = node;
             }
+
+            // Fog: an enemy building stays once we've laid eyes on its tile — you
+            // remember a keep is there even after your scout leaves. Ours always show.
+            if (b.Owner != MyPlayer && _sim.FogEnabled)
+                node.Visible = _sim.HasExplored(MyPlayer, b.X + (b.W - 1) / 2, b.Y + (b.H - 1) / 2);
         }
         Prune(_buildingNodes, live);
     }
