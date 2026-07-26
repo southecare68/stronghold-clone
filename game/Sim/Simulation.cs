@@ -749,6 +749,10 @@ namespace Sim
 
         public IReadOnlyList<int> CostOf(BuildingType type) => BuildCost[(int)type];
 
+        // Footprint of a type, so a renderer can size a placement ghost without
+        // duplicating the tables. Read-only — touches no state.
+        public (int W, int H) FootprintOf(BuildingType type) => (FootW[(int)type], FootH[(int)type]);
+
         void Apply(Command cmd)
         {
             switch (cmd.Type)

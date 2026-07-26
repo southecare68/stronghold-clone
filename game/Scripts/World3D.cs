@@ -91,6 +91,27 @@ public partial class World3D : Node3D
     Vector2 _boxStart, _boxEnd;
     ColorRect _box;
 
+    // Build mode. A chosen type places a translucent ghost that follows the cursor,
+    // green where it can go and red where it can't; a click issues a Build order
+    // through lockstep, and a wall can be dragged out as a straight run. Orders are
+    // validated again by the sim, so the ghost is a guide, not the authority.
+    BuildingType? _buildType;
+    bool _wallDragging;
+    Vector2I _wallStart;
+    readonly List<MeshInstance3D> _ghosts = new();
+    BoxMesh _ghostBox;
+    Material _ghostOk, _ghostBad;
+    readonly Dictionary<BuildingType, Button> _buildButtons = new();
+
+    // What the player can put down (not the Keep — you start with one). Order sets
+    // the palette left to right.
+    static readonly BuildingType[] Buildable =
+    {
+        BuildingType.Wall, BuildingType.Gatehouse, BuildingType.House, BuildingType.Barracks,
+        BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.Storehouse,
+        BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery,
+    };
+
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
     // stockpiles and headcounts, rebuilt each frame — no state of its own.
     readonly Label[] _stat = new Label[StatCount];
@@ -160,6 +181,7 @@ public partial class World3D : Node3D
         SetupCombatFx();
         SetupSelectionUi();
         SetupHud();
+        SetupBuild();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
         // needs no explicit listener. --audio-log prints each voice for headless
@@ -827,6 +849,205 @@ public partial class World3D : Node3D
         return "No selection";
     }
 
+    // ---- build UI ----------------------------------------------------------
+
+    void SetupBuild()
+    {
+        // A translucent box per footprint tile, green where it can go, red where it
+        // can't. One shared unit cube, scaled and coloured per ghost.
+        _ghostBox = new BoxMesh { Size = Vector3.One };
+        _ghostOk = Ghost(new Color(0.35f, 0.85f, 0.45f, 0.38f));
+        _ghostBad = Ghost(new Color(0.9f, 0.32f, 0.28f, 0.38f));
+
+        // The palette, bottom-centre: one button per buildable type, name over cost.
+        var layer = new CanvasLayer();
+        AddChild(layer);
+        var panel = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 1, AnchorBottom = 1,
+            OffsetTop = -70, OffsetBottom = -12, GrowHorizontal = Control.GrowDirection.Both,
+        };
+        panel.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.9f)));
+        layer.AddChild(panel);
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 8);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 6);
+        panel.AddChild(margin);
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 5);
+        margin.AddChild(row);
+
+        foreach (var t in Buildable)
+        {
+            var b = new Button
+            {
+                ToggleMode = true,
+                Text = $"{NameOf(t)}\n{CostText(t)}",
+                CustomMinimumSize = new Vector2(78, 0),
+                FocusMode = Control.FocusModeEnum.None,   // never steal keyboard from the game
+            };
+            b.AddThemeFontSizeOverride("font_size", 12);
+            var type = t;                              // capture per iteration
+            b.Pressed += () => SelectBuild(type);
+            row.AddChild(b);
+            _buildButtons[t] = b;
+        }
+    }
+
+    static Material Ghost(Color c) => new StandardMaterial3D
+    {
+        AlbedoColor = c,
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+    };
+
+    static string NameOf(BuildingType t) => t switch
+    {
+        BuildingType.Wall => "Wall", BuildingType.Gatehouse => "Gate", BuildingType.House => "House",
+        BuildingType.Barracks => "Barracks", BuildingType.WoodcutterHut => "Woodcutter",
+        BuildingType.Quarry => "Quarry", BuildingType.Storehouse => "Store", BuildingType.Farm => "Farm",
+        BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery", _ => t.ToString(),
+    };
+
+    // Cost as a compact string: nonzero amounts with a resource initial.
+    string CostText(BuildingType t)
+    {
+        var cost = _sim.CostOf(t);
+        string[] tag = { "w", "s", "f", "g" };
+        var parts = new List<string>();
+        for (int i = 0; i < cost.Count; i++) if (cost[i] > 0) parts.Add($"{cost[i]}{tag[i]}");
+        return parts.Count == 0 ? "free" : string.Join(" ", parts);
+    }
+
+    // Toggle a build type. Picking the active one (or its button again) leaves build
+    // mode; picking another switches to it.
+    void SelectBuild(BuildingType t)
+    {
+        if (_buildType == t) { ExitBuild(); return; }
+        _buildType = t;
+        _wallDragging = false;
+        foreach (var kv in _buildButtons) kv.Value.ButtonPressed = kv.Key == t;
+        _sound?.PlayUi(Sfx.Select);
+    }
+
+    void ExitBuild()
+    {
+        _buildType = null;
+        _wallDragging = false;
+        foreach (var kv in _buildButtons) kv.Value.ButtonPressed = false;
+        foreach (var g in _ghosts) g.Visible = false;
+    }
+
+    // Left/right clicks while a type is chosen. A wall drags out a straight run;
+    // everything else places one per click. Right-click leaves build mode.
+    void BuildClick(InputEventMouseButton mb)
+    {
+        if (mb.ButtonIndex == MouseButton.Right && mb.Pressed) { ExitBuild(); return; }
+        if (mb.ButtonIndex != MouseButton.Left) return;
+        bool wall = _buildType == BuildingType.Wall;
+
+        if (mb.Pressed)
+        {
+            if (!GroundTile(mb.Position, out int tx, out int ty)) return;
+            if (wall) { _wallDragging = true; _wallStart = new Vector2I(tx, ty); }
+            else PlaceOne(_buildType.Value, tx, ty);
+        }
+        else if (wall && _wallDragging)
+        {
+            _wallDragging = false;
+            if (GroundTile(mb.Position, out int tx, out int ty))
+                foreach (var p in WallLine(_wallStart, new Vector2I(tx, ty)))
+                    PlaceOne(BuildingType.Wall, p.X, p.Y);
+        }
+    }
+
+    // Issue a Build for a footprint centred on the cursor tile, if it can go there
+    // and be paid for; a refused spot chirps rather than sending a dead order.
+    void PlaceOne(BuildingType t, int cx, int cy)
+    {
+        var (w, h) = _sim.FootprintOf(t);
+        int ox = cx - (w - 1) / 2, oy = cy - (h - 1) / 2;
+        if (Placeable(t, ox, oy))
+            _me.Issue(new Command { Type = CommandType.Build, TargetId = (int)t, X = ox, Y = oy });
+        else
+            _sound.PlayUi(Sfx.Denied);
+    }
+
+    // A straight orthogonal run between two tiles, along the longer axis — the way
+    // a wall is dragged out. Inclusive of both ends.
+    static IEnumerable<Vector2I> WallLine(Vector2I a, Vector2I b)
+    {
+        int dx = b.X - a.X, dy = b.Y - a.Y;
+        if (Mathf.Abs(dx) >= Mathf.Abs(dy))
+        {
+            int step = dx >= 0 ? 1 : -1;
+            for (int x = a.X; x != b.X + step; x += step) yield return new Vector2I(x, a.Y);
+        }
+        else
+        {
+            int step = dy >= 0 ? 1 : -1;
+            for (int y = a.Y; y != b.Y + step; y += step) yield return new Vector2I(a.X, y);
+        }
+    }
+
+    // Can this footprint legally sit here AND be afforded AND be on explored ground
+    // — the same three gates the Build command applies, so the ghost tells the truth.
+    bool Placeable(BuildingType t, int ox, int oy)
+    {
+        if (!_sim.CanPlace(t, ox, oy)) return false;
+        var (w, h) = _sim.FootprintOf(t);
+        for (int y = oy; y < oy + h; y++)
+            for (int x = ox; x < ox + w; x++)
+                if (!_sim.HasExplored(MyPlayer, x, y)) return false;
+        var cost = _sim.CostOf(t);
+        for (int i = 0; i < cost.Count; i++)
+            if (_sim.Stockpile(MyPlayer, (ResourceType)i) < cost[i]) return false;
+        return true;
+    }
+
+    // The ghost(s) under the cursor, updated each frame while in build mode.
+    void UpdateGhost()
+    {
+        if (_buildType is not BuildingType t) { foreach (var g in _ghosts) g.Visible = false; return; }
+
+        var mouse = GetViewport().GetMousePosition();
+        if (!GroundTile(mouse, out int cx, out int cy)) { foreach (var g in _ghosts) g.Visible = false; return; }
+
+        // While dragging a wall, one ghost per tile of the run; otherwise a single
+        // footprint under the cursor.
+        var tiles = new List<Vector2I>();
+        if (t == BuildingType.Wall && _wallDragging)
+            tiles.AddRange(WallLine(_wallStart, new Vector2I(cx, cy)));
+        else
+            tiles.Add(new Vector2I(cx, cy));
+
+        var (w, h) = _sim.FootprintOf(t);
+        int i = 0;
+        foreach (var c in tiles)
+        {
+            int ox = c.X - (w - 1) / 2, oy = c.Y - (h - 1) / 2;
+            var g = GhostAt(i++);
+            g.Visible = true;
+            g.Mesh = _ghostBox;
+            g.Scale = new Vector3(w * 0.96f, 0.8f, h * 0.96f);
+            g.Position = new Vector3(ox + (w - 1) / 2f, 0.4f, oy + (h - 1) / 2f);
+            g.MaterialOverride = Placeable(t, ox, oy) ? _ghostOk : _ghostBad;
+        }
+        for (; i < _ghosts.Count; i++) _ghosts[i].Visible = false;
+    }
+
+    MeshInstance3D GhostAt(int i)
+    {
+        while (_ghosts.Count <= i)
+        {
+            var g = new MeshInstance3D { CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+            AddChild(g);
+            _ghosts.Add(g);
+        }
+        return _ghosts[i];
+    }
+
     // ---- per-frame ---------------------------------------------------------
 
     public override void _Process(double delta)
@@ -859,6 +1080,7 @@ public partial class World3D : Node3D
         UpdateHud();
         UpdateFx(delta);
         UpdateMusic(delta);
+        UpdateGhost();
         CameraInput(delta);
     }
 
@@ -1165,10 +1387,25 @@ public partial class World3D : Node3D
 
     public override void _UnhandledInput(InputEvent e)
     {
+        // Escape leaves build mode (or, harmlessly, does nothing).
+        if (e is InputEventKey k && k.Pressed && k.Keycode == Key.Escape && _buildType != null)
+        {
+            ExitBuild();
+            return;
+        }
+
         if (e is InputEventMouseButton mb)
         {
             if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed)   { _camDist = Mathf.Max(6f, _camDist * 0.9f); UpdateCamera(); }
             if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) { _camDist = Mathf.Min(90f, _camDist * 1.1f); UpdateCamera(); }
+
+            // In build mode the left/right buttons place and cancel instead of
+            // selecting and ordering. Wheel-zoom above still works either way.
+            if (_buildType != null && (mb.ButtonIndex == MouseButton.Left || mb.ButtonIndex == MouseButton.Right))
+            {
+                BuildClick(mb);
+                return;
+            }
 
             if (mb.ButtonIndex == MouseButton.Left)
             {
