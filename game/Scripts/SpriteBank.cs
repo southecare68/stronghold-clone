@@ -104,6 +104,10 @@ public sealed class SpriteBank
 
         foreach (var name in BuildingArt.Values)
             TryLoad($"buildings/{name}");
+        // Grid-aligned wall pieces, drawn by the autotiler rather than keyed to a
+        // single building type. Missing ones just fall back to the shape-drawn wall.
+        foreach (var name in new[] { "wall_h", "wall_pillar" })
+            TryLoad($"buildings/{name}");
         foreach (var t in new[] { "ground", "rock", "marsh", "water" })
             TryLoad($"terrain/{t}");
 
@@ -140,6 +144,11 @@ public sealed class SpriteBank
 
     public Texture2D Building(BuildingType type) =>
         BuildingArt.TryGetValue(type, out var name) && _cache.TryGetValue($"buildings/{name}", out var t) ? t : null;
+
+    // A named wall piece for the autotiler (wall_h, wall_v, wall_pillar), or null
+    // if it was never baked — in which case the renderer draws the procedural wall.
+    public Texture2D WallPiece(string name) =>
+        _cache.TryGetValue($"buildings/{name}", out var t) ? t : null;
 
     public Texture2D Terrain(string name) => _cache.TryGetValue($"terrain/{name}", out var t) ? t : null;
 

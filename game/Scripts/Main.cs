@@ -1514,9 +1514,18 @@ public partial class Main : Node2D
 
     // Buildings: a filled footprint in the owner's colour, keeps darker and
     // walled, barracks lighter with a production bar when a unit is queued.
+    readonly HashSet<(int, int)> _wallTiles = new();
+
     void DrawBuildings()
     {
         var stone = new Color(0.55f, 0.55f, 0.58f);
+        // Which tiles hold a rampart, so a wall can see its neighbours and draw one
+        // continuous run instead of a row of separate blocks.
+        _wallTiles.Clear();
+        foreach (var b in _shown.Buildings)
+            if ((b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse) && b.Alive)
+                _wallTiles.Add((b.X, b.Y));
+
         foreach (var b in _shown.Buildings)
         {
             // Structures do not move, so scouting one is knowledge you keep — the
@@ -1526,6 +1535,15 @@ public partial class Main : Node2D
             var owner = b.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
             var rect = new Rect2(TileCorner(b.X, b.Y),
                                  new Vector2(b.W * PxPerUnit, b.H * PxPerUnit));
+
+            // Walls draw procedurally, connecting to adjacent ramparts, so a line
+            // reads as one curtain wall rather than a string of blocks.
+            if (b.Type == BuildingType.Wall)
+            {
+                DrawWall(b, rect, owner);
+                DrawBuildingBars(b, rect);
+                continue;
+            }
 
             // Baked sprite if we have one for this type. Drawn wider than the
             // footprint and anchored at the footprint's BOTTOM, so the building
@@ -1620,6 +1638,110 @@ public partial class Main : Node2D
 
             DrawBuildingBars(b, rect);
         }
+    }
+
+    // A curtain wall. With the baked grid-aligned pieces, autotile: a straight run
+    // east-west or north-south, and a tower wherever the wall turns, branches or
+    // ends — so a line reads as one continuous rampart. Without the pieces, fall
+    // back to the procedural band below.
+    void DrawWall(Building b, Rect2 rect, Color owner)
+    {
+        var hSprite = _art?.WallPiece("wall_h");
+        var pillar = _art?.WallPiece("wall_pillar");
+        if (hSprite == null || pillar == null)
+        {
+            DrawWallShape(b, rect, owner);
+            return;
+        }
+
+        bool n = _wallTiles.Contains((b.X, b.Y - 1));
+        bool s = _wallTiles.Contains((b.X, b.Y + 1));
+        bool e = _wallTiles.Contains((b.X + 1, b.Y));
+        bool w = _wallTiles.Contains((b.X - 1, b.Y));
+        bool horiz = e || w, vert = n || s;
+
+        // A faint owner-tinted footprint on the ground says whose wall it is.
+        DrawRect(rect, new Color(owner.R, owner.G, owner.B, 0.14f));
+
+        // A turn, junction or lone tile becomes a corner tower; a straight run uses
+        // the battlement piece — laid flat for east-west, turned a quarter for
+        // north-south (the same piece rotated keeps a matching thickness, where the
+        // baked into-screen piece would foreshorten to a sliver).
+        if ((horiz && vert) || (!horiz && !vert))
+            DrawWallPiece(pillar, rect, 0f);
+        else if (vert)
+            DrawWallPiece(hSprite, rect, Mathf.Pi / 2f);
+        else
+            DrawWallPiece(hSprite, rect, 0f);
+    }
+
+    // Draw one wall piece on its tile, a touch oversized so adjacent runs overlap
+    // and join into a seamless curtain, optionally rotated a quarter-turn for a
+    // vertical run. Centred on the tile so the stone sits on its ground.
+    void DrawWallPiece(Texture2D sprite, Rect2 tile, float rot)
+    {
+        var texSize = sprite.GetSize();
+        float drawW = tile.Size.X * 1.34f;
+        float drawH = drawW * texSize.Y / texSize.X;
+        var center = tile.Position + tile.Size * 0.5f;
+        DrawSetTransform(center, rot, Vector2.One);
+        DrawTextureRect(sprite, new Rect2(-drawW * 0.5f, -drawH * 0.5f, drawW, drawH), false);
+        DrawSetTransform(Vector2.Zero, 0f, Vector2.One);
+    }
+
+    // Procedural fallback wall: a continuous stone band that reaches out to any
+    // adjacent rampart, crenellated along the top. Drawn top-down; used when the
+    // baked wall pieces are absent.
+    void DrawWallShape(Building b, Rect2 rect, Color owner)
+    {
+        var body = new Color(0.58f, 0.57f, 0.60f).Lerp(owner, 0.14f);
+        var dark = body.Darkened(0.38f);
+        var light = body.Lightened(0.16f);
+
+        bool n = _wallTiles.Contains((b.X, b.Y - 1));
+        bool s = _wallTiles.Contains((b.X, b.Y + 1));
+        bool e = _wallTiles.Contains((b.X + 1, b.Y));
+        bool w = _wallTiles.Contains((b.X - 1, b.Y));
+
+        float sz = rect.Size.X;
+        float inset = sz * 0.20f;                 // pull in from an OPEN edge; a rounded terminal
+        // Reach all the way to any edge that has a neighbour, so the two tiles' bands touch.
+        float left = w ? 0 : inset, right = e ? 0 : inset, top = n ? 0 : inset, bot = s ? 0 : inset;
+        var block = new Rect2(rect.Position + new Vector2(left, top),
+                              new Vector2(sz - left - right, sz - top - bot));
+
+        DrawRect(block, body);
+        // A lighter walkway strip down the centre gives a hint of a wall-top.
+        var walk = block.Grow(-sz * 0.10f);
+        if (walk.Size.X > 0 && walk.Size.Y > 0) DrawRect(walk, light.Lerp(body, 0.4f));
+        DrawRect(block, dark, false, 1.3f);
+
+        // Merlons along whichever outer edge is exposed to the field. For a run
+        // that goes left-right, that's the top and bottom; for an up-down run, the
+        // sides. Little blocks with gaps between them — the crenellations.
+        bool horizontal = e || w;
+        if (horizontal)
+        {
+            Merlons(block, dark, horizontal: true, block.Position.Y - sz * 0.06f, sz);
+            Merlons(block, dark, horizontal: true, block.End.Y - sz * 0.10f, sz);
+        }
+        else
+        {
+            Merlons(block, dark, horizontal: false, block.Position.X - sz * 0.06f, sz);
+            Merlons(block, dark, horizontal: false, block.End.X - sz * 0.10f, sz);
+        }
+    }
+
+    // A row of merlons (crenellation teeth) along one edge of a wall block.
+    void Merlons(Rect2 block, Color c, bool horizontal, float edge, float sz)
+    {
+        float tooth = sz * 0.16f;
+        if (horizontal)
+            for (float x = block.Position.X + tooth * 0.5f; x < block.End.X - tooth; x += tooth * 2f)
+                DrawRect(new Rect2(x, edge, tooth, sz * 0.16f), c);
+        else
+            for (float y = block.Position.Y + tooth * 0.5f; y < block.End.Y - tooth; y += tooth * 2f)
+                DrawRect(new Rect2(edge, y, sz * 0.16f, tooth), c);
     }
 
     // Damage and production bars, above a building's footprint. Shared by the

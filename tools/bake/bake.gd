@@ -71,6 +71,14 @@ const ENTITIES := [
 	{ "out": "buildings/mill",       "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_Windmill_01_Optimized", "turns": false, "fit": 1.15 },
 	{ "out": "buildings/bakery",     "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized",     "turns": false, "fit": 1.15 },
 	{ "out": "buildings/house",      "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized",   "turns": false, "fit": 1.15 },
+	# Grid-aligned wall pieces: the battlement yawed 45 degrees so it runs ALONG a
+	# screen axis (east-west here), which makes a row of tiles read as one curtain
+	# wall instead of a staircase of blocks. The renderer turns this same piece a
+	# quarter for north-south runs — baking the into-screen direction instead would
+	# foreshorten to a useless sliver. The pillar is a tower that stands wherever
+	# the wall turns, branches or ends.
+	{ "out": "buildings/wall_h",     "prefab": "Castle/SM_Bld_Castle_Battlements_01",      "turns": false, "fit": 1.15, "yaw": 45 },
+	{ "out": "buildings/wall_pillar","prefab": "Castle/SM_Bld_Castle_Battlements_Pillar_01","turns": false, "fit": 1.20, "yaw": 0 },
 	{ "out": "units/soldier", "prefab": "Characters/SM_Chr_Soldier_Male_01",   "turns": true, "fit": 1.25 },
 	{ "out": "units/runner",  "prefab": "Characters/SM_Chr_Soldier_Female_01", "turns": true, "fit": 1.25 },
 	{ "out": "units/brute",   "prefab": "Characters/SM_Chr_Rider_01",          "turns": true, "fit": 1.25 },
@@ -173,7 +181,10 @@ func _bake(entity: Dictionary) -> void:
 	_camera.far = radius * 8.0 + 20.0
 
 	if not entity["turns"]:
-		# A building: one 3/4 view, no rotation, no animation.
+		# A building: one 3/4 view. An optional yaw turns the model on the spot —
+		# used to swing a wall segment so it runs ALONG a screen axis (and so tiles
+		# in a row line up) instead of across it at the default iso diagonal.
+		_spin.rotation_degrees.y = float(entity.get("yaw", 0.0))
 		await _grab_named(entity["out"] + ".png")
 		return
 
