@@ -79,6 +79,12 @@ public partial class World3D : Node3D
     Vector2 _boxStart, _boxEnd;
     ColorRect _box;
 
+    // HUD: a live status bar over the 3D view. Read-only view of the sim's
+    // stockpiles and headcounts, rebuilt each frame — no state of its own.
+    readonly Label[] _stat = new Label[StatCount];
+    Label _selInfo;
+    const int StatCount = 7;   // wood, stone, food, grain, flour, pop, army
+
     public override void _Ready()
     {
         _sim = new Simulation(Sim.TileMap.Skirmish(MapSize));
@@ -88,6 +94,7 @@ public partial class World3D : Node3D
         SetupEnvironment();
         SetupGround();
         SetupSelectionUi();
+        SetupHud();
 
         _cam = new Camera3D { Current = true };
         AddChild(_cam);
@@ -225,6 +232,121 @@ public partial class World3D : Node3D
         Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
     };
 
+    // The resource/headcount bar and the selection readout. Each stat is a swatch
+    // (so it reads at a glance) plus a label we refresh every frame in UpdateHud.
+    static readonly (string Name, Color Swatch)[] StatDefs =
+    {
+        ("Wood",  new Color(0.62f, 0.44f, 0.24f)),
+        ("Stone", new Color(0.60f, 0.62f, 0.66f)),
+        ("Food",  new Color(0.86f, 0.66f, 0.24f)),
+        ("Grain", new Color(0.80f, 0.72f, 0.34f)),
+        ("Flour", new Color(0.88f, 0.86f, 0.80f)),
+        ("Pop",   new Color(0.42f, 0.78f, 0.44f)),
+        ("Army",  new Color(0.86f, 0.40f, 0.36f)),
+    };
+
+    void SetupHud()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        var bar = new PanelContainer
+        {
+            OffsetLeft = 12, OffsetTop = 10,
+            AnchorLeft = 0, AnchorTop = 0,
+        };
+        bar.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.86f)));
+        layer.AddChild(bar);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 14);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 8);
+        bar.AddChild(margin);
+
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 18);
+        margin.AddChild(row);
+
+        for (int i = 0; i < StatCount; i++)
+        {
+            var cell = new HBoxContainer();
+            cell.AddThemeConstantOverride("separation", 6);
+
+            var dot = new ColorRect { Color = StatDefs[i].Swatch, CustomMinimumSize = new Vector2(11, 11) };
+            dot.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            cell.AddChild(dot);
+
+            var lab = new Label { Text = StatDefs[i].Name + " –" };
+            lab.AddThemeColorOverride("font_color", new Color(0.92f, 0.94f, 0.97f));
+            lab.AddThemeFontSizeOverride("font_size", 15);
+            _stat[i] = lab;
+            cell.AddChild(lab);
+
+            row.AddChild(cell);
+        }
+
+        // Selection readout, bottom-left.
+        var selPanel = new PanelContainer
+        {
+            AnchorLeft = 0, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = 12, OffsetTop = -44, OffsetBottom = -12,
+        };
+        selPanel.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.86f)));
+        layer.AddChild(selPanel);
+        var selMargin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) selMargin.AddThemeConstantOverride("margin_" + s, 12);
+        foreach (var s in new[] { "top", "bottom" }) selMargin.AddThemeConstantOverride("margin_" + s, 6);
+        selPanel.AddChild(selMargin);
+        _selInfo = new Label { Text = "No selection" };
+        _selInfo.AddThemeColorOverride("font_color", new Color(0.82f, 0.86f, 0.92f));
+        _selInfo.AddThemeFontSizeOverride("font_size", 14);
+        selMargin.AddChild(_selInfo);
+    }
+
+    static StyleBoxFlat Panel(Color bg) => new()
+    {
+        BgColor = bg,
+        CornerRadiusTopLeft = 6, CornerRadiusTopRight = 6,
+        CornerRadiusBottomLeft = 6, CornerRadiusBottomRight = 6,
+    };
+
+    void UpdateHud()
+    {
+        int me = MyPlayer;
+        int[] res =
+        {
+            _sim.Stockpile(me, ResourceType.Wood),
+            _sim.Stockpile(me, ResourceType.Stone),
+            _sim.Stockpile(me, ResourceType.Food),
+            _sim.Stockpile(me, ResourceType.Grain),
+            _sim.Stockpile(me, ResourceType.Flour),
+        };
+        for (int i = 0; i < res.Length; i++) _stat[i].Text = $"{StatDefs[i].Name} {res[i]}";
+
+        int idle = _sim.IdlePeasantCount(me);
+        _stat[5].Text = $"Pop {_sim.PeasantCount(me)}/{_sim.PopulationCap(me)}" + (idle > 0 ? $" ({idle} idle)" : "");
+        _stat[6].Text = $"Army {_sim.ArmySize(me)}";
+
+        _selInfo.Text = _selected.Count == 0 ? "No selection"
+            : _selected.Count == 1 ? DescribeUnit(_selected) : $"{_selected.Count} units selected";
+    }
+
+    // A one-line description of a single selected unit.
+    string DescribeUnit(IEnumerable<int> ids)
+    {
+        foreach (var id in ids)
+            foreach (var u in _sim.Units)
+                if (u.Id == id && u.Alive)
+                {
+                    string kind = u.IsPeasant ? "Peasant"
+                        : u.DesignId >= 0 && u.DesignId < Skirmish.DesignNames.Length ? Skirmish.DesignNames[u.DesignId]
+                        : "Soldier";
+                    string where = u.GarrisonId != 0 ? ", on the wall" : "";
+                    return $"{kind}  ·  {u.Hp} hp{where}";
+                }
+        return "No selection";
+    }
+
     // ---- per-frame ---------------------------------------------------------
 
     public override void _Process(double delta)
@@ -245,6 +367,7 @@ public partial class World3D : Node3D
         SyncUnits(delta);
         SyncBuildings();
         UpdateRings();
+        UpdateHud();
         CameraInput(delta);
     }
 
