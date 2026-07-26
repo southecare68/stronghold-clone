@@ -852,6 +852,7 @@ public partial class Main : Node2D
                "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store [O] house  ([Z/X] zoom)" +
                "\nfood chain: [R] farm → [T] mill → [Y] bakery  (bread breeds peasants; a house holds 10)" +
                "\nright-click your barracks to train (each soldier arms 1 idle peasant), gate to open/close, enemy to attack" +
+               "\nselect soldiers + right-click your own wall/gate to garrison it — archers on walls out-range and take cover" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
                                   : "") +
@@ -963,7 +964,16 @@ public partial class Main : Node2D
                 // cursor. Acting on your own building (train / work the gate)
                 // needs no unit selected; orders to units do.
                 var mine = OwnBuildingAt(at);
-                if (mine != null && mine.Type == BuildingType.Barracks)
+                bool onRampart = mine != null &&
+                    (mine.Type == BuildingType.Wall || mine.Type == BuildingType.Gatehouse);
+                if (onRampart && _selected.Count > 0)
+                {
+                    // Man the rampart with the selected soldiers (peasants ignored).
+                    var ids = new List<int>(_selected).ToArray();
+                    _me.Issue(new Command { Type = CommandType.Garrison, UnitIds = ids, TargetId = mine.Id });
+                    _sound?.PlayUi(Sfx.MoveOrder);
+                }
+                else if (mine != null && mine.Type == BuildingType.Barracks)
                 {
                     _me.Issue(new Command { Type = CommandType.Train, TargetId = mine.Id, X = _trainDesign });
                     _sound?.PlayUi(CanAffordTraining() ? Sfx.MoveOrder : Sfx.Denied);
@@ -1191,6 +1201,9 @@ public partial class Main : Node2D
             if (u.Owner != _myPlayer && !LitUnit(u)) continue;
 
             var p = WorldToScreen(u);
+            // A garrisoned soldier stands ON the rampart — lift it so it reads as
+            // up on the battlement rather than in front of the wall.
+            if (u.GarrisonId != 0) p += new Vector2(0, -6f);
             var color = u.Owner == 1 ? new Color(0.3f, 0.7f, 1f) : new Color(1f, 0.45f, 0.35f);
             // Radius scales with the design's HP, so a Brute reads as bigger than
             // a Runner at a glance.

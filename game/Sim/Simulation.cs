@@ -17,7 +17,7 @@ namespace Sim
 {
     public enum CommandType
     {
-        Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6,
+        Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10 }
@@ -180,6 +180,13 @@ namespace Sim
         public int TargetBuildingId;
         public int AttackTimer;
 
+        // Garrison. The id of a friendly wall/gatehouse this unit mans; 0 when it
+        // is a field unit. A garrisoned unit climbs onto the wall and holds there,
+        // auto-firing at any enemy in reach — it shoots further (height) and takes
+        // less damage (cover). Kept out of the frozen units-only Checksum: no
+        // garrison appears in the Move-only parity scenario.
+        public int GarrisonId;
+
         // Economy. A unit gathering carries up to a full load from a node back to
         // its owner's drop-off, then repeats. GatherNodeId is the assignment;
         // CarryType/CarryAmount is what it is hauling right now.
@@ -214,6 +221,7 @@ namespace Sim
                 Id = Id, Owner = Owner, DesignId = DesignId, X = X, Y = Y, Tx = Tx, Ty = Ty,
                 Hp = Hp, MaxHp = MaxHp, TargetId = TargetId,
                 TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
+                GarrisonId = GarrisonId,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant,
                 PathIndex = PathIndex,
@@ -265,6 +273,11 @@ namespace Sim
         // --- Combat tuning that is NOT per-design ------------------------------
         static readonly int AggroRange = Fixed.FromInt(7);      // acquire the next foe within this
         const int ChaseRepathEvery = 6;                         // ticks between chase re-paths
+
+        // A unit stationed on a wall shoots two tiles further (height) and takes
+        // half damage (cover). Only 1x1 ramparts can be manned.
+        static readonly int GarrisonRangeBonus = Fixed.FromInt(2);
+        static bool CanGarrison(BuildingType t) => t == BuildingType.Wall || t == BuildingType.Gatehouse;
 
         // --- Economy tuning ---------------------------------------------------
         static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
@@ -746,6 +759,7 @@ namespace Sim
                         var u = Units.Find(v => v.Id == id);
                         if (u != null && u.Owner == cmd.Owner)
                         {
+                            if (u.GarrisonId != 0) Ungarrison(u);   // climb down off the wall first
                             StopWork(u);             // a plain move breaks off fighting AND gathering
                             Order(u, cmd.X, cmd.Y);
                         }
@@ -861,6 +875,25 @@ namespace Sim
                         gate.Type != BuildingType.Gatehouse) break;
                     gate.Open = !gate.Open;
                     BlockFootprint(gate, !gate.Open);
+                    break;
+
+                case CommandType.Garrison:
+                    // TargetId carries a friendly rampart's id. The listed soldiers
+                    // march to it and man it — peasants stay on the ground (they are
+                    // workers, not a garrison). The climb-on and the firing happen in
+                    // ResolveGarrison / ResolveCombat.
+                    var rampart = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (rampart == null || rampart.Owner != cmd.Owner ||
+                        !rampart.Alive || !CanGarrison(rampart.Type)) break;
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u == null || u.Owner != cmd.Owner || u.IsPeasant) continue;
+                        StopWork(u);
+                        u.GarrisonId = rampart.Id;
+                        var spot = NearestFreeTile(rampart.X, rampart.Y);
+                        if (spot.HasValue) Order(u, spot.Value.X, spot.Value.Y);
+                    }
                     break;
             }
         }
@@ -1021,7 +1054,8 @@ namespace Sim
                 }
             }
 
-            ResolveCombat();
+            ResolveGarrison();      // station soldiers on their ramparts...
+            ResolveCombat();        // ...then let the garrison and the field fight
             RemoveDead();
             RemoveDestroyedBuildings();
             ResolveWorkBuildings(); // hand idle peasants their next node...
@@ -1458,6 +1492,9 @@ namespace Sim
             {
                 if (u.AttackTimer > 0) u.AttackTimer--;
 
+                // A garrisoned soldier fights defensively: it needs no order, holds
+                // its rampart, and shoots anything that wanders into reach.
+                if (u.GarrisonId != 0) { GarrisonFire(u); continue; }
                 if (u.TargetBuildingId != 0) { SiegeBuilding(u); continue; }
                 if (u.TargetId == 0) continue;
 
@@ -1484,7 +1521,7 @@ namespace Sim
 
                     if (u.AttackTimer == 0)
                     {
-                        target.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
+                        target.Hp -= DamageTo(target, _rng.NextInt(d.Damage - 2, d.Damage + 3));
                         u.AttackTimer = d.Cooldown;
                         ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = target.X, ToY = target.Y });
                     }
@@ -1499,6 +1536,97 @@ namespace Sim
                         Order(u, Fixed.ToInt(target.X), Fixed.ToInt(target.Y));
                 }
             }
+        }
+
+        // ---- Garrison: soldiers manning the ramparts ---------------------------
+        // Marches assigned soldiers to their wall and stations them on it. Runs
+        // before combat so a soldier that has just reached its rampart fires the
+        // same tick. A garrison whose wall has fallen is dismissed to the ground.
+        void ResolveGarrison()
+        {
+            foreach (var u in Units)
+            {
+                if (u.GarrisonId == 0 || !u.Alive) continue;
+                var wall = Buildings.Find(b => b.Id == u.GarrisonId);
+                if (wall == null || !wall.Alive || !CanGarrison(wall.Type)) { Ungarrison(u); continue; }
+
+                if (OnWall(u, wall))
+                {
+                    // Stationed: hold fast (combat does the shooting).
+                    u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
+                }
+                else if (Fixed.VLen(Fixed.FromInt(wall.X) - u.X, Fixed.FromInt(wall.Y) - u.Y) <= Fixed.FromInt(2))
+                {
+                    // At the foot of the wall — climb up onto it.
+                    u.X = Fixed.FromInt(wall.X); u.Y = Fixed.FromInt(wall.Y);
+                    u.Tx = u.X; u.Ty = u.Y; u.Path = null; u.PathIndex = 0;
+                }
+                else
+                {
+                    var spot = NearestFreeTile(wall.X, wall.Y);
+                    if (spot.HasValue) ChaseTo(u, spot.Value.X, spot.Value.Y);
+                }
+            }
+        }
+
+        static bool OnWall(Unit u, Building wall) => (u.X >> 16) == wall.X && (u.Y >> 16) == wall.Y;
+
+        // Dismiss a unit from its garrison. If the wall still stands it is sitting
+        // on a blocked tile, so step it down to open ground before it tries to move.
+        void Ungarrison(Unit u)
+        {
+            u.GarrisonId = 0;
+            int tx = u.X >> 16, ty = u.Y >> 16;
+            if (!Map.Passable(tx, ty))
+            {
+                var spot = NearestFreeTile(tx, ty);
+                if (spot.HasValue)
+                {
+                    u.X = Fixed.FromInt(spot.Value.X); u.Y = Fixed.FromInt(spot.Value.Y);
+                    u.Tx = u.X; u.Ty = u.Y; u.Path = null; u.PathIndex = 0;
+                }
+            }
+        }
+
+        // A stationed soldier auto-fires at the nearest enemy in reach — its design
+        // range plus the height bonus. It never leaves the wall to chase. Draws from
+        // the same RNG as field combat, in id order, so it stays deterministic.
+        void GarrisonFire(Unit u)
+        {
+            var wall = Buildings.Find(b => b.Id == u.GarrisonId);
+            if (wall == null || !OnWall(u, wall)) return;   // still climbing up
+
+            var d = DesignOf(u.DesignId);
+            int reach = d.RangeFixed + GarrisonRangeBonus;
+
+            Unit best = null;
+            int bestDist = int.MaxValue;
+            foreach (var v in Units)                        // id order
+            {
+                if (v.Owner == u.Owner || !v.Alive) continue;
+                if (!CanSeeUnit(u.Owner, v)) continue;
+                int dist = Fixed.VLen(v.X - u.X, v.Y - u.Y);
+                if (dist <= reach && dist < bestDist) { bestDist = dist; best = v; }
+            }
+            u.TargetId = best?.Id ?? 0;
+            if (best != null && u.AttackTimer == 0)
+            {
+                best.Hp -= DamageTo(best, _rng.NextInt(d.Damage - 2, d.Damage + 3));
+                u.AttackTimer = d.Cooldown;
+                ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = best.X, ToY = best.Y });
+            }
+        }
+
+        // Damage a blow actually lands, after cover. A soldier stationed on a wall
+        // takes half — the rampart shields it.
+        int DamageTo(Unit target, int raw)
+        {
+            if (target.GarrisonId != 0)
+            {
+                var w = Buildings.Find(b => b.Id == target.GarrisonId);
+                if (w != null && OnWall(target, w)) return (raw + 1) / 2;
+            }
+            return raw;
         }
 
         // Besiege a building: close to its wall, then batter it on cooldown.
@@ -1574,6 +1702,11 @@ namespace Sim
                     var w = Units.Find(u => u.Id == b.WorkerId);
                     if (w != null) EndJob(w);
                 }
+                // A fallen rampart drops its garrison to the rubble (now walkable,
+                // so no relocation is needed) — they become field units again.
+                if (CanGarrison(b.Type))
+                    foreach (var u in Units)
+                        if (u.GarrisonId == b.Id) u.GarrisonId = 0;
                 Buildings.RemoveAt(i);
             }
         }
@@ -1705,6 +1838,7 @@ namespace Sim
                 Mix((int)u.Job); Mix(u.GatherNodeId);
                 Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
                 Mix(u.IsPeasant ? 1 : 0);
+                Mix(u.GarrisonId);
 
                 // The route still to walk. Two units in identical positions with
                 // different plans are not in the same world.

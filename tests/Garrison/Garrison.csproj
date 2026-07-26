@@ -1,0 +1,26 @@
+<!-- Garrison — soldiers manning the ramparts.
+
+     A soldier ordered onto a friendly wall climbs up and holds it, auto-firing at
+     any enemy in reach without an order, shooting further from the height and
+     taking half damage under cover. What these tests pin down: it climbs on, it
+     fires defensively, the wall extends its reach, cover halves the damage it
+     takes, a fallen wall dismisses it, a move order pulls it down — and two
+     machines agree on all of it.
+
+     Sim-only. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>GarrisonTests</RootNamespace>
+    <AssemblyName>GarrisonTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>
