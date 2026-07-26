@@ -51,6 +51,13 @@ public partial class World3D : Node3D
     EnetTransport _enet;       // networked modes only
     string _mode = "LOCAL";
     Simulation _sim;           // == _me.Sim, kept for the rendering code to read
+
+    // --desync-dump: on the first desync, write the DIVERGING tick's full state to
+    // a file, so two machines' dumps can be diffed to the exact unit/building/tile.
+    // Only while enabled do we keep the ring of recent snapshots it reads from.
+    bool _dumpDesync, _dumpDone;
+    readonly Dictionary<int, MatchSnapshot> _dumpRing = new();
+    const int DumpRingTicks = 12;
     Camera3D _cam;
     double _accum;
     float _alpha;
@@ -197,6 +204,7 @@ public partial class World3D : Node3D
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
         // needs no explicit listener. --audio-log prints each voice for headless
         // checks; --mute silences everything.
+        _dumpDesync = HasFlag("--desync-dump");
         bool mute = HasFlag("--mute");
         _sound = new Sound3D { LogPlays = HasFlag("--audio-log"), Muted = mute };
         AddChild(_sound);
@@ -1082,7 +1090,7 @@ public partial class World3D : Node3D
 
             bool advanced = _me.TryStep();
             foreach (var c in Clients()) if (c != _me) c.TryStep();
-            if (advanced) { SpawnShots(); ObserveEconomy(); }   // per-tick: blows, then sim-event sounds
+            if (advanced) { SpawnShots(); ObserveEconomy(); if (_dumpDesync) RecordDumpRing(); }   // per-tick: blows, sounds, dump ring
 
             if (!advanced) { _accum = Step; break; }
             _accum -= Step;
@@ -1100,6 +1108,7 @@ public partial class World3D : Node3D
         UpdateMusic(delta);
         UpdateGhost();
         UpdateTrainPanel();
+        if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
     }
 
@@ -1116,6 +1125,84 @@ public partial class World3D : Node3D
         if (_music == null) return;
         if (_battle > 0f) _battle -= (float)delta;
         _music.SetMood(_battle > 0f ? Mood.Battle : Mood.Calm);
+    }
+
+    // ---- desync dump -------------------------------------------------------
+
+    // Keep the just-completed tick's full state, so if a peer later reports that
+    // this tick diverged we can dump the EXACT state that produced our checksum.
+    void RecordDumpRing()
+    {
+        int k = _sim.TickNumber - 1;
+        if (k < 0) return;
+        _dumpRing[k] = _me.Sim.Snapshot();
+        _dumpRing.Remove(k - DumpRingTicks);
+    }
+
+    // On the first desync, write the diverging tick's state to user:// as plain,
+    // line-per-entity text. Run with --desync-dump on BOTH machines and diff the
+    // two files: identical lines cancel, the first difference is the divergence.
+    void WriteDesyncDump(DesyncReport d)
+    {
+        bool exact = _dumpRing.TryGetValue(d.Tick, out var snap);
+        if (!exact) snap = _me.Sim.Snapshot();   // fell out of the ring; current state, flagged below
+
+        string path = $"user://desync-{_mode}-p{MyPlayer}-tick{d.Tick}.txt";
+        using var f = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Write);
+        if (f == null) { GD.PrintErr("[desync] could not open ", path); return; }
+        f.StoreString(DumpText(d, snap, exact));
+        GD.Print("[desync] wrote ", ProjectSettings.GlobalizePath(path));
+    }
+
+    string DumpText(DesyncReport d, MatchSnapshot s, bool exact)
+    {
+        var b = new System.Text.StringBuilder();
+        void L(string line) => b.Append(line).Append('\n');
+
+        L($"DESYNC @ tick {d.Tick}: local 0x{d.LocalChecksum:X8} != player {d.RemotePlayer} 0x{d.RemoteChecksum:X8}");
+        L($"mode {_mode} player {MyPlayer}");
+        L(exact ? "# state AT the diverging tick (from the ring)"
+                : "# WARNING: diverging tick fell out of the ring — this is the CURRENT state");
+        L($"snapshot.tick {s.Tick} checksum 0x{s.Checksum:X8}");
+        L($"map.fingerprint 0x{_me.Sim.Map.Fingerprint:X8}");
+        L($"nextIds {s.NextUnitId}/{s.NextNodeId}/{s.NextBuildingId}");
+        L($"rng 0x{s.RngState:X8}");
+        for (int i = 0; i < s.Designs.Length; i++)
+        {
+            var g = s.Designs[i];
+            L($"design {i} {g.Hp}/{g.Damage}/{g.SpeedStat}/{g.RangeStat}/{g.Cooldown}");
+        }
+        foreach (var u in s.Units)   // id order
+            L($"unit {u.Id} o{u.Owner} d{u.DesignId} ({u.X},{u.Y}) t({u.Tx},{u.Ty}) hp{u.Hp}/{u.MaxHp} " +
+              $"tgt{u.TargetId}/{u.TargetBuildingId} at{u.AttackTimer} job{(int)u.Job} gn{u.GatherNodeId} " +
+              $"c{(int)u.CarryType}:{u.CarryAmount} gt{u.GatherTimer} p{(u.IsPeasant ? 1 : 0)} gar{u.GarrisonId} " +
+              $"path{(u.HasPath ? u.Path.Count - u.PathIndex : 0)}");
+        foreach (var bld in s.Buildings)   // id order
+            L($"bldg {bld.Id} o{bld.Owner} t{(int)bld.Type} ({bld.X},{bld.Y}) {bld.W}x{bld.H} " +
+              $"hp{bld.Hp}/{bld.MaxHp} q[{string.Join(",", bld.TrainQueue)}] bt{bld.BuildTimer} " +
+              $"open{(bld.Open ? 1 : 0)} wkr{bld.WorkerId}");
+        foreach (var n in s.Nodes)   // id order
+            L($"node {n.Id} t{(int)n.Type} ({n.X},{n.Y}) amt{n.Amount}");
+        foreach (int o in Sorted(s.Stock.Keys))
+            L($"stock o{o} [{string.Join(",", s.Stock[o])}]");
+        foreach (int o in Sorted(s.DropOffs.Keys))
+            L($"drop o{o} ({s.DropOffs[o].X},{s.DropOffs[o].Y})");
+        L($"fog {(s.FogEnabled ? 1 : 0)}");
+        foreach (int o in Sorted(s.Explored.Keys))
+        {
+            var w = s.Explored[o];
+            int bits = 0; uint h = 0x811c9dc5;
+            foreach (uint word in w) { bits += System.Numerics.BitOperations.PopCount(word); h = (h ^ word) * 0x01000193; }
+            L($"fog o{o} bits{bits} hash0x{h:X8}");
+        }
+        return b.ToString();
+    }
+
+    static List<int> Sorted(IEnumerable<int> keys)
+    {
+        var list = new List<int>(keys);
+        list.Sort();
+        return list;
     }
 
     static Vector2 SimXZ(Unit u) => new Vector2(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
