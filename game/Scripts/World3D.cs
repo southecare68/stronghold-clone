@@ -24,6 +24,15 @@ public partial class World3D : Node3D
     // them down to size; tuned by eye.
     const float CharScale = 0.42f;
 
+    // Wall pieces. The battlement model is 5 long x 1.38 tall x 0.5 deep, running
+    // along its local X with its base at y=0. Scaled to fill a tile along the run,
+    // a little taller, a little deeper. A garrison stands on the walkway just below
+    // the merlon tops.
+    static readonly Vector3 WallScale = new(0.22f, 0.95f, 1.5f);   // (run, up, depth) in local space
+    const float WallWalkY = 0.95f;                                  // rampart walkway height
+
+    readonly HashSet<(int, int)> _wallSet = new();
+
     Simulation _sim;
     Camera3D _cam;
     double _accum;
@@ -73,8 +82,36 @@ public partial class World3D : Node3D
         _camTarget = new Vector3(Skirmish.West(MapSize) + 4, 0, MapSize / 2f);
         UpdateCamera();
 
+        // A stretch of wall at the base to defend. (A build UI comes in M5; for now
+        // the player garrisons it by selecting soldiers and right-clicking it.)
+        int wy = MapSize / 2, wx = Skirmish.West(MapSize) + 6;
+        for (int i = 0; i < 6; i++) _sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy);
+
         SnapshotPositions();
         GD.Print("[3d] world ready — ", _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
+    }
+
+    // The union AABB of a model's meshes in its own space — used to size and place
+    // the wall pieces and to know how high the ramparts stand.
+    static Aabb ModelAabb(PackedScene scene)
+    {
+        var inst = scene.Instantiate<Node3D>();
+        var a = new Aabb();
+        bool first = true;
+        Walk(inst, ref a, ref first);
+        inst.QueueFree();
+        return a;
+
+        static void Walk(Node n, ref Aabb acc, ref bool first)
+        {
+            if (n is VisualInstance3D vi)
+            {
+                var box = vi.GetAabb();
+                acc = first ? box : acc.Merge(box);
+                first = false;
+            }
+            foreach (var c in n.GetChildren()) Walk(c, ref acc, ref first);
+        }
     }
 
     // ---- setup -------------------------------------------------------------
@@ -210,7 +247,9 @@ public partial class World3D : Node3D
             var now = SimXZ(u);
             var prev = _prevPos.TryGetValue(u.Id, out var p) ? p : now;
             var draw = prev.Lerp(now, _alpha);
-            node.Position = new Vector3(draw.X, 0, draw.Y);
+            // A garrisoned soldier stands up on the rampart walkway, not on the ground.
+            float yUp = u.GarrisonId != 0 ? WallWalkY : 0f;
+            node.Position = new Vector3(draw.X, yUp, draw.Y);
 
             // Face the way it is moving; hold the last heading when standing.
             var vel = now - prev;
@@ -250,6 +289,12 @@ public partial class World3D : Node3D
 
     void SyncBuildings()
     {
+        // Rampart tiles, so a wall knows which way its run goes.
+        _wallSet.Clear();
+        foreach (var b in _sim.Buildings)
+            if ((b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse) && b.Alive)
+                _wallSet.Add((b.X, b.Y));
+
         var live = new HashSet<int>();
         foreach (var b in _sim.Buildings)
         {
@@ -258,8 +303,20 @@ public partial class World3D : Node3D
             {
                 if (!_bldModel.TryGetValue(b.Type, out var scene) || scene == null) continue;
                 node = scene.Instantiate<Node3D>();
-                node.Scale = Vector3.One * _bldScale[b.Type];
-                // Centre the model on the footprint.
+
+                if (b.Type == BuildingType.Wall)
+                {
+                    // Run east-west or north-south to match the wall line; the model
+                    // runs along local X, so a north-south run turns a quarter.
+                    bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
+                    bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
+                    node.Scale = WallScale;
+                    node.Rotation = new Vector3(0, vert && !horiz ? Mathf.Pi / 2f : 0f, 0);
+                }
+                else
+                {
+                    node.Scale = Vector3.One * _bldScale[b.Type];
+                }
                 node.Position = new Vector3(b.X + b.W / 2f, 0, b.Y + b.H / 2f);
                 AddChild(node);
                 _buildingNodes[b.Id] = node;
@@ -389,7 +446,23 @@ public partial class World3D : Node3D
             return;
         }
         if (GroundTile(screen, out int tx, out int ty))
-            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+        {
+            // On your own rampart: man it. Otherwise, march there.
+            var wall = FriendlyWallAt(tx, ty);
+            if (wall != null)
+                _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
+            else
+                _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+        }
+    }
+
+    Building FriendlyWallAt(int tx, int ty)
+    {
+        foreach (var b in _sim.Buildings)
+            if (b.Owner == MyPlayer && b.Alive && b.X == tx && b.Y == ty &&
+                (b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse))
+                return b;
+        return null;
     }
 
     // The unit whose model sits nearest the cursor, of the wanted side, within a
