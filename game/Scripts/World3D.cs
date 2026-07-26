@@ -85,7 +85,7 @@ public partial class World3D : Node3D
         _cam = new Camera3D { Current = true };
         AddChild(_cam);
         // Aim at the starting party (soldiers spawn a few tiles east of the keep).
-        _camTarget = new Vector3(Skirmish.West(MapSize) + 4, 0, MapSize / 2f);
+        _camTarget = new Vector3(Skirmish.West(MapSize) + 9, 0, MapSize / 2f);   // the wall
         UpdateCamera();
 
         // A stretch of wall at the base, with the starting soldiers already manning
@@ -96,7 +96,7 @@ public partial class World3D : Node3D
         var walls = new List<Building>();
         for (int i = 0; i < 6; i++) walls.Add(_sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
         // A stone stair up to the walkway on the inner face, near the west end.
-        BuildStaircase(wx + 1 + 0.5f, wy + 0.5f);
+        BuildStaircase(wx + 1, wy);
 
         int k = 1;   // leave the first tile empty so the wall isn't wall-to-wall men
         foreach (var u in _sim.Units)
@@ -346,7 +346,10 @@ public partial class World3D : Node3D
                 else
                 {
                     node.Scale = Vector3.One * _bldScale[b.Type];
-                    node.Position = new Vector3(b.X + b.W / 2f, 0, b.Y + b.H / 2f);
+                    // Centre on the footprint. A tile at (x,y) is centred at (x,y),
+                    // so a WxH footprint's centre is (x+(W-1)/2, y+(H-1)/2) — not W/2,
+                    // which would sit half a tile off (unit positions are tile-centred).
+                    node.Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f);
                 }
                 AddChild(node);
                 _buildingNodes[b.Id] = node;
@@ -388,7 +391,7 @@ public partial class World3D : Node3D
 
         var root = new Node3D
         {
-            Position = new Vector3(b.X + 0.5f, 0, b.Y + 0.5f),
+            Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f),   // tile-centred like the units
             Rotation = new Vector3(0, vert && !horiz ? Mathf.Pi / 2f : 0f, 0),
         };
 
