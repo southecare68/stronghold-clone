@@ -20,9 +20,14 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9 }
 
-    public enum ResourceType { Wood = 0, Stone = 1, Food = 2 }
+    // Wood and Stone are gathered from the map; Food is the goal resource that
+    // feeds an army. Grain and Flour are the food chain's intermediates — a farm
+    // grows grain, a mill turns it to flour, a bakery bakes it into bread (Food).
+    // Nothing but the food buildings ever touches Grain/Flour, so a match without
+    // them leaves those two columns of every stockpile at zero.
+    public enum ResourceType { Wood = 0, Stone = 1, Food = 2, Grain = 3, Flour = 4 }
 
     // What a unit is currently doing beyond just moving/fighting.
     // Gathering = a worker sent to a node BY HAND. Working = a peasant bound to a
@@ -52,7 +57,7 @@ namespace Sim
     // Number of resource kinds, so a stockpile is a fixed-width int[].
     public static class Resources
     {
-        public const int Count = 3;   // Wood, Stone, Food
+        public const int Count = 5;   // Wood, Stone, Food, Grain, Flour
     }
 
     // A unit blueprint: the stats every unit built from it inherits. This is the
@@ -273,12 +278,33 @@ namespace Sim
         // instantly — otherwise one next to enemies would spew free bodies.
         const int WorkerRespawn = 120;                          // ticks (6s)
 
+        // --- The food chain ---------------------------------------------------
+        // A farm plants a wheat field beside itself; its farmer harvests and hauls
+        // grain like any gatherer. When the field is used up the farm plants a
+        // fresh one, so a farm is a renewable grain source, not a finite deposit.
+        const int FieldGrain = 240;                             // grain in one planted field
+        // The two workshops. Each turns a batch of its input good into a batch of
+        // output every interval, but ONLY when the input is on hand — the timer
+        // arms and waits, so a mill with no grain simply idles until grain arrives.
+        // Balanced so the chain roughly keeps pace: a farm feeds a mill feeds a
+        // bakery, and bread is the richest step (a loaf feeds several soldiers).
+        const int MillInterval = 25;                            // ticks per batch (1.25s)
+        const int MillInput = 4, MillOutput = 4;                // grain -> flour, 1:1
+        const int BakeryInterval = 25;
+        const int BakeryInput = 4, BakeryOutput = 6;            // flour -> bread, generous
+
         // What each work building harvests. A building type not listed here is not
         // a work building and grows no worker.
         static ResourceType? WorkResource(BuildingType t) => t switch
         {
             BuildingType.WoodcutterHut => ResourceType.Wood,
             BuildingType.Quarry => ResourceType.Stone,
+            // A farm is a work building like any other — its farmer harvests the
+            // wheat field the farm plants for itself (see PlantField) and hauls
+            // the grain home, reusing the whole gather/haul cycle. The mill and
+            // bakery are NOT work buildings: they are workshops that transform one
+            // stockpile good into another (see ResolveProcessors), no worker.
+            BuildingType.Farm => ResourceType.Grain,
             _ => (ResourceType?)null,
         };
 
@@ -290,8 +316,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2 };  // Keep, Barracks, Wall, Gatehouse, Hut, Storehouse, Quarry
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2 };  // ...Farm, Mill, Bakery
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -301,10 +327,13 @@ namespace Sim
             new[] { 15, 0, 0 },    // Woodcutter's Hut — cheap, so the wood economy bootstraps
             new[] { 20, 5, 0 },    // Storehouse — a drop-off closer to the trees
             new[] { 20, 0, 0 },    // Quarry — built from wood, then it pays back in stone
+            new[] { 15, 0, 0 },    // Farm — cheap; the field feeds the whole chain
+            new[] { 20, 15, 0 },   // Mill — a stone workshop that grinds grain to flour
+            new[] { 25, 15, 0 },   // Bakery — turns flour into bread (Food)
         };
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -610,9 +639,13 @@ namespace Sim
                 SetDropOff(owner, drop.X, drop.Y);
             }
 
-            // A work building (hut, quarry) comes with its peasant. It runs itself
-            // from here on — see ResolveWorkBuildings.
+            // A work building (hut, quarry, farm) comes with its peasant. It runs
+            // itself from here on — see ResolveWorkBuildings.
             if (WorkResource(type) != null) BreedWorker(b);
+
+            // A farm sows its field at once, so the farmer has grain to cut on the
+            // very next tick rather than after a one-tick replant gap.
+            if (type == BuildingType.Farm) PlantField(b);
 
             return b;
         }
@@ -795,9 +828,13 @@ namespace Sim
             return true;
         }
 
+        // A cost lists only the resources it charges (wood/stone/food); it never
+        // mentions the food-chain intermediates, so iterate the COST's length, not
+        // Resources.Count — a 3-long cost against a 5-wide stockpile must not read
+        // past its end.
         bool CanAfford(int owner, IReadOnlyList<int> cost)
         {
-            for (int i = 0; i < Resources.Count; i++)
+            for (int i = 0; i < cost.Count; i++)
                 if (Stockpile(owner, (ResourceType)i) < cost[i]) return false;
             return true;
         }
@@ -805,7 +842,7 @@ namespace Sim
         void Pay(int owner, IReadOnlyList<int> cost)
         {
             var s = StockOf(owner);
-            for (int i = 0; i < Resources.Count; i++) s[i] -= cost[i];
+            for (int i = 0; i < cost.Count; i++) s[i] -= cost[i];
         }
 
         // Cancel whatever task a unit was on. Called before a plain Move so an
@@ -944,6 +981,7 @@ namespace Sim
             ResolveWorkBuildings(); // hand idle peasants their next node...
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();
+            ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
             TickNumber++;
         }
 
@@ -1097,6 +1135,12 @@ namespace Sim
                 var res = WorkResource(wb.Type);
                 if (res == null || !wb.Alive) continue;
 
+                // A farm keeps a wheat field standing beside it: if the last one
+                // has been cut down to nothing, sow a fresh one. This is what makes
+                // the farm renewable — the farmer never runs out of grain to reap.
+                if (wb.Type == BuildingType.Farm && NearestResource(wb, ResourceType.Grain) == null)
+                    PlantField(wb);
+
                 var worker = wb.WorkerId != 0 ? Units.Find(u => u.Id == wb.WorkerId) : null;
                 if (worker == null || !worker.Alive)
                 {
@@ -1132,6 +1176,54 @@ namespace Sim
             w.Job = Job.Working;
             wb.WorkerId = w.Id;
             wb.BuildTimer = WorkerRespawn;            // arm the clock for the NEXT death
+        }
+
+        // Sow a farm's wheat field: one grain node on a passable tile just outside
+        // the farm, so it is both reachable and in WorkRange. Nodes do not block a
+        // tile, so the farmer stands on the field to reap it. Deterministic — the
+        // tile comes from the same fixed-order ring scan as everything else.
+        void PlantField(Building farm)
+        {
+            var spot = SpawnPointAround(farm);
+            if (!spot.HasValue) return;               // hemmed in this tick; retry next
+            Nodes.Add(new ResourceNode
+            {
+                Id = _nextNodeId++, Type = ResourceType.Grain,
+                X = spot.Value.X, Y = spot.Value.Y, Amount = FieldGrain,
+            });
+        }
+
+        // The workshops: a mill grinds grain into flour, a bakery bakes flour into
+        // bread (Food). Both draw from and return to the owner's shared stockpile,
+        // so they need not sit next to the farm — the grain the farmer banked at
+        // the keep is the grain the mill grinds. Iterated in id order, pure integer
+        // state, no RNG: a match with no such building is wholly untouched.
+        void ResolveProcessors()
+        {
+            foreach (var b in Buildings)             // id order
+            {
+                if (!b.Alive) continue;
+                if (b.Type == BuildingType.Mill)
+                    Convert(b, ResourceType.Grain, MillInput, ResourceType.Flour, MillOutput, MillInterval);
+                else if (b.Type == BuildingType.Bakery)
+                    Convert(b, ResourceType.Flour, BakeryInput, ResourceType.Food, BakeryOutput, BakeryInterval);
+            }
+        }
+
+        // One workshop step. The timer counts up to the interval and then HOLDS
+        // there until a full batch of input is available, so no production time is
+        // lost while the workshop waits on its supplier. (BuildTimer is free for
+        // these types — they are neither barracks nor work buildings.)
+        void Convert(Building b, ResourceType inRes, int inAmt, ResourceType outRes, int outAmt, int interval)
+        {
+            if (b.BuildTimer < interval) b.BuildTimer++;
+            if (b.BuildTimer < interval) return;
+            if (Stockpile(b.Owner, inRes) < inAmt) return;      // idle until fed
+
+            var s = StockOf(b.Owner);
+            s[(int)inRes] -= inAmt;
+            s[(int)outRes] += outAmt;
+            b.BuildTimer = 0;
         }
 
         // Nearest node of the given resource within the building's reach, ties

@@ -1,0 +1,26 @@
+<!-- FoodChain — the farm → mill → bakery production chain.
+
+     A farm plants a wheat field beside itself and its farmer reaps grain and
+     hauls it home, reusing the same self-running gather cycle as the woodcutter.
+     A mill then grinds banked grain into flour, and a bakery bakes flour into
+     bread (Food). What these tests hold down: the chain actually flows end to
+     end, each step waits on its input, the farm's field is renewable, and — the
+     one that matters — the whole thing is deterministic across two machines.
+
+     Sim-only, like the other economy tests. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>FoodChainTests</RootNamespace>
+    <AssemblyName>FoodChainTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

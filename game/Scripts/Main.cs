@@ -831,11 +831,14 @@ public partial class Main : Node2D
         int wood = _shown.Stockpile(_myPlayer, ResourceType.Wood);
         int stone = _shown.Stockpile(_myPlayer, ResourceType.Stone);
         int food = _shown.Stockpile(_myPlayer, ResourceType.Food);
+        int grain = _shown.Stockpile(_myPlayer, ResourceType.Grain);
+        int flour = _shown.Stockpile(_myPlayer, ResourceType.Flour);
         var d = _shown.DesignOf(_trainDesign);
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
-        return $"\nwood {wood}   stone {stone}   food {food}" +
+        return $"\nwood {wood}   stone {stone}   food {food}   grain {grain}   flour {flour}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
                "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store  ([Z/X] zoom)" +
+               "\nfood chain: [R] farm → [T] mill → [Y] bakery  (grain → flour → bread)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
@@ -1033,6 +1036,9 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.H) PlaceAtCursor(BuildingType.WoodcutterHut);   // Hut, in a forest
             else if (k.Keycode == Key.Q) PlaceAtCursor(BuildingType.Quarry);          // Quarry, on stone
             else if (k.Keycode == Key.J) PlaceAtCursor(BuildingType.Storehouse);      // storage (J, next to H)
+            else if (k.Keycode == Key.R) PlaceAtCursor(BuildingType.Farm);            // food chain: R/T/Y in a row
+            else if (k.Keycode == Key.T) PlaceAtCursor(BuildingType.Mill);
+            else if (k.Keycode == Key.Y) PlaceAtCursor(BuildingType.Bakery);
             // 1 / 2 / 3 / 4 choose which design a barracks trains.
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
             else if (k.Keycode == Key.Key2) _trainDesign = 1;
@@ -1103,7 +1109,7 @@ public partial class Main : Node2D
     {
         if (!_shown.CanPlace(type, x, y)) return false;
         var cost = _shown.CostOf(type);
-        for (int i = 0; i < Sim.Resources.Count; i++)
+        for (int i = 0; i < cost.Count; i++)   // cost lists only what it charges
             if (_shown.Stockpile(_myPlayer, (ResourceType)i) < cost[i]) return false;
         return Known(x, y);
     }
@@ -1354,10 +1360,12 @@ public partial class Main : Node2D
         }
     }
 
+    static readonly Color GrainColor = new(0.85f, 0.70f, 0.24f);   // ripe wheat gold
     static Color ResourceColor(ResourceType t) => t switch
     {
         ResourceType.Wood => WoodColor,
         ResourceType.Stone => StoneColor,
+        ResourceType.Grain => GrainColor,
         _ => FoodColor,
     };
 
@@ -1375,6 +1383,7 @@ public partial class Main : Node2D
 
             if (n.Type == ResourceType.Wood) DrawTree(center, n.Amount);
             else if (n.Type == ResourceType.Stone) DrawRock(center, n.Amount);
+            else if (n.Type == ResourceType.Grain) DrawField(center, n.Amount);
             else
             {
                 float s = Mathf.Lerp(4f, 11f, Mathf.Clamp(n.Amount / 300f, 0.15f, 1f));
@@ -1412,6 +1421,26 @@ public partial class Main : Node2D
         DrawCircle(center + new Vector2(-1.5f, -0.5f), r * 0.9f, RockLight);
     }
 
+    // A wheat field: a tilled brown patch with upright golden stalks, thinning as
+    // it is reaped so a half-cut field reads at a glance. Procedural, like the
+    // trees and rocks — the farm plants one of these beside itself.
+    static readonly Color SoilColor = new(0.34f, 0.24f, 0.16f);
+    static readonly Color StalkDark = new(0.68f, 0.54f, 0.18f);
+    void DrawField(Vector2 center, int amount)
+    {
+        float f = Mathf.Clamp(amount / 240f, 0.2f, 1f);        // full field at plant time
+        DrawRect(new Rect2(center - new Vector2(7f, 5f), new Vector2(14f, 10f)), SoilColor);
+        // A row of stalks, as many as the field still holds.
+        int stalks = 1 + (int)(f * 6f);
+        for (int i = 0; i < stalks; i++)
+        {
+            float x = center.X - 6f + i * (12f / 6f);
+            var foot = new Vector2(x, center.Y + 4f);
+            DrawLine(foot, foot + new Vector2(0, -8f), StalkDark, 1.4f);
+            DrawCircle(foot + new Vector2(0, -8.5f), 1.6f, GrainColor);   // the ear
+        }
+    }
+
     // The load a hauling peasant carries over its head: a bound log for wood, a
     // rock for stone, an apple for food. Small procedural icons — legible at a
     // glance, no baked art needed.
@@ -1437,6 +1466,15 @@ public partial class Main : Node2D
                     c + new Vector2(-4.5f, 1.5f), c + new Vector2(-1.5f, 4f),
                     c + new Vector2(3f, 3.5f),    c + new Vector2(0.5f, 0.6f),
                 }, RockDark);
+                break;
+            case ResourceType.Grain:  // a bound sheaf of wheat, ears fanning up
+                DrawLine(c + new Vector2(-2.6f, 3.5f), c + new Vector2(-3.4f, -4f), StalkDark, 1.4f);
+                DrawLine(c + new Vector2(0f, 3.8f),    c + new Vector2(0f, -4.6f),  StalkDark, 1.4f);
+                DrawLine(c + new Vector2(2.6f, 3.5f),  c + new Vector2(3.4f, -4f),  StalkDark, 1.4f);
+                DrawCircle(c + new Vector2(-3.4f, -4f), 1.7f, GrainColor);
+                DrawCircle(c + new Vector2(0f, -4.6f),  1.9f, GrainColor);
+                DrawCircle(c + new Vector2(3.4f, -4f),  1.7f, GrainColor);
+                DrawRect(new Rect2(c.X - 3f, c.Y + 1.2f, 6f, 1.4f), new Color(0.5f, 0.36f, 0.14f));   // the tie
                 break;
             default:                  // food — an apple
                 DrawCircle(c, 2.8f, new Color(0.78f, 0.18f, 0.14f));
@@ -1498,6 +1536,33 @@ public partial class Main : Node2D
                         DrawRect(rect, stone.Lerp(owner, 0.3f));
                         DrawRect(rect, owner, false, 2f);
                     }
+                    break;
+
+                case BuildingType.Farm:
+                    // A tilled field with a small barn in the corner.
+                    DrawRect(rect, SoilColor.Lerp(owner, 0.12f));
+                    for (float gx = rect.Position.X + 3f; gx < rect.End.X - 2f; gx += 4f)
+                        DrawLine(new Vector2(gx, rect.Position.Y + 2f), new Vector2(gx, rect.End.Y - 2f), StalkDark, 1f);
+                    DrawRect(new Rect2(rect.Position, rect.Size * 0.4f), owner.Darkened(0.2f));
+                    DrawRect(rect, owner, false, 1.5f);
+                    break;
+
+                case BuildingType.Mill:
+                    // A windmill: a body with four crossed sails.
+                    DrawRect(rect, owner.Darkened(0.1f));
+                    var mc = rect.Position + rect.Size / 2f;
+                    float arm = rect.Size.X * 0.55f;
+                    DrawLine(mc + new Vector2(-arm, -arm), mc + new Vector2(arm, arm), Colors.White, 1.6f);
+                    DrawLine(mc + new Vector2(-arm, arm), mc + new Vector2(arm, -arm), Colors.White, 1.6f);
+                    DrawRect(rect, owner, false, 1.5f);
+                    break;
+
+                case BuildingType.Bakery:
+                    // A house with a chimney and a warm glow at the oven door.
+                    DrawRect(rect, owner.Darkened(0.05f));
+                    DrawRect(new Rect2(rect.Position + new Vector2(rect.Size.X - 5f, -4f), new Vector2(3f, 6f)), owner.Darkened(0.3f));
+                    DrawCircle(rect.Position + new Vector2(rect.Size.X / 2f, rect.Size.Y - 4f), 2.5f, new Color(1f, 0.6f, 0.2f));
+                    DrawRect(rect, owner, false, 1.5f);
                     break;
 
                 default:  // Keep, Barracks
