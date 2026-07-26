@@ -97,6 +97,21 @@ public partial class World3D : Node3D
     static readonly (byte R, byte G, byte B, byte A) FogUnexplored = (6, 8, 11, 236);
     static readonly (byte R, byte G, byte B, byte A) FogExplored = (14, 18, 26, 120);
 
+    // Combat feedback: a floating health bar over a hurt unit, a spark where a
+    // blow lands, a tracer for a ranged shot, a puff when a unit dies. All of it
+    // is transient candy read from _sim.ShotsThisTick and per-unit hp — nothing is
+    // fed back into the sim, so determinism is untouched. Effects in fogged tiles
+    // are suppressed, so a fight you cannot see makes no sparks.
+    sealed class Bar { public Node3D Root; public MeshInstance3D Fill; public StandardMaterial3D FillMat; }
+    readonly Dictionary<int, Bar> _bars = new();
+    sealed class Fx { public Node3D Node; public float Age, Life; public System.Action<Fx> Step; }
+    readonly List<Fx> _fx = new();
+    readonly Dictionary<int, (Vector3 Pos, bool Peasant)> _lastSeen = new();
+    QuadMesh _quad;
+    BoxMesh _bit;
+    StandardMaterial3D _barBgMat, _bitMat;
+    const float BarW = 0.9f, BarH = 0.13f, BarLift = 1.05f;
+
     public override void _Ready()
     {
         _sim = new Simulation(Sim.TileMap.Skirmish(MapSize));
@@ -106,6 +121,7 @@ public partial class World3D : Node3D
         SetupEnvironment();
         SetupGround();
         SetupFog();
+        SetupCombatFx();
         SetupSelectionUi();
         SetupHud();
 
@@ -326,6 +342,134 @@ public partial class World3D : Node3D
         _fogTex.Update(_fogImg);
     }
 
+    // ---- combat feedback ---------------------------------------------------
+
+    void SetupCombatFx()
+    {
+        _quad = new QuadMesh { Size = Vector2.One };
+        _barBgMat = BarMat(new Color(0.05f, 0.05f, 0.06f, 0.85f), 1);
+        _bit = new BoxMesh { Size = Vector3.One * 0.11f };
+        _bitMat = (StandardMaterial3D)Unshaded(Colors.White);
+        _bitMat.VertexColorUseAsAlbedo = true;   // let each particle's Color tint the bit
+        _bit.Material = _bitMat;
+    }
+
+    static StandardMaterial3D BarMat(Color c, int priority) => new()
+    {
+        AlbedoColor = c,
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        NoDepthTest = true,          // a bar reads even when the body is behind a wall
+        RenderPriority = priority,
+        BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,   // always face the camera
+        BillboardKeepScale = true,
+    };
+
+    // A world-space value colour, green through amber to red as it falls.
+    static Color HpColor(float f) =>
+        f > 0.5f ? new Color(1f - (f - 0.5f) * 2f * 0.15f, 0.8f, 0.2f).Lerp(new Color(0.35f, 0.82f, 0.30f), (f - 0.5f) * 2f)
+                 : new Color(0.85f, 0.20f, 0.16f).Lerp(new Color(0.95f, 0.72f, 0.18f), f * 2f);
+
+    // The health bar over a hurt unit. Hidden at full health and when the unit is
+    // fogged; freed when the unit heals up or dies.
+    void UpdateBar(Unit u, Vector3 pos, bool visible)
+    {
+        float frac = u.MaxHp > 0 ? Mathf.Clamp(u.Hp / (float)u.MaxHp, 0f, 1f) : 1f;
+        if (!visible || !u.Alive || frac >= 0.999f)
+        {
+            if (_bars.Remove(u.Id, out var gone)) gone.Root.QueueFree();
+            return;
+        }
+        if (!_bars.TryGetValue(u.Id, out var bar))
+        {
+            var root = new Node3D();
+            var bg = new MeshInstance3D { Mesh = _quad, MaterialOverride = _barBgMat };
+            bg.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+            bg.Scale = new Vector3(BarW, BarH, 1);
+            var fillMat = BarMat(Colors.Green, 2);
+            var fill = new MeshInstance3D { Mesh = _quad, MaterialOverride = fillMat };
+            fill.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+            root.AddChild(bg);
+            root.AddChild(fill);
+            AddChild(root);
+            bar = _bars[u.Id] = new Bar { Root = root, Fill = fill, FillMat = fillMat };
+        }
+        // Both quads billboard to the camera; the fill shrinks about its centre and
+        // its higher render priority (with no depth test) keeps it over the ground.
+        bar.Root.Position = pos + new Vector3(0, BarLift, 0);
+        bar.Fill.Scale = new Vector3(BarW * frac, BarH * 0.68f, 1);
+        bar.FillMat.AlbedoColor = HpColor(frac);
+    }
+
+    // Drain this tick's blows into sparks and tracers. Called right after each
+    // Tick, before the next one clears the list. Fogged impacts are skipped.
+    void SpawnShots()
+    {
+        foreach (var s in _sim.ShotsThisTick)
+        {
+            int tx = s.ToX >> 16, ty = s.ToY >> 16;
+            if (_sim.FogEnabled && !_sim.CanSee(MyPlayer, tx, ty)) continue;
+            var to = new Vector3(s.ToX / (float)Fixed.One, 0.7f, s.ToY / (float)Fixed.One);
+            var from = new Vector3(s.FromX / (float)Fixed.One, 0.7f, s.FromY / (float)Fixed.One);
+            if ((to - from).LengthSquared() > 1.6f * 1.6f) Tracer(from, to);   // a ranged shot flies
+            Spark(to, new Color(0.9f, 0.25f, 0.2f), 7, 2.6f);                 // blood/impact
+        }
+    }
+
+    // A one-shot burst of little bits at a point.
+    void Spark(Vector3 at, Color col, int count, float speed)
+    {
+        var p = new CpuParticles3D
+        {
+            Position = at, Emitting = true, OneShot = true, Explosiveness = 1f,
+            Amount = count, Lifetime = 0.5, Mesh = _bit, Color = col,
+            Direction = Vector3.Up, Spread = 85f, InitialVelocityMin = speed * 0.6f,
+            InitialVelocityMax = speed, Gravity = new Vector3(0, -9f, 0),
+            ScaleAmountMin = 0.6f, ScaleAmountMax = 1.2f,
+        };
+        AddChild(p);
+        _fx.Add(new Fx { Node = p, Life = 1.0f });
+    }
+
+    // A brief bright streak from shooter to target — an arrow's flight, collapsed
+    // to a fading line.
+    void Tracer(Vector3 a, Vector3 b)
+    {
+        var d = b - a;
+        float len = d.Length();
+        if (len < 1e-3f) return;
+        var mat = (StandardMaterial3D)Unshaded(new Color(1f, 0.95f, 0.7f));
+        var m = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(0.05f, 0.05f, len) },
+            MaterialOverride = mat,
+            Position = (a + b) * 0.5f,
+        };
+        m.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        var fwd = d / len;
+        var right = Vector3.Up.Cross(fwd);
+        right = right.LengthSquared() < 1e-6f ? Vector3.Right : right.Normalized();
+        m.Basis = new Basis(right, fwd.Cross(right).Normalized(), fwd);
+        AddChild(m);
+        _fx.Add(new Fx { Node = m, Life = 0.16f, Step = f => mat.AlbedoColor = new Color(1f, 0.95f, 0.7f, 1f - f.Age / f.Life) });
+    }
+
+    // Age every transient effect, run its per-frame step, free the expired.
+    void UpdateFx(double delta)
+    {
+        for (int i = _fx.Count - 1; i >= 0; i--)
+        {
+            var f = _fx[i];
+            f.Age += (float)delta;
+            f.Step?.Invoke(f);
+            if (f.Age >= f.Life)
+            {
+                f.Node.QueueFree();
+                _fx.RemoveAt(i);
+            }
+        }
+    }
+
     void SetupSelectionUi()
     {
         // A flat ground ring under a selected unit, team-coloured and unshaded so
@@ -474,6 +618,7 @@ public partial class World3D : Node3D
             SnapshotPositions();
             // This frame's orders ride the FIRST tick only, then it is empty.
             _sim.Tick(ran == 0 ? _pending : (IReadOnlyList<Command>)System.Array.Empty<Command>());
+            SpawnShots();   // drain this tick's blows before the next Tick clears them
             if (ran == 0) _pending.Clear();
             _accum -= Step;
             ran++;
@@ -485,6 +630,7 @@ public partial class World3D : Node3D
         UpdateFog();
         UpdateRings();
         UpdateHud();
+        UpdateFx(delta);
         CameraInput(delta);
     }
 
@@ -520,7 +666,14 @@ public partial class World3D : Node3D
             {
                 bool seen = _sim.CanSee(MyPlayer, u.X >> 16, u.Y >> 16);
                 node.Visible = seen;
-                if (!seen) continue;
+                if (!seen)
+                {
+                    // Out of sight: no body, no bar, and forget it — so if it dies in
+                    // the fog there is no tell-tale puff where we last saw it.
+                    UpdateBar(u, Vector3.Zero, false);
+                    _lastSeen.Remove(u.Id);
+                    continue;
+                }
             }
             else node.Visible = true;
 
@@ -581,10 +734,24 @@ public partial class World3D : Node3D
                 }
                 else Anim3D.Idle(s);
             }
+
+            UpdateBar(u, pos, node.Visible);
+            _lastSeen[u.Id] = (pos, u.IsPeasant);
         }
         Prune(_unitNodes, live);
         foreach (var id in new List<int>(_skel.Keys))
             if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); }
+
+        // A unit that was here last frame and is gone now has died (or, for a
+        // peasant, been trained away). Soldiers fall with a puff; drop its bar.
+        foreach (var id in new List<int>(_lastSeen.Keys))
+        {
+            if (live.Contains(id)) continue;
+            var (at, peasant) = _lastSeen[id];
+            _lastSeen.Remove(id);
+            if (_bars.Remove(id, out var b)) b.Root.QueueFree();
+            if (!peasant) Spark(at + Vector3.Up * 0.5f, new Color(0.7f, 0.16f, 0.13f), 16, 3.2f);
+        }
     }
 
     // Point at distance `dist` along a polyline, with the segment direction and
