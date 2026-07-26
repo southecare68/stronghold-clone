@@ -313,6 +313,15 @@ namespace Sim
         const int HousingPerHouse = 10;
         const int KeepHousing = 8;                              // the keep's own household
 
+        // Army upkeep. A standing army eats: every so often each soldier draws a
+        // little food from the larder. Peasants are not charged here — their food
+        // cost is the one-off price of breeding them; the ongoing drain is the
+        // ARMY. If the larder cannot cover it the food simply floors at zero (the
+        // soldiers are hungry, not harmed), and since a side with no food is left
+        // untouched, this never perturbs the frozen units-only parity constant.
+        const int UpkeepInterval = 60;                         // ticks between meals (3s)
+        const int UpkeepPerSoldier = 1;                        // food each soldier eats per meal
+
         // A mill or bakery is a WORKSHOP: it needs a peasant standing in it to run,
         // but unlike a harvester that peasant hauls nothing — it just mans the
         // place. A harvester (hut/quarry/farm) is any building with a WorkResource.
@@ -1020,6 +1029,7 @@ namespace Sim
             ResolveProduction();
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
             ResolvePopulation();    // and food, in turn, raises the next peasant
+            ResolveUpkeep();        // while the standing army eats away at the larder
             TickNumber++;
         }
 
@@ -1311,6 +1321,38 @@ namespace Sim
             foreach (var u in Units)
                 if (u.IsPeasant && u.Owner == owner && u.Alive && u.Job == Job.None) n++;
             return n;
+        }
+
+        // The standing army: an owner's living non-peasant units. This is what eats
+        // food as upkeep (see ResolveUpkeep).
+        public int ArmySize(int owner)
+        {
+            int n = 0;
+            foreach (var u in Units) if (!u.IsPeasant && u.Owner == owner && u.Alive) n++;
+            return n;
+        }
+
+        // The army eats. On a slow tick, each owner's soldiers draw food from the
+        // larder; what it cannot cover simply floors at zero. An owner with no food
+        // on hand is skipped entirely — no stockpile entry is even created — so a
+        // Move-only scenario with no economy is byte-for-byte unchanged, and the
+        // frozen parity constant (units only) never sees this at all.
+        void ResolveUpkeep()
+        {
+            if (TickNumber % UpkeepInterval != 0) return;
+
+            var army = new SortedDictionary<int, int>();       // owner -> soldier count, sorted
+            foreach (var u in Units)
+                if (!u.IsPeasant && u.Alive)
+                    army[u.Owner] = (army.TryGetValue(u.Owner, out var c) ? c : 0) + 1;
+
+            foreach (var kv in army)
+            {
+                int food = Stockpile(kv.Key, ResourceType.Food);
+                if (food <= 0) continue;                       // nothing to eat; no state touched
+                int fed = food - kv.Value * UpkeepPerSoldier;
+                StockOf(kv.Key)[(int)ResourceType.Food] = fed < 0 ? 0 : fed;
+            }
         }
 
         // Sow a farm's wheat field: one grain node on a passable tile just outside

@@ -841,10 +841,13 @@ public partial class Main : Node2D
                 if (u.Job == Job.None) idle++;
             }
         int cap = _shown.PopulationCap(_myPlayer);
+        int army = _shown.ArmySize(_myPlayer);
+        bool starving = army > 0 && food == 0;
         var d = _shown.DesignOf(_trainDesign);
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
         return $"\nwood {wood}   stone {stone}   food {food}   grain {grain}   flour {flour}" +
-               $"   peasants {peasants}/{cap} ({idle} idle){(peasants >= cap ? "  — build a [O] house for room" : "")}" +
+               $"   peasants {peasants}/{cap} ({idle} idle){(peasants >= cap ? "  — [O] house for room" : "")}" +
+               $"   army {army}{(army > 0 ? $" (eats {army} food/3s)" : "")}{(starving ? "  — STARVING, feed them" : "")}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
                "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store [O] house  ([Z/X] zoom)" +
                "\nfood chain: [R] farm → [T] mill → [Y] bakery  (bread breeds peasants; a house holds 10)" +

@@ -32,6 +32,9 @@ static class Program
         TheWholeChainTurnsAnEmptyLarderIntoFood();
         RazingTheFarmStopsItsFarmer();
         PopulationIsCappedByHousing();
+        AStandingArmyEatsFood();
+        NoArmyMeansNoUpkeep();
+        TwoClientsAgreeOnUpkeep();
         TwoClientsAgreeOnTheFoodChain();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -223,6 +226,71 @@ static class Program
         for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
         Check($"at the cap, food is no longer spent ({foodAtCap} -> {sim.Stockpile(1, ResourceType.Food)})",
               sim.Stockpile(1, ResourceType.Food) == foodAtCap);
+    }
+
+    // A standing army eats: each soldier draws food from the larder every meal,
+    // the draw is exactly the army size per interval, and an empty larder floors
+    // at zero rather than going negative.
+    static void AStandingArmyEatsFood()
+    {
+        Console.WriteLine("\na standing army eats food as upkeep:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.AddResource(1, ResourceType.Food, 200);
+        for (int i = 0; i < 10; i++) sim.SpawnUnit(1, 5 + i, 5);   // ten soldiers (non-peasant)
+        Check("the army is ten strong", sim.ArmySize(1) == 10);
+
+        int start = sim.Stockpile(1, ResourceType.Food);
+        for (int i = 0; i < 600; i++) sim.Tick(Array.Empty<Command>());
+        int eaten = start - sim.Stockpile(1, ResourceType.Food);
+        // 10 soldiers x 1 food, ten meals over 600 ticks (one every 60) = 100.
+        Check($"it ate its keep ({eaten} of 200 over 600 ticks)", eaten == 100);
+
+        // Run the larder dry: it floors at zero, never negative.
+        for (int i = 0; i < 3000; i++) sim.Tick(Array.Empty<Command>());
+        Check($"a drained larder floors at zero ({sim.Stockpile(1, ResourceType.Food)})",
+              sim.Stockpile(1, ResourceType.Food) == 0);
+    }
+
+    // Peasants are not charged upkeep — their food cost was paid at birth. With no
+    // army, a larder is not touched by upkeep at all.
+    static void NoArmyMeansNoUpkeep()
+    {
+        Console.WriteLine("\nno army, no upkeep:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 5, 5);                 // spawn point, but NO keep => no breeding either
+        sim.AddResource(1, ResourceType.Food, 100);
+        for (int i = 0; i < 5; i++) sim.SpawnPeasant(1);
+        for (int i = 0; i < 600; i++) sim.Tick(Array.Empty<Command>());
+        Check($"the larder is untouched with no soldiers ({sim.Stockpile(1, ResourceType.Food)})",
+              sim.Stockpile(1, ResourceType.Food) == 100);
+    }
+
+    // Upkeep is pure integer bookkeeping, so two machines must draw the larder
+    // down in lockstep.
+    static void TwoClientsAgreeOnUpkeep()
+    {
+        Console.WriteLine("\ntwo clients agree on army upkeep:");
+        var net = new LoopbackTransport();
+        var a = new Client(1, net, TileMap.Open(48));
+        var b = new Client(2, net, TileMap.Open(48));
+        net.Connect(a);
+        net.Connect(b);
+        foreach (var c in new[] { a, b })
+        {
+            c.Sim.AddResource(1, ResourceType.Food, 300);
+            for (int i = 0; i < 8; i++) c.Sim.SpawnUnit(1, 5 + i, 5);
+        }
+
+        int desyncs = 0;
+        for (int t = 0; t < 800; t++)
+        {
+            a.SendInput(); b.SendInput();
+            a.TryStep();   b.TryStep();
+            if (a.Sim.StateChecksum() != b.Sim.StateChecksum()) desyncs++;
+        }
+        Check($"StateChecksum identical over 800 ticks of upkeep ({desyncs} desyncs)", desyncs == 0);
+        Check($"and the larder was drawn down ({a.Sim.Stockpile(1, ResourceType.Food)} of 300)",
+              a.Sim.Stockpile(1, ResourceType.Food) < 300);
     }
 
     // The one that matters most: the whole chain, computed twice, must agree on
