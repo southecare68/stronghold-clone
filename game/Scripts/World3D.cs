@@ -212,16 +212,75 @@ public partial class World3D : Node3D
         AddChild(we);
     }
 
+    // Terrain colours, by tile type. The ground plane is painted with these; rock
+    // also gets raised into relief so the ridge and outcrops have real shape.
+    static readonly Color TerrGround = new(0.36f, 0.45f, 0.28f);   // grass
+    static readonly Color TerrMarsh  = new(0.33f, 0.34f, 0.21f);   // boggy, browner
+    static readonly Color TerrWater  = new(0.17f, 0.30f, 0.45f);   // deep water
+    static readonly Color TerrRock   = new(0.44f, 0.42f, 0.39f);   // stone
+
     void SetupGround()
     {
+        var map = _sim.Map;
+
+        // The map, painted a tile at a time onto one texture on the ground plane.
+        // Terrain never changes (see TileMap), so this is built once.
+        var img = Image.CreateEmpty(MapSize, MapSize, false, Image.Format.Rgba8);
+        for (int y = 0; y < MapSize; y++)
+            for (int x = 0; x < MapSize; x++)
+                img.SetPixel(x, y, ColorFor(map.At(x, y)));
+        var tex = ImageTexture.CreateFromImage(img);
+
         var ground = new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(MapSize, MapSize) },
             Position = new Vector3(MapSize / 2f, 0, MapSize / 2f),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.45f, 0.28f) },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoTexture = tex,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,   // crisp tiles
+            },
         };
         AddChild(ground);
+
+        // Rock raised into relief — the central ridge and the outcrops become a
+        // real barrier rather than a painted one. One MultiMesh, so all the blocks
+        // are a single draw. Nothing stands on rock (it's impassable), so height
+        // here never fights a unit's footing. Height is a cheap deterministic hash
+        // of the tile so the ridge reads as rugged, not a smooth wall.
+        var rock = new List<(int, int)>();
+        for (int y = 0; y < MapSize; y++)
+            for (int x = 0; x < MapSize; x++)
+                if (map.At(x, y) == Sim.Terrain.Rock) rock.Add((x, y));
+
+        var mm = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            Mesh = new BoxMesh { Size = Vector3.One },
+            InstanceCount = rock.Count,
+        };
+        for (int i = 0; i < rock.Count; i++)
+        {
+            var (x, y) = rock[i];
+            float h = 0.8f + ((x * 7 + y * 13) % 5) * 0.17f;   // 0.80 .. 1.48
+            mm.SetInstanceTransform(i, new Transform3D(
+                new Basis(Quaternion.Identity).Scaled(new Vector3(0.98f, h, 0.98f)),
+                new Vector3(x, h * 0.5f, y)));
+        }
+        AddChild(new MultiMeshInstance3D
+        {
+            Multimesh = mm,
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.44f, 0.41f) },
+        });
     }
+
+    static Color ColorFor(Sim.Terrain t) => t switch
+    {
+        Sim.Terrain.Water => TerrWater,
+        Sim.Terrain.Rock  => TerrRock,
+        Sim.Terrain.Marsh => TerrMarsh,
+        _                     => TerrGround,
+    };
 
     void SetupFog()
     {
