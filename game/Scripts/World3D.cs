@@ -57,6 +57,13 @@ public partial class World3D : Node3D
 
     readonly Dictionary<int, Node3D> _unitNodes = new();
     readonly Dictionary<int, Node3D> _buildingNodes = new();
+    readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
+    PackedScene _mTree, _mRock;
+
+    // Building selection drives the train panel: click your barracks to open it.
+    Building _selectedBuilding;
+    Control _trainPanel;
+    Label _trainInfo;
     readonly Dictionary<int, Vector2> _prevPos = new();
     readonly Dictionary<int, float> _yaw = new();
     readonly Dictionary<int, Skeleton3D> _skel = new();
@@ -182,6 +189,7 @@ public partial class World3D : Node3D
         SetupSelectionUi();
         SetupHud();
         SetupBuild();
+        SetupTrainPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
         // needs no explicit listener. --audio-log prints each voice for headless
@@ -344,6 +352,9 @@ public partial class World3D : Node3D
 
         _wallBody = Load("Castle/SM_Bld_Castle_Wall_01");
         _wallBat  = Load("Castle/SM_Bld_Castle_Battlements_01");
+
+        _mTree = Load("Environments/SM_Env_Tree_Round_01");
+        _mRock = Load("Environments/SM_Env_Rock_Chunk_02");
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -1075,12 +1086,14 @@ public partial class World3D : Node3D
 
         SyncUnits(delta);
         SyncBuildings();
+        SyncNodes();
         UpdateFog();
         UpdateRings();
         UpdateHud();
         UpdateFx(delta);
         UpdateMusic(delta);
         UpdateGhost();
+        UpdateTrainPanel();
         CameraInput(delta);
     }
 
@@ -1280,6 +1293,49 @@ public partial class World3D : Node3D
         Prune(_buildingNodes, live);
     }
 
+    // Resource nodes as trees (wood/grain) and rock (stone). Shown only on ground
+    // we've explored — a forest across the ridge stays hidden until scouted — and
+    // pruned as the deposit is worked out. A deterministic yaw and scale jitter
+    // keeps a cluster from looking stamped.
+    void SyncNodes()
+    {
+        var live = new HashSet<int>();
+        foreach (var n in _sim.NodeList)
+        {
+            live.Add(n.Id);
+            bool seen = !_sim.FogEnabled || _sim.HasExplored(MyPlayer, n.X, n.Y);
+            if (!_nodeNodes.TryGetValue(n.Id, out var node))
+            {
+                if (!seen) continue;
+                var scene = n.Type == ResourceType.Stone ? _mRock : _mTree;
+                node = scene.Instantiate<Node3D>();
+                float jitter = 1f + ((n.X * 13 + n.Y * 7) % 5) * 0.06f;
+                float baseS = n.Type == ResourceType.Stone ? 0.5f : (n.Type == ResourceType.Grain ? 0.28f : 0.42f);
+                node.Scale = Vector3.One * baseS * jitter;
+                node.Rotation = new Vector3(0, ((n.X * 31 + n.Y * 17) % 360) * Mathf.Pi / 180f, 0);
+                node.Position = new Vector3(n.X, 0, n.Y);
+                AddChild(node);
+                _nodeNodes[n.Id] = node;
+            }
+            node.Visible = seen;
+        }
+        Prune(_nodeNodes, live);
+    }
+
+    // The resource node whose model sits nearest the cursor, within a small radius.
+    ResourceNode NodeAtScreen(Vector2 screen)
+    {
+        ResourceNode best = null;
+        float bestD = 26f * 26f;
+        foreach (var n in _sim.NodeList)
+        {
+            if (!_nodeNodes.TryGetValue(n.Id, out var node) || !node.Visible) continue;
+            float d = _cam.UnprojectPosition(new Vector3(n.X, 0.5f, n.Y)).DistanceSquaredTo(screen);
+            if (d < bestD) { bestD = d; best = n; }
+        }
+        return best;
+    }
+
     // A stone staircase from the ground up to the walkway, on the inner (south)
     // face of the wall at column `tileX`. Built from stacked steps so a unit
     // climbing it reads as walking up.
@@ -1433,11 +1489,13 @@ public partial class World3D : Node3D
     {
         bool additive = Input.IsKeyPressed(Key.Shift);
         if (!additive) _selected.Clear();
+        _selectedBuilding = null;   // a fresh selection closes any open building panel
 
         if ((end - _boxStart).Length() <= 6f)
         {
             var u = UnitAtScreen(_boxStart, mine: true);
             if (u != null) _selected.Add(u.Id);
+            else _selectedBuilding = BuildingAtScreen(_boxStart);   // click a building of ours to inspect it
         }
         else
         {
@@ -1482,6 +1540,18 @@ public partial class World3D : Node3D
             _sound.PlayUi(Sfx.MoveOrder);
             return;
         }
+
+        // A resource node: put the selected workers on it. A hut/quarry hires its
+        // own peasant automatically, so this is the manual "gather here" for spare
+        // hands — the sim ignores it for non-peasants.
+        var res = NodeAtScreen(screen);
+        if (res != null)
+        {
+            _me.Issue(new Command { Type = CommandType.Gather, UnitIds = ids, TargetId = res.Id });
+            _sound.PlayUi(Sfx.MoveOrder);
+            return;
+        }
+
         if (GroundTile(screen, out int tx, out int ty))
         {
             _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
@@ -1511,6 +1581,100 @@ public partial class World3D : Node3D
     {
         foreach (var b in _sim.Buildings) if (b.Id == id) return b;
         return null;
+    }
+
+    // One of our footprint buildings under the cursor — walls excluded (those are
+    // manned by right-click, not inspected). Tested against the model's mid-height
+    // centre (not its ground tile, which the tall body hides behind it), nearest
+    // within a generous radius so clicking anywhere on the building picks it.
+    Building BuildingAtScreen(Vector2 screen)
+    {
+        Building best = null;
+        float bestD = 90f * 90f;
+        foreach (var b in _sim.Buildings)
+        {
+            if (b.Owner != MyPlayer || !b.Alive || b.Type == BuildingType.Wall) continue;
+            // Test a couple of heights up the model, since a click can land low on
+            // the body or high on the roof; take the nearer.
+            var c = new Vector3(b.X + (b.W - 1) / 2f, 0f, b.Y + (b.H - 1) / 2f);
+            float d = Mathf.Min(
+                _cam.UnprojectPosition(c + Vector3.Up * 0.6f).DistanceSquaredTo(screen),
+                _cam.UnprojectPosition(c + Vector3.Up * 1.6f).DistanceSquaredTo(screen));
+            if (d < bestD) { bestD = d; best = b; }
+        }
+        return best;
+    }
+
+    // ---- train panel -------------------------------------------------------
+
+    void SetupTrainPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        // Centre-left, clear of the build bar and the selection readout.
+        _trainPanel = new PanelContainer
+        {
+            AnchorLeft = 0, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            OffsetLeft = 12, OffsetTop = -70, Visible = false,
+        };
+        ((PanelContainer)_trainPanel).AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.9f)));
+        layer.AddChild(_trainPanel);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 12);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 10);
+        _trainPanel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 6);
+        margin.AddChild(col);
+
+        _trainInfo = new Label { Text = "Barracks" };
+        _trainInfo.AddThemeColorOverride("font_color", new Color(0.9f, 0.92f, 0.96f));
+        _trainInfo.AddThemeFontSizeOverride("font_size", 14);
+        col.AddChild(_trainInfo);
+
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 5);
+        col.AddChild(row);
+        // One button per registered design. All cost the same wood (TrainCost).
+        for (int i = 0; i < _sim.DesignList.Count; i++)
+        {
+            string name = i < Skirmish.DesignNames.Length ? Skirmish.DesignNames[i] : $"Unit {i}";
+            var b = new Button { Text = $"{name}\n15w", CustomMinimumSize = new Vector2(70, 0), FocusMode = Control.FocusModeEnum.None };
+            b.AddThemeFontSizeOverride("font_size", 12);
+            int design = i;
+            b.Pressed += () => TrainAt(design);
+            row.AddChild(b);
+        }
+    }
+
+    // Queue one of `design` at the selected barracks. The sim re-checks wood and a
+    // spare peasant; a refused order simply queues nothing.
+    void TrainAt(int design)
+    {
+        if (_selectedBuilding == null || _selectedBuilding.Type != BuildingType.Barracks) return;
+        _me.Issue(new Command { Type = CommandType.Train, TargetId = _selectedBuilding.Id, X = design });
+        _sound.PlayUi(Sfx.Select);
+    }
+
+    // Show the panel while a live barracks of ours is selected, with its queue and
+    // whether a spare peasant is on hand to fill it.
+    void UpdateTrainPanel()
+    {
+        if (_selectedBuilding != null && BuildingById(_selectedBuilding.Id) == null)
+            _selectedBuilding = null;   // it was destroyed out from under us
+
+        bool show = _selectedBuilding != null && _selectedBuilding.Alive
+                    && _selectedBuilding.Type == BuildingType.Barracks;
+        _trainPanel.Visible = show;
+        if (!show) return;
+
+        int queued = _selectedBuilding.TrainQueue.Count;
+        int idle = _sim.IdlePeasantCount(MyPlayer);
+        _trainInfo.Text = $"Barracks — queue {queued}"
+            + (idle > queued ? $"   ({idle - queued} spare)" : "   (no spare peasant)");
     }
 
     // The unit whose model sits nearest the cursor, of the wanted side, within a
