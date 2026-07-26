@@ -133,6 +133,17 @@ public partial class World3D : Node3D
     float _battle;
     const float BattleHold = 5f;   // seconds of quiet before the music stands down
 
+    // Sim-event observation for the economy/structure sounds: the sim emits no
+    // events (it must stay render-agnostic and deterministic), so we diff its state
+    // tick to tick and infer what happened — a load banked, a unit trained, a wall
+    // raised or felled, a gate worked. Run once per advanced tick, seeded from the
+    // starting world so nothing fires on launch.
+    readonly HashSet<int> _prevUnitIds = new();
+    readonly HashSet<int> _prevBuildingIds = new();
+    readonly Dictionary<int, Vector3> _prevBuildingWhere = new();
+    readonly Dictionary<int, bool> _prevGateOpen = new();
+    int _prevStockTotal;
+
     public override void _Ready()
     {
         SetUpTransport();          // builds the client(s); _sim = _me.Sim
@@ -169,6 +180,7 @@ public partial class World3D : Node3D
         BuildStaircase(Skirmish.West(MapSize) + 7, MapSize / 2);
 
         SnapshotPositions();
+        SeedObservation();   // baseline so the starting world fires no sounds
         GD.Print("[3d] world ready — mode ", _mode, ", player ", MyPlayer, ", ",
                  _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
     }
@@ -528,6 +540,82 @@ public partial class World3D : Node3D
         }
     }
 
+    // Economy and structure sounds, inferred by diffing the sim tick to tick. Unit
+    // deaths are handled in SyncUnits (its interpolation history holds the last
+    // position), so this covers the rest: a unit trained, a wall raised or felled,
+    // a gate worked, a load banked. Runs once per advanced tick.
+    void ObserveEconomy()
+    {
+        if (_sound == null) return;
+
+        // A unit of ours appeared that wasn't here last tick — a barracks finished
+        // one. Only ours; an enemy reinforcement isn't ours to hear.
+        foreach (var u in _sim.Units)
+            if (!_prevUnitIds.Contains(u.Id) && u.Owner == MyPlayer)
+                _sound.Play(Sfx.BuildDone, Aud(u.X / (float)Fixed.One, u.Y / (float)Fixed.One));
+
+        // A building appeared — set down on an audible tile.
+        foreach (var b in _sim.Buildings)
+            if (!_prevBuildingIds.Contains(b.Id) && Audible(b.CenterX, b.CenterY))
+                _sound.Play(Sfx.BuildPlace, Aud(b.CenterX, b.CenterY));
+
+        // A building we knew about is gone — it came down. Its footprint is only
+        // in the remembered record now, since it's no longer in the list to ask.
+        foreach (var id in _prevBuildingIds)
+            if (BuildingById(id) == null && _prevBuildingWhere.TryGetValue(id, out var where)
+                && Audible(Mathf.RoundToInt(where.X), Mathf.RoundToInt(where.Z)))
+                _sound.Play(Sfx.Collapse, where);
+
+        // A gatehouse changed state. A gate with no previous state was only just
+        // built — that's BuildPlace's event, not a gate moving.
+        foreach (var b in _sim.Buildings)
+            if (b.Type == BuildingType.Gatehouse
+                && _prevGateOpen.TryGetValue(b.Id, out bool was) && was != b.Open
+                && Audible(b.CenterX, b.CenterY))
+                _sound.Play(Sfx.GateMove, Aud(b.CenterX, b.CenterY));
+
+        // A load was banked: our gathered stock (wood/stone/food) rose. Heard at
+        // our drop-off, which is where it happened.
+        int stock = StockTotal();
+        if (stock > _prevStockTotal && _sim.DropOffs.TryGetValue(MyPlayer, out var drop))
+            _sound.Play(Sfx.Deposit, Aud(drop.X, drop.Y));
+
+        RollObservation(stock);
+    }
+
+    // Record the current world as the baseline for the next diff.
+    void SeedObservation() => RollObservation(StockTotal());
+
+    void RollObservation(int stock)
+    {
+        _prevUnitIds.Clear();
+        foreach (var u in _sim.Units) _prevUnitIds.Add(u.Id);
+        _prevBuildingIds.Clear();
+        _prevGateOpen.Clear();
+        _prevBuildingWhere.Clear();
+        foreach (var b in _sim.Buildings)
+        {
+            _prevBuildingIds.Add(b.Id);
+            _prevGateOpen[b.Id] = b.Open;
+            _prevBuildingWhere[b.Id] = Aud(b.CenterX, b.CenterY);
+        }
+        _prevStockTotal = stock;
+    }
+
+    // The gathered stock we would hear banked — production intermediates (grain,
+    // flour) are not deliveries, so they're left out and don't trip Deposit.
+    int StockTotal() =>
+        _sim.Stockpile(MyPlayer, ResourceType.Wood) +
+        _sim.Stockpile(MyPlayer, ResourceType.Stone) +
+        _sim.Stockpile(MyPlayer, ResourceType.Food);
+
+    // Should the player HEAR something there? The same rule as seeing it — a sound
+    // from a fogged tile would hand back the information the fog exists to withhold.
+    bool Audible(int tx, int ty) => !_sim.FogEnabled || _sim.CanSee(MyPlayer, tx, ty);
+
+    // Sim tile coordinates to an audio world position, a little off the ground.
+    static Vector3 Aud(float x, float z) => new Vector3(x, 0.5f, z);
+
     // A one-shot burst of little bits at a point.
     void Spark(Vector3 at, Color col, int count, float speed)
     {
@@ -756,7 +844,7 @@ public partial class World3D : Node3D
 
             bool advanced = _me.TryStep();
             foreach (var c in Clients()) if (c != _me) c.TryStep();
-            if (advanced) SpawnShots();   // drain this tick's blows before the next clears them
+            if (advanced) { SpawnShots(); ObserveEconomy(); }   // per-tick: blows, then sim-event sounds
 
             if (!advanced) { _accum = Step; break; }
             _accum -= Step;
