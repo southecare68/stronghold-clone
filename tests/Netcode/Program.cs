@@ -26,6 +26,7 @@ static class Program
         SnapshotRoundTrip();
         RejoinResumesTheMatch();
         CorruptSnapshotIsCaughtOnArrival();
+        SkirmishSnapshotRoundTrip();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -454,6 +455,32 @@ static class Program
     {
         Type = CommandType.Move, UnitIds = new[] { unit }, X = x, Y = y,
     };
+
+    // Regression for the two-window DESYNC@0: the real Skirmish start runs with fog
+    // ON but reveals nothing until the first tick, so its Explored dict is empty. A
+    // rejoiner adopts that snapshot and recomputes visibility, which must NOT leave
+    // an empty Explored owner entry behind — StateChecksum hashes the entry count,
+    // so it would flag a phantom desync at tick 0. Also covers a joiner that built
+    // the world itself first, the way World3D does.
+    static void SkirmishSnapshotRoundTrip()
+    {
+        Console.WriteLine("\nskirmish snapshot round-trip (fog on):");
+        var host = new Simulation(TileMap.Skirmish(128));
+        Skirmish.Setup(host, 128);
+        uint hostSum = host.Snapshot().Checksum;
+        var back = Wire.DeserializeSnapshot(Wire.Serialize(host.Snapshot()));
+
+        var fresh = new Simulation(TileMap.Skirmish(128));
+        fresh.Restore(back);
+        Check($"fresh joiner reproduces host (0x{fresh.StateChecksum():X8} == 0x{hostSum:X8})",
+              fresh.StateChecksum() == hostSum);
+
+        var join = new Simulation(TileMap.Skirmish(128));
+        Skirmish.Setup(join, 128);           // built the world itself, then adopts
+        join.Restore(back);
+        Check($"setup-then-adopt joiner reproduces host (0x{join.StateChecksum():X8} == 0x{hostSum:X8})",
+              join.StateChecksum() == hostSum);
+    }
 
     static void Check(string what, bool ok)
     {

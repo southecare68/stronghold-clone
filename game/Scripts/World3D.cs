@@ -175,11 +175,14 @@ public partial class World3D : Node3D
     public override void _Ready()
     {
         SetUpTransport();          // builds the client(s); _sim = _me.Sim
-        // The starting world and the demo scaffold are built IDENTICALLY on every
-        // client, before tick 0 — like Skirmish.Setup itself. Ids are handed out in
-        // the same order on each, so a wall or a garrisoned man has the same id
-        // everywhere and StateChecksum agrees from the first comparison.
-        foreach (var c in Clients()) { Skirmish.Setup(c.Sim, MapSize); ScaffoldWall(c.Sim); }
+        // The starting world is built identically on every client, before tick 0,
+        // like Skirmish.Setup itself. The men-on-walls scaffold is a single-window
+        // DEMO convenience — a networked match starts clean (no free walls for the
+        // host) and, crucially, a joiner ADOPTS the host's tick-0 snapshot, so any
+        // pre-placed state has to survive the snapshot round-trip. Keeping the
+        // scaffold to LOCAL sidesteps that and is the correct competitive start.
+        bool demo = _mode == "LOCAL";
+        foreach (var c in Clients()) { Skirmish.Setup(c.Sim, MapSize); if (demo) ScaffoldWall(c.Sim); }
 
         LoadModels();
         SetupEnvironment();
@@ -202,12 +205,15 @@ public partial class World3D : Node3D
 
         _cam = new Camera3D { Current = true };
         AddChild(_cam);
-        // Aim at the starting party (soldiers spawn a few tiles east of the keep).
-        _camTarget = new Vector3(Skirmish.West(MapSize) + 9, 0, MapSize / 2f);   // the wall
+        // Aim at OUR base — the host looks at the west start, a joiner at the east —
+        // so each player opens on their own keep rather than a fog bank.
+        int baseX = MyPlayer == 2 ? Skirmish.East(MapSize) - 9 : Skirmish.West(MapSize) + 9;
+        _camTarget = new Vector3(baseX, 0, MapSize / 2f);
+        _camYaw = MyPlayer == 2 ? 0.6f + Mathf.Pi : 0.6f;   // face in off the enemy side
         UpdateCamera();
 
-        // The staircase is render-only, so build it once on our side.
-        BuildStaircase(Skirmish.West(MapSize) + 7, MapSize / 2);
+        // The staircase serves the demo scaffold wall, so it too is LOCAL-only.
+        if (demo) BuildStaircase(Skirmish.West(MapSize) + 7, MapSize / 2);
 
         SnapshotPositions();
         SeedObservation();   // baseline so the starting world fires no sounds

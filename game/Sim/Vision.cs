@@ -119,7 +119,12 @@ namespace Sim
         void Reveal(int owner, int cx, int cy, int radius, bool accumulate)
         {
             var vis = BitsFor(_visible, owner);
-            var seen = BitsFor(_explored, owner);
+            // Only touch Explored when accumulating. BitsFor would otherwise CREATE
+            // a zero-filled owner entry even on a non-accumulating recompute, and
+            // StateChecksum hashes the entry count — so a rejoiner that recomputes
+            // visibility over a not-yet-explored start would carry an empty entry
+            // the host lacks, and flag a phantom desync at tick 0.
+            var seen = accumulate ? BitsFor(_explored, owner) : null;
             int r2 = radius * radius;
 
             int x0 = Math.Max(0, cx - radius), x1 = Math.Min(_map.Width - 1, cx + radius);
