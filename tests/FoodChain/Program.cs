@@ -31,6 +31,7 @@ static class Program
         ABakeryBakesFlourIntoBread();
         TheWholeChainTurnsAnEmptyLarderIntoFood();
         RazingTheFarmStopsItsFarmer();
+        PopulationIsCappedByHousing();
         TwoClientsAgreeOnTheFoodChain();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -188,6 +189,40 @@ static class Program
         Check("the razed farm is gone", sim.BuildingList.Count == 1);   // just the keep
         Check("its farmer rejoined the idle pool (Job.None, still a peasant)",
               farmer.Job == Job.None && farmer.IsPeasant);
+    }
+
+    // Population cannot outgrow its housing: with food to spare, it climbs to the
+    // keep's cap and stops, a house lifts the cap by ten, and at the cap food is
+    // no longer spent — it just piles up, the signal to build another house.
+    static void PopulationIsCappedByHousing()
+    {
+        Console.WriteLine("\npopulation is capped by housing:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        sim.AddResource(1, ResourceType.Food, 1000);   // food to spare, so ONLY housing limits growth
+        Seed(sim, 1, 1);
+
+        int keepCap = sim.PopulationCap(1);
+        Check($"the keep alone houses a starting court ({keepCap})", keepCap > 0);
+
+        for (int i = 0; i < 2000; i++) sim.Tick(Array.Empty<Command>());
+        Check($"population grew to the keep's cap and stopped ({sim.PeasantCount(1)}/{keepCap})",
+              sim.PeasantCount(1) == keepCap);
+
+        // A house shelters ten more.
+        sim.PlaceBuilding(BuildingType.House, 1, 20, 20);
+        int withHouse = sim.PopulationCap(1);
+        Check($"a house raised the cap by ten ({keepCap} -> {withHouse})", withHouse == keepCap + 10);
+
+        for (int i = 0; i < 2000; i++) sim.Tick(Array.Empty<Command>());
+        Check($"population grew to the new cap ({sim.PeasantCount(1)}/{withHouse})",
+              sim.PeasantCount(1) == withHouse);
+
+        // Full again: food stops being consumed and accumulates.
+        int foodAtCap = sim.Stockpile(1, ResourceType.Food);
+        for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
+        Check($"at the cap, food is no longer spent ({foodAtCap} -> {sim.Stockpile(1, ResourceType.Food)})",
+              sim.Stockpile(1, ResourceType.Food) == foodAtCap);
     }
 
     // The one that matters most: the whole chain, computed twice, must agree on

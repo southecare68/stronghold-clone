@@ -70,6 +70,7 @@ const ENTITIES := [
 	{ "out": "buildings/farm",       "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_Stables_01_Optimized",   "turns": false, "fit": 1.15 },
 	{ "out": "buildings/mill",       "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_Windmill_01_Optimized", "turns": false, "fit": 1.15 },
 	{ "out": "buildings/bakery",     "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized",     "turns": false, "fit": 1.15 },
+	{ "out": "buildings/house",      "prefab": "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized",   "turns": false, "fit": 1.15 },
 	{ "out": "units/soldier", "prefab": "Characters/SM_Chr_Soldier_Male_01",   "turns": true, "fit": 1.25 },
 	{ "out": "units/runner",  "prefab": "Characters/SM_Chr_Soldier_Female_01", "turns": true, "fit": 1.25 },
 	{ "out": "units/brute",   "prefab": "Characters/SM_Chr_Rider_01",          "turns": true, "fit": 1.25 },

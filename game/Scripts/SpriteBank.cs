@@ -48,6 +48,7 @@ public sealed class SpriteBank
         [BuildingType.Farm] = "farm",
         [BuildingType.Mill] = "mill",
         [BuildingType.Bakery] = "bakery",
+        [BuildingType.House] = "house",
     };
 
     // The animation states a unit sprite can be in. The clip name under Art/units

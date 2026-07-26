@@ -840,12 +840,14 @@ public partial class Main : Node2D
                 peasants++;
                 if (u.Job == Job.None) idle++;
             }
+        int cap = _shown.PopulationCap(_myPlayer);
         var d = _shown.DesignOf(_trainDesign);
         string name = _trainDesign < Skirmish.DesignNames.Length ? Skirmish.DesignNames[_trainDesign] : $"#{_trainDesign}";
-        return $"\nwood {wood}   stone {stone}   food {food}   grain {grain}   flour {flour}   peasants {peasants} ({idle} idle)" +
+        return $"\nwood {wood}   stone {stone}   food {food}   grain {grain}   flour {flour}" +
+               $"   peasants {peasants}/{cap} ({idle} idle){(peasants >= cap ? "  — build a [O] house for room" : "")}" +
                $"\ntrain: [{_trainDesign + 1}] {name}  (hp {d.Hp} dmg {d.Damage} spd {d.SpeedStat} rng {d.RangeStat} cd {d.Cooldown}, {d.PointCost}/{Simulation.MaxDesignPoints}pts)" +
-               "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store  ([Z/X] zoom)" +
-               "\nfood chain: [R] farm → [T] mill → [Y] bakery  (bread breeds peasants; peasants staff every work building)" +
+               "\n[1/2/3/4] design   build: [B]arracks [K]eep [W]all [G]ate [H]ut [Q]uarry [J] store [O] house  ([Z/X] zoom)" +
+               "\nfood chain: [R] farm → [T] mill → [Y] bakery  (bread breeds peasants; a house holds 10)" +
                "\nright-click your barracks to train, gate to open/close, enemy to attack" +
                (_shown.FogEnabled ? $"\nfog of war ON  [F] {(_fogView ? "reveal map" : "back to your view")}" +
                                     "  — you cannot attack, gather or build where you cannot see"
@@ -1046,6 +1048,7 @@ public partial class Main : Node2D
             else if (k.Keycode == Key.R) PlaceAtCursor(BuildingType.Farm);            // food chain: R/T/Y in a row
             else if (k.Keycode == Key.T) PlaceAtCursor(BuildingType.Mill);
             else if (k.Keycode == Key.Y) PlaceAtCursor(BuildingType.Bakery);
+            else if (k.Keycode == Key.O) PlaceAtCursor(BuildingType.House);           // hOuse: +10 population cap
             // 1 / 2 / 3 / 4 choose which design a barracks trains.
             else if (k.Keycode == Key.Key1) _trainDesign = 0;
             else if (k.Keycode == Key.Key2) _trainDesign = 1;
@@ -1569,6 +1572,23 @@ public partial class Main : Node2D
                     DrawRect(rect, owner.Darkened(0.05f));
                     DrawRect(new Rect2(rect.Position + new Vector2(rect.Size.X - 5f, -4f), new Vector2(3f, 6f)), owner.Darkened(0.3f));
                     DrawCircle(rect.Position + new Vector2(rect.Size.X / 2f, rect.Size.Y - 4f), 2.5f, new Color(1f, 0.6f, 0.2f));
+                    DrawRect(rect, owner, false, 1.5f);
+                    break;
+
+                case BuildingType.House:
+                    // A little cottage: walls with a pitched roof and a door.
+                    var wall = new Color(0.80f, 0.72f, 0.58f).Lerp(owner, 0.12f);
+                    DrawRect(new Rect2(rect.Position + new Vector2(0, rect.Size.Y * 0.35f),
+                                       new Vector2(rect.Size.X, rect.Size.Y * 0.65f)), wall);
+                    var roof = new Vector2[]  // a gable over the top
+                    {
+                        rect.Position + new Vector2(-1f, rect.Size.Y * 0.4f),
+                        rect.Position + new Vector2(rect.Size.X + 1f, rect.Size.Y * 0.4f),
+                        rect.Position + new Vector2(rect.Size.X / 2f, -3f),
+                    };
+                    DrawColoredPolygon(roof, new Color(0.5f, 0.24f, 0.18f));
+                    DrawRect(new Rect2(rect.Position + new Vector2(rect.Size.X * 0.42f, rect.Size.Y * 0.6f),
+                                       new Vector2(rect.Size.X * 0.16f, rect.Size.Y * 0.4f)), new Color(0.3f, 0.2f, 0.12f));
                     DrawRect(rect, owner, false, 1.5f);
                     break;
 

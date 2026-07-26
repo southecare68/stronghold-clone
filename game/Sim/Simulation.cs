@@ -20,7 +20,7 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -307,6 +307,12 @@ namespace Sim
         const int PopInterval = 30;                             // ticks between births (1.5s)
         const int PopFoodCost = 12;                             // food eaten to raise one peasant
 
+        // Population is capped by HOUSING: a peasant needs a roof. The keep shelters
+        // a starting court; every house shelters ten more. At the cap, food stops
+        // being spent and simply piles up — the signal to build another house.
+        const int HousingPerHouse = 10;
+        const int KeepHousing = 8;                              // the keep's own household
+
         // A mill or bakery is a WORKSHOP: it needs a peasant standing in it to run,
         // but unlike a harvester that peasant hauls nothing — it just mans the
         // place. A harvester (hut/quarry/farm) is any building with a WorkResource.
@@ -338,8 +344,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2 };  // ...Farm, Mill, Bakery
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2 };  // ...Farm, Mill, Bakery, House
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -352,10 +358,11 @@ namespace Sim
             new[] { 15, 0, 0 },    // Farm — cheap; the field feeds the whole chain
             new[] { 20, 15, 0 },   // Mill — a stone workshop that grinds grain to flour
             new[] { 25, 15, 0 },   // Bakery — turns flour into bread (Food)
+            new[] { 15, 0, 0 },    // House — cheap timber; each one shelters ten more peasants
         };
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1257,9 +1264,32 @@ namespace Sim
             {
                 if (b.Type != BuildingType.Keep || !b.Alive) continue;
                 if (Stockpile(b.Owner, ResourceType.Food) < PopFoodCost) continue;
+                if (PeasantCount(b.Owner) >= PopulationCap(b.Owner)) continue;   // no room at the inn
                 StockOf(b.Owner)[(int)ResourceType.Food] -= PopFoodCost;
                 SpawnPeasant(b.Owner);
             }
+        }
+
+        // How many peasants an owner can house: the keep's household plus ten per
+        // house. Live buildings only — a razed house shelters no one.
+        public int PopulationCap(int owner)
+        {
+            int cap = 0;
+            foreach (var b in Buildings)
+            {
+                if (!b.Alive || b.Owner != owner) continue;
+                if (b.Type == BuildingType.Keep) cap += KeepHousing;
+                else if (b.Type == BuildingType.House) cap += HousingPerHouse;
+            }
+            return cap;
+        }
+
+        // How many peasants an owner currently has (population, not army).
+        public int PeasantCount(int owner)
+        {
+            int n = 0;
+            foreach (var u in Units) if (u.IsPeasant && u.Owner == owner && u.Alive) n++;
+            return n;
         }
 
         // Sow a farm's wheat field: one grain node on a passable tile just outside
