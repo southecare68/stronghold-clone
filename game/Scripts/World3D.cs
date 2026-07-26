@@ -82,10 +82,24 @@ public partial class World3D : Node3D
         _camTarget = new Vector3(Skirmish.West(MapSize) + 4, 0, MapSize / 2f);
         UpdateCamera();
 
-        // A stretch of wall at the base to defend. (A build UI comes in M5; for now
-        // the player garrisons it by selecting soldiers and right-clicking it.)
+        // A stretch of wall at the base, with the starting soldiers already manning
+        // it so men-on-the-walls is visible the moment you launch. You can still
+        // garrison by hand too: select soldiers and right-click a wall. (A proper
+        // build UI comes in M5.)
         int wy = MapSize / 2, wx = Skirmish.West(MapSize) + 6;
-        for (int i = 0; i < 6; i++) _sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy);
+        var walls = new List<Building>();
+        for (int i = 0; i < 6; i++) walls.Add(_sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
+
+        int k = 1;   // leave the first tile empty so the wall isn't wall-to-wall men
+        foreach (var u in _sim.Units)
+        {
+            if (u.Owner != 1 || u.IsPeasant || k >= walls.Count) continue;
+            var w = walls[k]; k += 2;
+            if (w == null) continue;
+            u.GarrisonId = w.Id;
+            u.X = Fixed.FromInt(w.X); u.Y = Fixed.FromInt(w.Y);   // snap straight onto the rampart
+            u.Tx = u.X; u.Ty = u.Y;
+        }
 
         SnapshotPositions();
         GD.Print("[3d] world ready — ", _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
@@ -247,8 +261,15 @@ public partial class World3D : Node3D
             var now = SimXZ(u);
             var prev = _prevPos.TryGetValue(u.Id, out var p) ? p : now;
             var draw = prev.Lerp(now, _alpha);
-            // A garrisoned soldier stands up on the rampart walkway, not on the ground.
-            float yUp = u.GarrisonId != 0 ? WallWalkY : 0f;
+            // A garrisoned soldier rises onto the rampart ONLY once it has reached
+            // the wall's tile — while it is still marching up to the wall it stays
+            // on the ground, so it does not float across the field.
+            float yUp = 0f;
+            if (u.GarrisonId != 0)
+            {
+                var w = BuildingById(u.GarrisonId);
+                if (w != null && (u.X >> 16) == w.X && (u.Y >> 16) == w.Y) yUp = WallWalkY;
+            }
             node.Position = new Vector3(draw.X, yUp, draw.Y);
 
             // Face the way it is moving; hold the last heading when standing.
@@ -445,23 +466,40 @@ public partial class World3D : Node3D
             _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Attack, UnitIds = ids, TargetId = enemy.Id });
             return;
         }
-        if (GroundTile(screen, out int tx, out int ty))
+
+        // Clicking on your own rampart mans it — tested against the wall's RAISED
+        // body on screen, not the ground behind it, so clicking the wall itself
+        // works rather than reading as the tile beyond it.
+        var wall = WallUnderCursor(screen);
+        if (wall != null)
         {
-            // On your own rampart: man it. Otherwise, march there.
-            var wall = FriendlyWallAt(tx, ty);
-            if (wall != null)
-                _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
-            else
-                _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Garrison, UnitIds = ids, TargetId = wall.Id });
+            return;
         }
+        if (GroundTile(screen, out int tx, out int ty))
+            _pending.Add(new Command { Owner = MyPlayer, Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
     }
 
-    Building FriendlyWallAt(int tx, int ty)
+    // The friendly rampart whose body sits nearest the cursor — projected at mid
+    // height so clicking the wall (not the ground behind it) picks it.
+    Building WallUnderCursor(Vector2 screen)
     {
+        Building best = null;
+        float bestD = 34f * 34f;
         foreach (var b in _sim.Buildings)
-            if (b.Owner == MyPlayer && b.Alive && b.X == tx && b.Y == ty &&
-                (b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse))
-                return b;
+        {
+            if (b.Owner != MyPlayer || !b.Alive ||
+                (b.Type != BuildingType.Wall && b.Type != BuildingType.Gatehouse)) continue;
+            var mid = new Vector3(b.X + 0.5f, WallWalkY, b.Y + 0.5f);
+            float d = _cam.UnprojectPosition(mid).DistanceSquaredTo(screen);
+            if (d < bestD) { bestD = d; best = b; }
+        }
+        return best;
+    }
+
+    Building BuildingById(int id)
+    {
+        foreach (var b in _sim.Buildings) if (b.Id == id) return b;
         return null;
     }
 
