@@ -31,11 +31,12 @@ namespace Sim
 
     // What a unit is currently doing beyond just moving/fighting.
     // Gathering = a worker sent to a node BY HAND. Working = a peasant bound to a
-    // work building (a woodcutter's hut, a quarry), which finds it a fresh node of
-    // the right kind whenever it runs out — the self-running economy. Both share
-    // the same walk/harvest/haul cycle; only what happens when the node runs out
-    // differs.
-    public enum Job { None = 0, Gathering = 1, Working = 2 }
+    // harvesting work building (hut, quarry, farm), which finds it a fresh node of
+    // the right kind whenever it runs out — the self-running economy. Manning = a
+    // peasant staffing a workshop (mill, bakery): it stands at the building and the
+    // building converts goods only while manned. Gathering and Working share the
+    // walk/harvest/haul cycle; Manning does not (nothing to haul).
+    public enum Job { None = 0, Gathering = 1, Working = 2, Manning = 3 }
 
     // A harvestable deposit sitting on a tile. Depletes as it is gathered and is
     // removed when empty. Position is in whole tiles (a node occupies a cell),
@@ -188,6 +189,14 @@ namespace Sim
         public int CarryAmount;
         public int GatherTimer;
 
+        // A peasant is population, not a soldier: it is what STAFFS a work
+        // building (see ResolveWorkBuildings) and what food breeds more of (see
+        // ResolvePopulation). The flag rides with the unit so an idle peasant
+        // waiting for a job still reads as a peasant, not a soldier. It is NOT in
+        // the frozen Checksum (units-only, and peasants never appear in the parity
+        // scenario) — only in StateChecksum, like every other post-freeze field.
+        public bool IsPeasant;
+
         public bool Alive => Hp > 0;
 
         // The route still to walk, and how far along it we are. Tx/Ty always
@@ -206,7 +215,7 @@ namespace Sim
                 Hp = Hp, MaxHp = MaxHp, TargetId = TargetId,
                 TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
-                CarryAmount = CarryAmount, GatherTimer = GatherTimer,
+                CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant,
                 PathIndex = PathIndex,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
@@ -274,9 +283,6 @@ namespace Sim
         // Beyond this it sits idle — so you place a hut IN the forest and a quarry
         // ON the stone, which is the point.
         const int WorkRange = 18;                               // tiles
-        // A work building whose worker has died breeds a new one, but not
-        // instantly — otherwise one next to enemies would spew free bodies.
-        const int WorkerRespawn = 120;                          // ticks (6s)
 
         // --- The food chain ---------------------------------------------------
         // A farm plants a wheat field beside itself; its farmer harvests and hauls
@@ -292,6 +298,22 @@ namespace Sim
         const int MillInput = 4, MillOutput = 4;                // grain -> flour, 1:1
         const int BakeryInterval = 25;
         const int BakeryInput = 4, BakeryOutput = 6;            // flour -> bread, generous
+
+        // --- Population -------------------------------------------------------
+        // Peasants are the workforce, and food is what raises them. Every so often
+        // a keep that can feed a new mouth breeds a peasant; that peasant then goes
+        // and staffs whatever work building is short a worker. This closes the
+        // loop: food -> peasants -> they work the farms/mills/bakeries -> more food.
+        const int PopInterval = 30;                             // ticks between births (1.5s)
+        const int PopFoodCost = 12;                             // food eaten to raise one peasant
+
+        // A mill or bakery is a WORKSHOP: it needs a peasant standing in it to run,
+        // but unlike a harvester that peasant hauls nothing — it just mans the
+        // place. A harvester (hut/quarry/farm) is any building with a WorkResource.
+        static bool IsWorkshop(BuildingType t) => t == BuildingType.Mill || t == BuildingType.Bakery;
+        static bool NeedsWorker(BuildingType t) => WorkResource(t) != null || IsWorkshop(t);
+        // How close the miller/baker must be for the workshop to actually run.
+        static readonly int ManningRange = Fixed.One * 2;      // 2 tiles
 
         // What each work building harvests. A building type not listed here is not
         // a work building and grows no worker.
@@ -639,12 +661,13 @@ namespace Sim
                 SetDropOff(owner, drop.X, drop.Y);
             }
 
-            // A work building (hut, quarry, farm) comes with its peasant. It runs
-            // itself from here on — see ResolveWorkBuildings.
-            if (WorkResource(type) != null) BreedWorker(b);
+            // A work building does NOT come with a worker any more: peasants are
+            // population, and a building stands idle until one is free to staff it
+            // (see ResolveWorkBuildings). Food breeds that population — this is the
+            // loop that makes food matter.
 
-            // A farm sows its field at once, so the farmer has grain to cut on the
-            // very next tick rather than after a one-tick replant gap.
+            // A farm still sows its field at once, so grain is standing the moment
+            // a farmer is assigned rather than a tick later.
             if (type == BuildingType.Farm) PlantField(b);
 
             return b;
@@ -982,6 +1005,7 @@ namespace Sim
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
+            ResolvePopulation();    // and food, in turn, raises the next peasant
             TickNumber++;
         }
 
@@ -1124,40 +1148,64 @@ namespace Sim
             return dx * dx + dy * dy;
         }
 
-        // ---- Work buildings: the self-running economy --------------------------
-        // Each hut/quarry keeps one peasant fed with nodes of its resource. This
-        // runs BEFORE the gather cycle so a worker that just emptied a node is
-        // handed the next one in the same tick and never stalls.
+        // ---- Work buildings: staffed from population ---------------------------
+        // A work building runs itself, but it needs a PEASANT to run: a building
+        // short a worker hires the nearest idle peasant of its owner. A harvester
+        // (hut/quarry/farm) then works the gather/haul cycle; a workshop (mill,
+        // bakery) just keeps its peasant standing inside, and only produces while
+        // it is manned. A building with no peasant free to hire simply waits — that
+        // waiting is the whole point: population, fed by food, is the real limit on
+        // how much economy you can run at once. Runs BEFORE the gather cycle so a
+        // freshly-hired harvester is handed its node the same tick.
         void ResolveWorkBuildings()
         {
             foreach (var wb in Buildings)             // id order
             {
-                var res = WorkResource(wb.Type);
-                if (res == null || !wb.Alive) continue;
+                if (!wb.Alive || !NeedsWorker(wb.Type)) continue;
 
-                // A farm keeps a wheat field standing beside it: if the last one
-                // has been cut down to nothing, sow a fresh one. This is what makes
-                // the farm renewable — the farmer never runs out of grain to reap.
+                // A farm keeps a wheat field standing beside it: if the last one has
+                // been cut down to nothing, sow a fresh one. This is what makes the
+                // farm renewable — its farmer never runs out of grain to reap.
                 if (wb.Type == BuildingType.Farm && NearestResource(wb, ResourceType.Grain) == null)
                     PlantField(wb);
 
                 var worker = wb.WorkerId != 0 ? Units.Find(u => u.Id == wb.WorkerId) : null;
                 if (worker == null || !worker.Alive)
                 {
-                    // The peasant is gone. Breed a replacement, on a timer so a
-                    // work building cannot be a free-body fountain. (BuildTimer is
-                    // unused by these, so it doubles as the respawn clock.)
+                    // Vacancy: take on the nearest idle peasant, if the owner has
+                    // one spare. Otherwise the building stands empty until one is.
                     wb.WorkerId = 0;
-                    if (wb.BuildTimer > 0) { wb.BuildTimer--; continue; }
-                    BreedWorker(wb);
-                    continue;
+                    worker = HireIdlePeasant(wb);
+                    if (worker == null) continue;
+                    worker.Job = IsWorkshop(wb.Type) ? Job.Manning : Job.Working;
+                    worker.GatherNodeId = 0;
+                    worker.GatherTimer = 0;
+                    wb.WorkerId = worker.Id;
                 }
 
-                // Idle (no node, empty-handed): find the nearest standing node of
-                // the building's resource in range and send the worker to it.
-                if (worker.GatherNodeId == 0 && worker.CarryAmount == 0)
+                if (IsWorkshop(wb.Type))
                 {
-                    var node = NearestResource(wb, res.Value);
+                    // Keep the miller/baker at the workshop. Production waits for it
+                    // to arrive — see Manned(), checked in ResolveProcessors. It
+                    // walks to a tile BESIDE the building (the footprint itself is
+                    // blocked, so ordering it onto the centre would path nowhere and
+                    // strand it out of range forever).
+                    if (DistToBuilding(worker, wb) > ManningRange)
+                    {
+                        var door = SpawnPointAround(wb) ?? new Tile(wb.CenterX, wb.CenterY);
+                        ChaseTo(worker, door.X, door.Y);
+                    }
+                    else
+                    {
+                        worker.Path = null; worker.PathIndex = 0;
+                        worker.Tx = worker.X; worker.Ty = worker.Y;
+                    }
+                }
+                else if (worker.GatherNodeId == 0 && worker.CarryAmount == 0)
+                {
+                    // Harvester idle (no node, empty-handed): hand it the nearest
+                    // standing node of its resource in reach.
+                    var node = NearestResource(wb, WorkResource(wb.Type).Value);
                     if (node != null)
                     {
                         worker.Job = Job.Working;
@@ -1168,14 +1216,50 @@ namespace Sim
             }
         }
 
-        void BreedWorker(Building wb)
+        // The nearest idle peasant of a building's owner — a peasant with no job,
+        // free to be put to work. Ties broken by unit id (id order + strict <).
+        // Null if the owner has nobody spare, which is how a building goes unstaffed.
+        Unit HireIdlePeasant(Building wb)
         {
-            var spot = SpawnPointAround(wb);
-            if (!spot.HasValue) { wb.BuildTimer = 1; return; }    // no room this tick; try next
-            var w = SpawnUnit(wb.Owner, spot.Value.X, spot.Value.Y, 0);
-            w.Job = Job.Working;
-            wb.WorkerId = w.Id;
-            wb.BuildTimer = WorkerRespawn;            // arm the clock for the NEXT death
+            Unit best = null;
+            long bestD = long.MaxValue;
+            foreach (var u in Units)                  // id order
+            {
+                if (!u.IsPeasant || u.Owner != wb.Owner || !u.Alive || u.Job != Job.None) continue;
+                long dx = (u.X >> 16) - wb.CenterX, dy = (u.Y >> 16) - wb.CenterY;
+                long d = dx * dx + dy * dy;
+                if (d < bestD) { bestD = d; best = u; }
+            }
+            return best;
+        }
+
+        // Raise a peasant at an owner's keep: population, not army — IsPeasant, no
+        // job, waiting to be hired. Public so match setup can seed a starting
+        // workforce, exactly like SpawnUnit. Spawns on passable ground by the keep.
+        public Unit SpawnPeasant(int owner)
+        {
+            int x = 0, y = 0;
+            if (_dropOff.TryGetValue(owner, out var d)) { x = d.X; y = d.Y; }
+            var t = NearestFreeTile(x, y) ?? new Tile(x, y);
+            var u = SpawnUnit(owner, t.X, t.Y, 0);
+            u.IsPeasant = true;
+            u.Job = Job.None;
+            return u;
+        }
+
+        // Food raises peasants. On a slow tick, every keep that can spare the food
+        // for another mouth breeds one. Iterated in building-id order (no RNG, pure
+        // integer state); a side with no keep or no food breeds nobody.
+        void ResolvePopulation()
+        {
+            if (TickNumber % PopInterval != 0) return;
+            foreach (var b in Buildings)              // id order
+            {
+                if (b.Type != BuildingType.Keep || !b.Alive) continue;
+                if (Stockpile(b.Owner, ResourceType.Food) < PopFoodCost) continue;
+                StockOf(b.Owner)[(int)ResourceType.Food] -= PopFoodCost;
+                SpawnPeasant(b.Owner);
+            }
         }
 
         // Sow a farm's wheat field: one grain node on a passable tile just outside
@@ -1202,12 +1286,20 @@ namespace Sim
         {
             foreach (var b in Buildings)             // id order
             {
-                if (!b.Alive) continue;
+                if (!b.Alive || !Manned(b)) continue;   // an unstaffed workshop is idle
                 if (b.Type == BuildingType.Mill)
                     Convert(b, ResourceType.Grain, MillInput, ResourceType.Flour, MillOutput, MillInterval);
                 else if (b.Type == BuildingType.Bakery)
                     Convert(b, ResourceType.Flour, BakeryInput, ResourceType.Food, BakeryOutput, BakeryInterval);
             }
+        }
+
+        // A workshop runs only while its peasant is alive and standing in it.
+        bool Manned(Building b)
+        {
+            if (b.WorkerId == 0) return false;
+            var w = Units.Find(u => u.Id == b.WorkerId);
+            return w != null && w.Alive && DistToBuilding(w, b) <= ManningRange;
         }
 
         // One workshop step. The timer counts up to the interval and then HOLDS
@@ -1382,8 +1474,9 @@ namespace Sim
                 BlockFootprint(b, false);
                 if (b.Type == BuildingType.Keep) _dropOff.Remove(b.Owner);
                 // A razed work building lets its peasant go — it stops working and
-                // just stands where it was, rather than serving a building gone.
-                if (WorkResource(b.Type) != null && b.WorkerId != 0)
+                // rejoins the idle pool (still a peasant, ready to be re-hired),
+                // rather than serving a building that is gone.
+                if (NeedsWorker(b.Type) && b.WorkerId != 0)
                 {
                     var w = Units.Find(u => u.Id == b.WorkerId);
                     if (w != null) EndJob(w);
@@ -1518,6 +1611,7 @@ namespace Sim
                 Mix(u.TargetId); Mix(u.TargetBuildingId); Mix(u.AttackTimer);
                 Mix((int)u.Job); Mix(u.GatherNodeId);
                 Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
+                Mix(u.IsPeasant ? 1 : 0);
 
                 // The route still to walk. Two units in identical positions with
                 // different plans are not in the same world.

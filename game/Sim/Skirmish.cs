@@ -20,6 +20,10 @@ namespace Sim
     {
         public const int DefaultSize = 128;
 
+        // Peasants each side starts with — enough to staff a first building or
+        // two while the food economy gets going and begins breeding more.
+        public const int StartPeasants = 4;
+
         // The two bases face each other across the ridge that TileMap.Skirmish
         // runs down the middle.
         public static int West(int size) => size * 8 / 100;
@@ -105,6 +109,10 @@ namespace Sim
             {
                 sim.AddResource(owner, ResourceType.Wood, 200);
                 sim.AddResource(owner, ResourceType.Stone, 100);
+                // A starting workforce to bootstrap the economy: peasants staff
+                // your work buildings, and the bread they help make breeds more.
+                // Placed AFTER the keep so they spawn at its drop-off.
+                for (int i = 0; i < StartPeasants; i++) sim.SpawnPeasant(owner);
             }
 
             foreach (var (type, x, y, amount) in Nodes(size))

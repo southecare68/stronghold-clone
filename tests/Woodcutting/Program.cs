@@ -50,17 +50,18 @@ static class Program
 
     static void AHutBreedsAWoodcutterAndCutsWood()
     {
-        Console.WriteLine("\na hut breeds a cutter and wood flows:");
+        Console.WriteLine("\na hut hires a cutter and wood flows:");
         var sim = Forest();
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);        // the drop-off
+        Seed(sim, 1, 2);                                      // a couple of idle peasants
 
-        int unitsBefore = sim.Units.Count;
         var hut = sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+        Check("empty hut has no worker yet", hut.WorkerId == 0);
 
-        Check("placing the hut spawned a woodcutter", sim.Units.Count == unitsBefore + 1);
-        Check("the hut knows its worker", hut.WorkerId != 0);
+        Settle(sim);                                          // it hires an idle peasant
+        Check("the hut took on a peasant", hut.WorkerId != 0);
         var worker = Find(sim, hut.WorkerId);
-        Check("the worker is set to woodcutting with no order given",
+        Check("who is set to woodcutting with no order given",
               worker != null && worker.Job == Job.Working);
 
         Check("nothing banked yet", sim.Stockpile(1, ResourceType.Wood) == 0);
@@ -74,7 +75,9 @@ static class Program
         Console.WriteLine("\nit finds the next tree when one runs out:");
         var sim = Forest(smallTrees: true);       // tiny trees, so they exhaust fast
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 2);
         var hut = sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+        Settle(sim);
         var worker = Find(sim, hut.WorkerId);
 
         // Let it work through more wood than any single tree holds, so it MUST
@@ -96,11 +99,13 @@ static class Program
         // FASTER than with the keep alone.
         var near = Forest();
         near.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(near, 1, 2);
         near.PlaceBuilding(BuildingType.Storehouse, 1, 24, 20);   // beside the forest
         near.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
 
         var far = Forest();
         far.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(far, 1, 2);
         far.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20); // keep only
 
         for (int i = 0; i < 700; i++) { near.Tick(Array.Empty<Command>()); far.Tick(Array.Empty<Command>()); }
@@ -113,20 +118,23 @@ static class Program
 
     static void AHutRebreedsAKilledWoodcutter()
     {
-        Console.WriteLine("\na hut replaces a fallen woodcutter:");
+        Console.WriteLine("\na hut replaces a fallen woodcutter from the pool:");
         var sim = Forest();
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 2);                       // one to cut, one spare to replace it
         var hut = sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+        Settle(sim);
         int firstWorker = hut.WorkerId;
+        Check("the hut hired a cutter", firstWorker != 0);
 
         // Kill the woodcutter.
         Find(sim, firstWorker).Hp = 0;
         sim.Tick(Array.Empty<Command>());     // RemoveDead clears it
         Check("the woodcutter is gone", Find(sim, firstWorker) == null);
 
-        // The hut waits out its respawn timer, then breeds a fresh one.
-        for (int i = 0; i < 200 && hut.WorkerId == 0; i++) sim.Tick(Array.Empty<Command>());
-        Check("the hut bred a replacement", hut.WorkerId != 0 && hut.WorkerId != firstWorker);
+        // With a spare peasant on hand, the hut takes one on straight away.
+        for (int i = 0; i < 50 && hut.WorkerId == 0; i++) sim.Tick(Array.Empty<Command>());
+        Check("the hut hired a replacement", hut.WorkerId != 0 && hut.WorkerId != firstWorker);
         var repl = Find(sim, hut.WorkerId);
         Check("which is back to cutting", repl != null && repl.Job == Job.Working);
     }
@@ -136,9 +144,11 @@ static class Program
         Console.WriteLine("\nrazing the hut frees its woodcutter:");
         var sim = Forest();
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 2);
         var hut = sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+        for (int i = 0; i < 30; i++) sim.Tick(Array.Empty<Command>());   // hire + get to work
         var worker = Find(sim, hut.WorkerId);
-        for (int i = 0; i < 30; i++) sim.Tick(Array.Empty<Command>());   // let it get to work
+        Check("the hut has a working cutter", worker != null && worker.Job == Job.Working);
 
         hut.Hp = 0;
         sim.Tick(Array.Empty<Command>());     // RemoveDestroyedBuildings runs
@@ -160,7 +170,9 @@ static class Program
         // The player-1 forest is planted around (w+7, m-9); put the hut in it.
         var hut = sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, w + 6, m - 10);
         Check("the hut placed on the forest", hut != null);
-        Check("and bred a woodcutter", hut != null && hut.WorkerId != 0);
+        // The skirmish start seeds a workforce, so the hut hires one of them.
+        Settle(sim, 10);
+        Check("and hired a woodcutter from the starting peasants", hut != null && hut.WorkerId != 0);
 
         // A tree gets planted on the very tile the hut lands on; building over it
         // must clear it, or the hut's nearest tree is one buried under itself and
@@ -228,13 +240,15 @@ static class Program
         Console.WriteLine("\na quarry mines stone the same way a hut cuts wood:");
         var sim = new Simulation(TileMap.Open(48));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 2);
         // A stone deposit and, right beside it, a forest — to prove the quarry
         // takes stone and leaves the trees alone.
         for (int i = 0; i < 6; i++) sim.SpawnNode(ResourceType.Stone, 22 + (i % 3) * 3, 18 + (i / 3) * 3, 120);
         sim.SpawnNode(ResourceType.Wood, 24, 24, 200);
 
         var quarry = sim.PlaceBuilding(BuildingType.Quarry, 1, 20, 20);
-        Check("the quarry bred a worker", quarry.WorkerId != 0);
+        Settle(sim);
+        Check("the quarry hired a worker", quarry.WorkerId != 0);
         Check("its worker is a peasant on the job (Job.Working)",
               Find(sim, quarry.WorkerId)?.Job == Job.Working);
 
@@ -257,6 +271,7 @@ static class Program
         foreach (var c in new[] { a, b })
         {
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+            Seed(c.Sim, 1, 4);                                            // workforce for two huts + a quarry
             c.Sim.PlaceBuilding(BuildingType.Storehouse, 1, 24, 20);
             PlantForest(c.Sim);
             for (int i = 0; i < 4; i++) c.Sim.SpawnNode(ResourceType.Stone, 30 + (i % 2) * 3, 30 + (i / 2) * 3, 120);
@@ -302,6 +317,20 @@ static class Program
     {
         foreach (var u in sim.Units) if (u.Id == id) return u;
         return null;
+    }
+
+    // Seed a starting workforce. Work buildings hire from population now, so a
+    // hut/quarry does nothing until an idle peasant is on hand to staff it. Call
+    // after the keep is placed (peasants spawn at its drop-off).
+    static void Seed(Simulation sim, int owner, int n)
+    {
+        for (int i = 0; i < n; i++) sim.SpawnPeasant(owner);
+    }
+
+    // Run a handful of ticks so a just-placed building can hire its peasant.
+    static void Settle(Simulation sim, int ticks = 5)
+    {
+        for (int i = 0; i < ticks; i++) sim.Tick(Array.Empty<Command>());
     }
 
     static int TotalWood(Simulation sim) => sim.Stockpile(1, ResourceType.Wood);

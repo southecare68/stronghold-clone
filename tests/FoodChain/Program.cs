@@ -58,15 +58,16 @@ static class Program
         Console.WriteLine("\na farm sows a field and grain flows:");
         var sim = new Simulation(TileMap.Open(48));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);            // the drop-off
+        Seed(sim, 1, 2);                                          // a couple of idle peasants
 
-        int unitsBefore = sim.Units.Count;
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
+        Check("a wheat field was sown at once", NodesOfType(sim, ResourceType.Grain) >= 1);
+        Check("empty farm has no worker yet", farm.WorkerId == 0);
 
-        Check("placing the farm bred a farmer", sim.Units.Count == unitsBefore + 1);
-        Check("the farm knows its worker", farm.WorkerId != 0);
+        Settle(sim);                                             // it hires a farmer
+        Check("the farm took on a farmer", farm.WorkerId != 0);
         Check("its worker is a peasant on the job (Job.Working)",
               Find(sim, farm.WorkerId)?.Job == Job.Working);
-        Check("a wheat field was sown at once", NodesOfType(sim, ResourceType.Grain) >= 1);
 
         Check("nothing banked yet", sim.Stockpile(1, ResourceType.Grain) == 0);
         for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
@@ -81,11 +82,13 @@ static class Program
         Console.WriteLine("\na farm replants its field and never runs dry:");
         var sim = new Simulation(TileMap.Open(48));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 2);
         var store = sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);   // clear of the 3x3 farm
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
         Check("farm and storehouse both fit", store != null && farm != null);
 
-        // One field holds 240 grain; run long enough to reap well past that.
+        // One field holds 240 grain; run long enough to reap well past that. (No
+        // bakery here, so no food and no population growth — grain just banks.)
         for (int i = 0; i < 6000; i++) sim.Tick(Array.Empty<Command>());
         int banked = sim.Stockpile(1, ResourceType.Grain);
         Check($"reaped more than a single field's worth ({banked} > 240)", banked > 240);
@@ -99,7 +102,9 @@ static class Program
     {
         Console.WriteLine("\na mill grinds grain into flour:");
         var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 17, 17);          // miller spawns here; no keep => no population growth
         sim.AddResource(1, ResourceType.Grain, 40);
+        Seed(sim, 1, 1);                    // a miller to man the mill
         sim.PlaceBuilding(BuildingType.Mill, 1, 20, 20);
 
         for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
@@ -114,8 +119,10 @@ static class Program
     // than producing flour from an empty bin.
     static void AMillWithNoGrainStaysIdle()
     {
-        Console.WriteLine("\na mill with no grain stays idle:");
+        Console.WriteLine("\na manned mill with no grain stays idle:");
         var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 17, 17);
+        Seed(sim, 1, 1);                    // fully manned — but there is no grain
         sim.PlaceBuilding(BuildingType.Mill, 1, 20, 20);
         for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
         Check("no flour from an empty bin", sim.Stockpile(1, ResourceType.Flour) == 0);
@@ -126,7 +133,9 @@ static class Program
     {
         Console.WriteLine("\na bakery bakes flour into bread:");
         var sim = new Simulation(TileMap.Open(48));
+        sim.SetDropOff(1, 17, 17);          // baker spawns here; no keep => food is not spent on population
         sim.AddResource(1, ResourceType.Flour, 40);
+        Seed(sim, 1, 1);                    // a baker to man the bakery
         sim.PlaceBuilding(BuildingType.Bakery, 1, 20, 20);
 
         for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
@@ -136,13 +145,16 @@ static class Program
         Check($"flour was consumed to bake it ({flour} left of 40)", flour < 40);
     }
 
-    // End to end on an empty larder: a farm, a mill, and a bakery, no starting
-    // resources and no orders, must turn wheat into bread all by themselves.
+    // End to end on an empty larder: a farm, a mill, and a bakery, staffed by a
+    // starting workforce, must turn wheat into bread and — the whole point now —
+    // bread into new peasants, all by themselves.
     static void TheWholeChainTurnsAnEmptyLarderIntoFood()
     {
-        Console.WriteLine("\nthe whole chain turns an empty larder into food:");
+        Console.WriteLine("\nthe whole chain turns wheat into bread into peasants:");
         var sim = new Simulation(TileMap.Open(64));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 3);                                                     // a farmer, a miller, a baker
+        int seeded = Peasants(sim, 1);
         var store = sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);   // grain banks close to the field
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
         var mill = sim.PlaceBuilding(BuildingType.Mill, 1, 30, 30);
@@ -152,10 +164,10 @@ static class Program
         Check("larder starts empty", sim.Stockpile(1, ResourceType.Food) == 0);
         for (int i = 0; i < 5000; i++) sim.Tick(Array.Empty<Command>());
 
-        Check($"grain was grown ({sim.Stockpile(1, ResourceType.Grain)} on hand)",
-              sim.Stockpile(1, ResourceType.Grain) >= 0);   // may be mid-grind, so >= 0
-        Check($"and bread reached the table ({sim.Stockpile(1, ResourceType.Food)})",
-              sim.Stockpile(1, ResourceType.Food) > 0);
+        // Food is now SPENT on population, so the payoff is more peasants, not a
+        // rising food pile — the chain fed and grew the workforce.
+        Check($"the workforce grew past the {seeded} it started with ({Peasants(sim, 1)})",
+              Peasants(sim, 1) > seeded);
     }
 
     // A razed farm lets its farmer go — the field it planted stops being worked,
@@ -165,6 +177,7 @@ static class Program
         Console.WriteLine("\nrazing the farm stops its farmer:");
         var sim = new Simulation(TileMap.Open(48));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 1);
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
         for (int i = 0; i < 60; i++) sim.Tick(Array.Empty<Command>());
         var farmer = Find(sim, farm.WorkerId);
@@ -173,7 +186,8 @@ static class Program
         farm.Hp = 0;
         sim.Tick(Array.Empty<Command>());     // RemoveDestroyedBuildings runs
         Check("the razed farm is gone", sim.BuildingList.Count == 1);   // just the keep
-        Check("its farmer stood down (Job.None)", farmer.Job == Job.None);
+        Check("its farmer rejoined the idle pool (Job.None, still a peasant)",
+              farmer.Job == Job.None && farmer.IsPeasant);
     }
 
     // The one that matters most: the whole chain, computed twice, must agree on
@@ -189,6 +203,7 @@ static class Program
         foreach (var c in new[] { a, b })
         {
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+            Seed(c.Sim, 1, 5);                                           // workforce for two farms + mill + bakery, plus growth
             c.Sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);
             var f1 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
             var f2 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 26, 26);   // two farms, well clear of each other
@@ -206,8 +221,10 @@ static class Program
         }
         Check($"StateChecksum identical on all 1500 ticks" +
               (desyncs > 0 ? $" (diverged {desyncs}x, first at {first})" : ""), desyncs == 0);
-        Check($"and both actually baked bread ({a.Sim.Stockpile(1, ResourceType.Food)})",
-              a.Sim.Stockpile(1, ResourceType.Food) > 0);
+        // The chain ran end to end: bread bred peasants past the 5 each started
+        // with. (Both agree by the checksum above, so checking one is enough.)
+        Check($"and the workforce grew from the chain ({Peasants(a.Sim, 1)} on A)",
+              Peasants(a.Sim, 1) > 5);
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -216,6 +233,25 @@ static class Program
     {
         int n = 0;
         foreach (var node in sim.NodeList) if (node.Type == t) n++;
+        return n;
+    }
+
+    // Work buildings hire from population now, so tests seed a workforce and give
+    // it a beat to be taken on. Peasants spawn at the owner's drop-off.
+    static void Seed(Simulation sim, int owner, int n)
+    {
+        for (int i = 0; i < n; i++) sim.SpawnPeasant(owner);
+    }
+
+    static void Settle(Simulation sim, int ticks = 8)
+    {
+        for (int i = 0; i < ticks; i++) sim.Tick(Array.Empty<Command>());
+    }
+
+    static int Peasants(Simulation sim, int owner)
+    {
+        int n = 0;
+        foreach (var u in sim.Units) if (u.IsPeasant && u.Owner == owner && u.Alive) n++;
         return n;
     }
 

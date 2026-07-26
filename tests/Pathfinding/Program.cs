@@ -370,7 +370,11 @@ static class Program
 
         int w = Skirmish.West(size), e = Skirmish.East(size), m = Skirmish.MidY(size);
 
-        Check("both starting parties exist", sim.Units.Count == 6);
+        // Three soldiers a side, plus each side's starting workforce of peasants.
+        int soldiers = 0, peasants = 0;
+        foreach (var u in sim.Units) { if (u.IsPeasant) peasants++; else soldiers++; }
+        Check("both starting armies exist", soldiers == 6);
+        Check("both starting workforces exist", peasants == 2 * Skirmish.StartPeasants);
         int keeps = 0;
         foreach (var b in sim.Buildings) if (b.Type == BuildingType.Keep) keeps++;
         Check("both keeps placed (neither fell on bad ground)", keeps == 2);

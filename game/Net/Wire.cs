@@ -147,6 +147,7 @@ namespace Netcode
                 PutInt(buf, (int)u.CarryType);
                 PutInt(buf, u.CarryAmount);
                 PutInt(buf, u.GatherTimer);
+                PutInt(buf, u.IsPeasant ? 1 : 0);
 
                 // The remaining route. StateChecksum hashes it, so a snapshot that
                 // dropped it would fail its own checksum verification on arrival —
@@ -294,6 +295,7 @@ namespace Netcode
                         CarryType = (ResourceType)GetInt(data, ref p),
                         CarryAmount = GetInt(data, ref p),
                         GatherTimer = GetInt(data, ref p),
+                        IsPeasant = GetInt(data, ref p) != 0,
                     };
 
                     int remaining = GetInt(data, ref p);
