@@ -44,6 +44,7 @@ public partial class World3D : Node3D
     // stair onto its crenellated roof and fire from it. These carry the roof height,
     // each keep's stair foot/crown for the climb, and the spots troops stand at.
     const float KeepRoofY = 2.6f;
+    const float KeepTowerH = 3.05f;   // square corner towers rise above the wall-walk (keep2 style)
     const float KeepBldMaxH = 1.9f;   // cap other buildings below the keep's roofline
     readonly Dictionary<int, (Vector3 Base, Vector3 Top)> _keepStair = new();   // keep id -> stair
     readonly Dictionary<int, int> _keepIdx = new();                            // unit id -> roof-spot index
@@ -1710,12 +1711,12 @@ public partial class World3D : Node3D
         };
         root.AddChild(core);
 
-        KeepFace(root, nw, ne);   // north (back)
-        KeepFace(root, nw, sw);   // west
-        KeepFace(root, ne, se);   // east
+        KeepFace(root, nw, ne, KeepRoofY);   // north (back)
+        KeepFace(root, nw, sw, KeepRoofY);   // west
+        KeepFace(root, ne, se, KeepRoofY);   // east
         // South (front): a solid wall with a stone-framed doorway and a wooden door
         // built proud of it — the marked entrance. Solid core behind, so no opening.
-        KeepFace(root, sw, se);
+        KeepFace(root, sw, se, KeepRoofY);
         DoorLeaf(root, new Vector3(0, 0, d));
 
         // The flat roof deck the garrison stands on.
@@ -1728,9 +1729,15 @@ public partial class World3D : Node3D
         deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         root.AddChild(deck);
 
-        // Crenellated parapet around the roof edge, and a round tower at each corner.
-        Parapet(root, nw, ne); Parapet(root, sw, se); Parapet(root, nw, sw); Parapet(root, ne, se);
-        foreach (var c in new[] { nw, ne, sw, se }) RoundTurret(root, c);
+        // Crenellated parapet around the roof edge, and a tall SQUARE tower at each
+        // corner — the four crenellated corner towers are what make it read as a
+        // Stronghold lord's keep.
+        Parapet(root, nw, ne, KeepRoofY); Parapet(root, sw, se, KeepRoofY);
+        Parapet(root, nw, sw, KeepRoofY); Parapet(root, ne, se, KeepRoofY);
+        // Towers sit AT the corners, their outer faces flush with the walls (inset
+        // just inside to avoid z-fighting), so the keep reads as one enclosure with
+        // corner towers rising above the curtain — not four separate pillars.
+        foreach (var c in new[] { nw, ne, sw, se }) SquareTower(root, c * 0.63f);
 
         // The hidden internal climb: the gate mouth (on the ground) and the inner
         // floor. From the floor the man rises straight up behind the walls onto the
@@ -1741,39 +1748,77 @@ public partial class World3D : Node3D
     }
 
     // One tall keep face — a Wall_01 (native 5x5x0.5, length on local X) scaled to
-    // span the edge and rise to the roof, turned to run along it.
-    void KeepFace(Node3D root, Vector3 a, Vector3 c)
+    // span the edge and rise to `height`, turned to run along it.
+    void KeepFace(Node3D root, Vector3 a, Vector3 c, float height)
     {
         var seg = c - a;
         float len = seg.Length();
         if (len < 0.05f) return;
         var w = _keepWall.Instantiate<Node3D>();
-        w.Scale = new Vector3(len / 5f, KeepRoofY / 5f, 1.0f);
+        w.Scale = new Vector3(len / 5f, height / 5f, 1.0f);
         w.Position = (a + c) * 0.5f;
         w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
         root.AddChild(w);
     }
 
-    // A round tower at a keep corner, rising from the ground to a little above the
-    // roofline — its own crenellations crown it.
-    void RoundTurret(Node3D root, Vector3 at)
+    // A tall square tower at a keep corner: four textured stone faces around a solid
+    // core, an overhanging cap, and a crown of merlons — the fighting keep's corner
+    // tower. Straddles the corner so it projects proud of the walls.
+    void SquareTower(Node3D root, Vector3 at)
     {
-        var aabb = ModelAabb(_keepTurret);
-        float scale = (KeepRoofY + 0.7f) / Mathf.Max(0.1f, aabb.Size.Y);
-        var t = _keepTurret.Instantiate<Node3D>();
-        t.Scale = new Vector3(scale * 0.72f, scale, scale * 0.72f);   // slimmer so it frames the corner, not the deck
-        t.Position = at - new Vector3(0, aabb.Position.Y * scale, 0);   // seat its base on the ground
-        root.AddChild(t);
+        const float hw = 0.5f;             // half-width; a ~1-tile-square tower, clear of its neighbours
+        float H = KeepTowerH;
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.47f, 0.45f, 0.42f), Roughness = 1f };
+
+        var a = at + new Vector3(-hw, 0, -hw); var b = at + new Vector3(hw, 0, -hw);
+        var c = at + new Vector3(hw, 0, hw);   var e = at + new Vector3(-hw, 0, hw);
+        KeepFace(root, a, b, H); KeepFace(root, b, c, H); KeepFace(root, c, e, H); KeepFace(root, e, a, H);
+
+        // Solid core so the tower can't be seen through.
+        root.AddChild(KeepBox(stone, new Vector3(2 * hw - 0.08f, H, 2 * hw - 0.08f), at + new Vector3(0, H / 2, 0)));
+        // Overhanging cap (machicolation) the merlons sit on.
+        float capHalf = hw + 0.09f;
+        root.AddChild(KeepBox(stone, new Vector3(2 * capHalf, 0.16f, 2 * capHalf), at + new Vector3(0, H + 0.08f, 0)));
+        Merlons(root, at, capHalf, H + 0.16f, stone);
     }
 
-    // The Battlements strip laid along a roof edge, at deck height.
-    void Parapet(Node3D root, Vector3 a, Vector3 c)
+    // A crown of square merlons on a corner tower — teeth with gaps between them,
+    // but only on the two OUTWARD-facing edges (the inner sides face the courtyard
+    // and stay clear, which keeps the four towers' tops from clustering into noise).
+    void Merlons(Node3D root, Vector3 center, float half, float topY, Material m)
+    {
+        const int per = 2;                       // teeth per side
+        float tooth = 2 * half / (per * 2 - 1);  // tooth width == gap width
+        const float th = 0.28f;                  // how tall a tooth stands
+        bool north = center.Z < 0, south = center.Z > 0, west = center.X < 0, east = center.X > 0;
+        void Tooth(Vector3 pos) =>
+            root.AddChild(KeepBox(m, new Vector3(tooth, th, tooth), center + pos + new Vector3(0, topY + th / 2, 0)));
+        for (int i = 0; i < per; i++)
+        {
+            float t = -half + tooth / 2 + i * 2 * tooth;
+            if (north) Tooth(new Vector3(t, 0, -half));
+            if (south) Tooth(new Vector3(t, 0, half));
+            if (west) Tooth(new Vector3(-half, 0, t));
+            if (east) Tooth(new Vector3(half, 0, t));
+        }
+    }
+
+    // A shadow-free box helper for keep detail (merlons, caps, cores).
+    static MeshInstance3D KeepBox(Material m, Vector3 size, Vector3 pos)
+    {
+        var mi = new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = m, Position = pos };
+        mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        return mi;
+    }
+
+    // The Battlements strip laid along an edge, at height `atY`.
+    void Parapet(Node3D root, Vector3 a, Vector3 c, float atY)
     {
         var seg = c - a;
         float len = seg.Length();
         var p = _wallBat.Instantiate<Node3D>();
         p.Scale = new Vector3(len / 5f, 0.3f, 0.7f);
-        p.Position = (a + c) * 0.5f + new Vector3(0, KeepRoofY, 0);
+        p.Position = (a + c) * 0.5f + new Vector3(0, atY, 0);
         p.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
         root.AddChild(p);
     }
