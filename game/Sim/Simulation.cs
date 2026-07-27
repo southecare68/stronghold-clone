@@ -240,7 +240,7 @@ namespace Sim
         public int FromX, FromY, ToX, ToY;   // fixed-point
     }
 
-    public sealed class Simulation
+    public sealed partial class Simulation
     {
         public int TickNumber;
         public readonly List<Unit> Units = new(); // always iterated in id order
@@ -398,6 +398,15 @@ namespace Sim
         // (the parity test) never touches it.
         public const uint DefaultSeed = 0xC0FFEE11u;
         readonly Rng _rng;
+
+        // Owners played by the computer. Sorted so multi-AI turn order is identical
+        // on every machine; empty by default, so a match without an AI (every test,
+        // and any human-only game) runs exactly as before. The AI itself lives in
+        // SimAi.cs. Not hashed and not snapshotted — it is a match setting, not
+        // evolving state, and each machine is told who is a bot at setup.
+        readonly SortedSet<int> _aiOwners = new();
+        public void EnableAi(int owner) => _aiOwners.Add(owner);
+        public bool IsAi(int owner) => _aiOwners.Contains(owner);
 
         // Scratch buffers for pathfinding, reused across calls. Working memory,
         // not game state: nothing here survives a call, so none of it is hashed.
@@ -1025,6 +1034,12 @@ namespace Sim
             var ordered = new List<Command>(commands);
             ordered.Sort(CanonicalOrder); // same order on every machine
             foreach (var c in ordered) Apply(c);
+
+            // Computer players decide here, on the same fog-updated world and at the
+            // same point in the tick as human orders — so an AI opponent is byte
+            // identical on every machine and needs no network traffic. Empty unless
+            // EnableAi was called, which is why the parity scenario is untouched.
+            if (_aiOwners.Count > 0) StepAi();
 
             foreach (var u in Units)
             {

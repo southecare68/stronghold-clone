@@ -1,0 +1,25 @@
+<!-- AiSim — proves the computer opponent (SimAi.cs) is deterministic and alive.
+
+     Like SimParity, this is a Godot-free console test that compiles the sim
+     sources directly, so it runs on the Ubuntu box too. It matters because the
+     AI runs INSIDE the deterministic tick: if a single AI decision depended on
+     iteration order, wall-clock, or a float, two machines would diverge — and
+     this is the cheap check that catches it before a real match does.
+
+     Run with `dotnet run` from this directory. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>AiSim</RootNamespace>
+    <AssemblyName>AiSim</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

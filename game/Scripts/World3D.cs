@@ -206,8 +206,20 @@ public partial class World3D : Node3D
         // host) and, crucially, a joiner ADOPTS the host's tick-0 snapshot, so any
         // pre-placed state has to survive the snapshot round-trip. Keeping the
         // scaffold to LOCAL sidesteps that and is the correct competitive start.
-        bool demo = _mode == "LOCAL";
-        foreach (var c in Clients()) { Skirmish.Setup(c.Sim, MapSize); if (demo) ScaffoldWall(c.Sim); }
+        // --ai turns the other side over to the computer for a single-window
+        // practice match, in place of the men-on-walls demo. The AI lives inside
+        // the sim, so it is enabled on EVERY client's Simulation identically and
+        // needs no network traffic — the two loopback sims each run the same bot
+        // and stay in lockstep. It replaces the scaffold rather than joining it.
+        bool ai = HasFlag("--ai");
+        bool demo = _mode == "LOCAL" && !ai;
+        int aiOwner = MyPlayer == 2 ? 1 : 2;
+        foreach (var c in Clients())
+        {
+            Skirmish.Setup(c.Sim, MapSize);
+            if (demo) ScaffoldWall(c.Sim);
+            if (ai) c.Sim.EnableAi(aiOwner);
+        }
 
         LoadModels();
         SetupEnvironment();
