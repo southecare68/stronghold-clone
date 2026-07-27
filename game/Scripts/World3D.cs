@@ -37,7 +37,7 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
-    PackedScene _keepWall, _keepGate;   // the keep is composed from castle pieces
+    PackedScene _keepWall, _keepGate, _keepTurret;   // the keep is composed from castle pieces
 
     // The keep is a flat-topped fighting platform (Stronghold-style): troops climb a
     // stair onto its crenellated roof and fire from it. These carry the roof height,
@@ -390,8 +390,9 @@ public partial class World3D : Node3D
 
         // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
         // body to skirt them, assembled in MakeKeep into a small castle.
-        _keepWall = Load("Castle/SM_Bld_Castle_Wall_01");
-        _keepGate = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
+        _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
+        _keepGate   = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
+        _keepTurret = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");   // round corner tower
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -1407,10 +1408,11 @@ public partial class World3D : Node3D
     }
 
     // The keep: a flat-topped stone stronghold (Stronghold-style), not a roofed
-    // tower. Four tall faces box the 3x3 footprint up to a crenellated roof deck the
-    // troops stand and fight on; a gate breaks the front, small turrets mark the
-    // corners, and a stair climbs the back up to the roof. Placed once; a keep never
-    // moves. The stair foot/crown are stored for the garrison climb.
+    // tower. Four clean faces box the 3x3 footprint up to a crenellated roof deck the
+    // troops stand and fight on; a round tower stands at each corner, a gate breaks
+    // the front — and that gate is the ONLY way up: there is no outside stair. The
+    // garrison walks in through it and climbs unseen inside the walls to the roof.
+    // Placed once; a keep never moves.
     Node3D MakeKeep(Building b)
     {
         var root = new Node3D { Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f) };
@@ -1437,13 +1439,14 @@ public partial class World3D : Node3D
         deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         root.AddChild(deck);
 
-        // Crenellated parapet around the roof edge, and a squat crenellated post at
-        // each corner rising a little above it — bartizans, not domed towers.
+        // Crenellated parapet around the roof edge, and a round tower at each corner.
         Parapet(root, nw, ne); Parapet(root, sw, se); Parapet(root, nw, sw); Parapet(root, ne, se);
-        foreach (var c in new[] { nw, ne, sw, se }) CornerPost(root, c);
+        foreach (var c in new[] { nw, ne, sw, se }) RoundTurret(root, c);
 
-        // Stair up the back, and remember its foot and crown for the climb.
-        BuildKeepStair(root, b.Id, -d);
+        // The hidden internal climb: the gate mouth (on the ground) and the inner
+        // floor. From the floor the man rises straight up behind the walls onto the
+        // roof — reads as climbing unseen stairs inside.
+        _keepStair[b.Id] = (root.Position + new Vector3(0, 0, d), root.Position);
 
         return root;
     }
@@ -1462,18 +1465,16 @@ public partial class World3D : Node3D
         root.AddChild(w);
     }
 
-    // A short crenellated corner post — a Wall_01 stub with battlements, standing a
-    // touch taller than the parapet to mark the corner.
-    void CornerPost(Node3D root, Vector3 at)
+    // A round tower at a keep corner, rising from the ground to a little above the
+    // roofline — its own crenellations crown it.
+    void RoundTurret(Node3D root, Vector3 at)
     {
-        var body = _keepWall.Instantiate<Node3D>();
-        body.Scale = new Vector3(0.11f, (KeepRoofY + 0.5f) / 5f, 0.55f);   // narrow, a bit above the roof
-        body.Position = at;
-        root.AddChild(body);
-        var cap = _wallBat.Instantiate<Node3D>();
-        cap.Scale = new Vector3(0.11f, 0.28f, 0.55f);
-        cap.Position = at + new Vector3(0, KeepRoofY + 0.5f, 0);
-        root.AddChild(cap);
+        var aabb = ModelAabb(_keepTurret);
+        float scale = (KeepRoofY + 0.7f) / Mathf.Max(0.1f, aabb.Size.Y);
+        var t = _keepTurret.Instantiate<Node3D>();
+        t.Scale = new Vector3(scale * 0.72f, scale, scale * 0.72f);   // slimmer so it frames the corner, not the deck
+        t.Position = at - new Vector3(0, aabb.Position.Y * scale, 0);   // seat its base on the ground
+        root.AddChild(t);
     }
 
     // The Battlements strip laid along a roof edge, at deck height.
@@ -1486,30 +1487,6 @@ public partial class World3D : Node3D
         p.Position = (a + c) * 0.5f + new Vector3(0, KeepRoofY, 0);
         p.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
         root.AddChild(p);
-    }
-
-    // A stone stair from the ground up to the roof on the keep's `faceZ` side,
-    // storing its foot and crown (in world space) so the garrison can climb it.
-    void BuildKeepStair(Node3D root, int keepId, float faceZ)
-    {
-        const int steps = 11;
-        const float run = 2.8f;
-        var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f) };
-        float stepH = KeepRoofY / steps, stepDepth = run / steps;
-        for (int i = 0; i < steps; i++)
-        {
-            float topY = stepH * (i + 1);
-            float z = faceZ - run + (i + 0.5f) * stepDepth;   // foot furthest out, rising to the face
-            root.AddChild(new MeshInstance3D
-            {
-                Mesh = new BoxMesh { Size = new Vector3(1.0f, topY, stepDepth + 0.02f) },
-                MaterialOverride = mat,
-                Position = new Vector3(0, topY * 0.5f, z),
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            });
-        }
-        _keepStair[keepId] = (root.Position + new Vector3(0, 0, faceZ - run),
-                              root.Position + new Vector3(0, KeepRoofY, faceZ));
     }
 
     // The gatehouse module set into the front wall, opening outward.
