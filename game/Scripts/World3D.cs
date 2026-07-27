@@ -2196,10 +2196,19 @@ public partial class World3D : Node3D
         bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
         bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
 
+        // Face the crenellated parapet AWAY from the keep, so the wall shields it.
+        // The parapet sits on the tile's +z edge (→ +x once a vertical run is turned
+        // 90°); flip the tile 180° whenever that edge would point toward the keep.
+        bool alongZ = vert && !horiz;
+        float rot = alongZ ? Mathf.Pi / 2f : 0f;
+        var keep = _sim.Buildings.Find(k => k.Type == BuildingType.Keep && k.Owner == b.Owner && k.Alive);
+        if (keep != null && (alongZ ? keep.CenterX > b.X : keep.CenterY > b.Y))
+            rot += Mathf.Pi;
+
         var root = new Node3D
         {
             Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f),   // tile-centred like the units
-            Rotation = new Vector3(0, vert && !horiz ? Mathf.Pi / 2f : 0f, 0),
+            Rotation = new Vector3(0, rot, 0),
         };
 
         var body = _wallBody.Instantiate<Node3D>();
