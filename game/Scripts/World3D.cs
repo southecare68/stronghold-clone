@@ -1747,27 +1747,31 @@ public partial class World3D : Node3D
         return root;
     }
 
-    // A round corner tower with a green conical spire and a red flag on top.
+    // A round corner tower with a green conical spire and a red flag on top. Built
+    // from a plain CYLINDER, not the pack's wall-tower model — that model ships with
+    // wall stubs attached, which is what made the stone run out past the corners.
+    // The four flat curtain walls now meet a clean round turret at each corner.
     void RoundKeepTower(Node3D root, Vector3 at)
     {
         float towerH = KeepRoofY + 1.0f;
-        var aabb = ModelAabb(_keepTurret);
-        float s = towerH / Mathf.Max(0.1f, aabb.Size.Y);
-        var t = _keepTurret.Instantiate<Node3D>();
-        t.Scale = new Vector3(s * 0.68f, s, s * 0.68f);                 // a slim round tower
-        t.Position = at - new Vector3(0, aabb.Position.Y * s, 0);       // seat its base on the ground
-        root.AddChild(t);
+        const float r = 0.5f;
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
+        root.AddChild(new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = r, BottomRadius = r, Height = towerH, RadialSegments = 16 },
+            MaterialOverride = stone,
+            Position = at + new Vector3(0, towerH / 2f, 0),
+        });
 
         // Conical spire — a cone (a cylinder tapered to a point), roof-green.
         var green = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.41f, 0.33f), Roughness = 1f };
-        const float coneH = 1.15f, coneR = 0.52f;
-        var cone = new MeshInstance3D
+        const float coneH = 1.2f;
+        root.AddChild(new MeshInstance3D
         {
-            Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = coneR, Height = coneH, RadialSegments = 12 },
+            Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = r + 0.1f, Height = coneH, RadialSegments = 16 },
             MaterialOverride = green,
             Position = at + new Vector3(0, towerH + coneH / 2f, 0),
-        };
-        root.AddChild(cone);
+        });
         KeepFlag(root, at + new Vector3(0, towerH + coneH, 0));
     }
 
@@ -1834,15 +1838,15 @@ public partial class World3D : Node3D
         root.AddChild(p);
     }
 
-    // The front entrance: a wooden door set flush INTO the front wall — a dark
-    // recess with the door and two iron braces at the wall face, nothing standing
-    // proud of it, so the keep's sides stay flat. Centred at `at` on the front.
+    // The front entrance: a wooden door sitting flush on the front wall's face — lit
+    // and plainly a door, not a dark recessed hollow — with a centre seam and iron
+    // braces. It sits right at the wall face, so it neither hides nor stands proud.
+    // Centred at `at` on the front.
     void DoorLeaf(Node3D root, Vector3 at)
     {
-        var wood = new StandardMaterial3D { AlbedoColor = new Color(0.42f, 0.27f, 0.14f), Roughness = 1f };
-        var iron = new StandardMaterial3D { AlbedoColor = new Color(0.16f, 0.15f, 0.14f), Roughness = 1f };
-        var dark = new StandardMaterial3D { AlbedoColor = new Color(0.10f, 0.09f, 0.08f), Roughness = 1f };
-        const float w = 0.9f, h = 1.7f;
+        var wood = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.30f, 0.16f), Roughness = 1f };
+        var iron = new StandardMaterial3D { AlbedoColor = new Color(0.18f, 0.17f, 0.16f), Roughness = 1f };
+        const float w = 0.86f, h = 1.7f, face = 0.24f;   // z from wall centre-line out to its face
 
         MeshInstance3D Box(Material m, Vector3 size, Vector3 pos)
         {
@@ -1851,11 +1855,10 @@ public partial class World3D : Node3D
             return mi;
         }
 
-        // Recess set back into the wall, then the door and braces flush at its face.
-        root.AddChild(Box(dark, new Vector3(w, h, 0.22f), new Vector3(0, h / 2, 0.02f)));
-        root.AddChild(Box(wood, new Vector3(w, h, 0.1f), new Vector3(0, h / 2, 0.16f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.06f), new Vector3(0, h * 0.3f, 0.2f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.06f), new Vector3(0, h * 0.7f, 0.2f)));
+        root.AddChild(Box(wood, new Vector3(w, h, 0.1f), new Vector3(0, h / 2, face)));                     // the door
+        root.AddChild(Box(iron, new Vector3(0.05f, h, 0.12f), new Vector3(0, h / 2, face + 0.01f)));        // centre seam
+        root.AddChild(Box(iron, new Vector3(w + 0.02f, 0.09f, 0.12f), new Vector3(0, h * 0.26f, face + 0.01f)));
+        root.AddChild(Box(iron, new Vector3(w + 0.02f, 0.09f, 0.12f), new Vector3(0, h * 0.74f, face + 0.01f)));
     }
 
     void SyncBuildings()
