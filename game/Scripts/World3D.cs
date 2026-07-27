@@ -1834,16 +1834,15 @@ public partial class World3D : Node3D
         root.AddChild(p);
     }
 
-    // The front entrance: a stone porch standing well proud of the wall with a
-    // wooden plank door in it, so it reads as a clear gateway and can't be lost
-    // against the wall or hidden by the corner towers. Centred at `at` on the front.
+    // The front entrance: a wooden door set flush INTO the front wall — a dark
+    // recess with the door and two iron braces at the wall face, nothing standing
+    // proud of it, so the keep's sides stay flat. Centred at `at` on the front.
     void DoorLeaf(Node3D root, Vector3 at)
     {
-        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.62f, 0.6f, 0.55f), Roughness = 1f };
-        var wood  = new StandardMaterial3D { AlbedoColor = new Color(0.42f, 0.27f, 0.14f), Roughness = 1f };
-        var iron  = new StandardMaterial3D { AlbedoColor = new Color(0.16f, 0.15f, 0.14f), Roughness = 1f };
-
-        const float w = 0.92f, h = 1.8f, out_ = 0.34f;   // door width, height, how far the porch stands out
+        var wood = new StandardMaterial3D { AlbedoColor = new Color(0.42f, 0.27f, 0.14f), Roughness = 1f };
+        var iron = new StandardMaterial3D { AlbedoColor = new Color(0.16f, 0.15f, 0.14f), Roughness = 1f };
+        var dark = new StandardMaterial3D { AlbedoColor = new Color(0.10f, 0.09f, 0.08f), Roughness = 1f };
+        const float w = 0.9f, h = 1.7f;
 
         MeshInstance3D Box(Material m, Vector3 size, Vector3 pos)
         {
@@ -1852,16 +1851,11 @@ public partial class World3D : Node3D
             return mi;
         }
 
-        // Porch: two jambs and a lintel, running from the wall face out to `out_`.
-        float jz = out_ * 0.5f, jd = out_ + 0.1f;   // jamb centre z and depth
-        root.AddChild(Box(stone, new Vector3(0.2f, h + 0.24f, jd), new Vector3(-w / 2 - 0.13f, (h + 0.24f) / 2, jz)));
-        root.AddChild(Box(stone, new Vector3(0.2f, h + 0.24f, jd), new Vector3(w / 2 + 0.13f, (h + 0.24f) / 2, jz)));
-        root.AddChild(Box(stone, new Vector3(w + 0.46f, 0.22f, jd), new Vector3(0, h + 0.11f, jz)));
-
-        // The wooden door, hung at the front of the porch, with two iron braces.
-        root.AddChild(Box(wood, new Vector3(w, h, 0.12f), new Vector3(0, h / 2, out_ + 0.02f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.04f, 0.1f, 0.15f), new Vector3(0, h * 0.28f, out_ + 0.05f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.04f, 0.1f, 0.15f), new Vector3(0, h * 0.72f, out_ + 0.05f)));
+        // Recess set back into the wall, then the door and braces flush at its face.
+        root.AddChild(Box(dark, new Vector3(w, h, 0.22f), new Vector3(0, h / 2, 0.02f)));
+        root.AddChild(Box(wood, new Vector3(w, h, 0.1f), new Vector3(0, h / 2, 0.16f)));
+        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.06f), new Vector3(0, h * 0.3f, 0.2f)));
+        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.06f), new Vector3(0, h * 0.7f, 0.2f)));
     }
 
     void SyncBuildings()
