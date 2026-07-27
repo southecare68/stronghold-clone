@@ -140,6 +140,14 @@ public partial class World3D : Node3D
     BoxMesh _ghostBox;
     Material _ghostOk, _ghostBad;
     readonly Dictionary<BuildingType, Button> _buildButtons = new();
+    // Placement facing, in quarter-turns (R rotates it). Cosmetic — footprints are
+    // square, so it never changes which tiles a building occupies, which is why it
+    // can live entirely in the renderer. _ghostModel previews the rotated building;
+    // _pendingRot carries the choice to the node the sim creates a few ticks later.
+    int _ghostRot;
+    Node3D _ghostModel;
+    BuildingType? _ghostModelType;
+    readonly Dictionary<Vector2I, int> _pendingRot = new();
 
     // What the player can put down (not the Keep — you start with one). Order sets
     // the palette left to right.
@@ -433,6 +441,18 @@ public partial class World3D : Node3D
             }
             foreach (var c in n.GetChildren()) Walk(c, ref acc, ref first);
         }
+    }
+
+    // Scale a building model to fill ~90% of its (square) footprint, but never let
+    // it stand taller than the keep — the Synty house models are big. Shared by the
+    // placed building and its ghost preview so they match.
+    static float BuildingScale(PackedScene scene, int footTiles)
+    {
+        var a = ModelAabb(scene);
+        float horiz = Mathf.Max(Mathf.Max(a.Size.X, a.Size.Z), 0.1f);
+        float fit = 0.9f * footTiles / horiz;
+        float cap = KeepBldMaxH / Mathf.Max(a.Size.Y, 0.1f);
+        return Mathf.Min(fit, cap);
     }
 
     // ---- setup -------------------------------------------------------------
@@ -1190,6 +1210,7 @@ public partial class World3D : Node3D
         if (_buildType == t) { ExitBuild(); return; }
         _buildType = t;
         _wallDragging = false;
+        _ghostRot = 0;                 // each new pick starts facing the default way
         foreach (var kv in _buildButtons) kv.Value.ButtonPressed = kv.Key == t;
         _sound?.PlayUi(Sfx.Select);
     }
@@ -1200,6 +1221,7 @@ public partial class World3D : Node3D
         _wallDragging = false;
         foreach (var kv in _buildButtons) kv.Value.ButtonPressed = false;
         foreach (var g in _ghosts) g.Visible = false;
+        if (_ghostModel != null) _ghostModel.Visible = false;
     }
 
     // Left/right clicks while a type is chosen. A wall drags out a straight run;
@@ -1232,7 +1254,12 @@ public partial class World3D : Node3D
         var (w, h) = _sim.FootprintOf(t);
         int ox = cx - (w - 1) / 2, oy = cy - (h - 1) / 2;
         if (Placeable(t, ox, oy))
+        {
             _me.Issue(new Command { Type = CommandType.Build, TargetId = (int)t, X = ox, Y = oy });
+            // Remember the facing for the building the sim will raise here in a few
+            // ticks; SyncBuildings applies it when the node appears.
+            if (_ghostRot != 0) _pendingRot[new Vector2I(ox, oy)] = _ghostRot;
+        }
         else
             _sound.PlayUi(Sfx.Denied);
     }
@@ -1272,10 +1299,12 @@ public partial class World3D : Node3D
     // The ghost(s) under the cursor, updated each frame while in build mode.
     void UpdateGhost()
     {
-        if (_buildType is not BuildingType t) { foreach (var g in _ghosts) g.Visible = false; return; }
+        if (_buildType is not BuildingType t)
+        { foreach (var g in _ghosts) g.Visible = false; if (_ghostModel != null) _ghostModel.Visible = false; return; }
 
         var mouse = GetViewport().GetMousePosition();
-        if (!GroundTile(mouse, out int cx, out int cy)) { foreach (var g in _ghosts) g.Visible = false; return; }
+        if (!GroundTile(mouse, out int cx, out int cy))
+        { foreach (var g in _ghosts) g.Visible = false; if (_ghostModel != null) _ghostModel.Visible = false; return; }
 
         // While dragging a wall, one ghost per tile of the run; otherwise a single
         // footprint under the cursor.
@@ -1298,6 +1327,41 @@ public partial class World3D : Node3D
             g.MaterialOverride = Placeable(t, ox, oy) ? _ghostOk : _ghostBad;
         }
         for (; i < _ghosts.Count; i++) _ghosts[i].Visible = false;
+
+        UpdateGhostModel(t, cx, cy, w, h);
+    }
+
+    // A translucent, rotated copy of the actual building model, so you can see the
+    // facing R will give it. Walls orient themselves to their run, so they skip it.
+    void UpdateGhostModel(BuildingType t, int cx, int cy, int w, int h)
+    {
+        bool showModel = t != BuildingType.Wall && !_wallDragging
+                         && _bldModel.TryGetValue(t, out var scene) && scene != null;
+        if (!showModel) { if (_ghostModel != null) _ghostModel.Visible = false; return; }
+
+        if (_ghostModelType != t)   // rebuild only when the chosen type changes
+        {
+            _ghostModel?.QueueFree();
+            _ghostModel = _bldModel[t].Instantiate<Node3D>();
+            foreach (var mi in Descendants<MeshInstance3D>(_ghostModel)) mi.Transparency = 0.5f;
+            _ghostModel.Scale = Vector3.One * BuildingScale(_bldModel[t], w);
+            AddChild(_ghostModel);
+            _ghostModelType = t;
+        }
+        int ox = cx - (w - 1) / 2, oy = cy - (h - 1) / 2;
+        _ghostModel.Visible = true;
+        _ghostModel.Position = new Vector3(ox + (w - 1) / 2f, 0.02f, oy + (h - 1) / 2f);
+        _ghostModel.Rotation = new Vector3(0, _ghostRot * Mathf.Pi / 2f, 0);
+    }
+
+    // Every descendant of a given node type, depth-first.
+    static IEnumerable<T> Descendants<T>(Node n) where T : Node
+    {
+        foreach (var c in n.GetChildren())
+        {
+            if (c is T t) yield return t;
+            foreach (var d in Descendants<T>(c)) yield return d;
+        }
     }
 
     MeshInstance3D GhostAt(int i)
@@ -1773,18 +1837,18 @@ public partial class World3D : Node3D
                 }
                 else
                 {
-                    // Size the model to its tile footprint rather than a fixed scale,
-                    // and never let it stand taller than the keep — the Synty house
-                    // models are big, so a flat 0.5 made them overshoot everything.
-                    var a = ModelAabb(scene);
-                    float horiz = Mathf.Max(Mathf.Max(a.Size.X, a.Size.Z), 0.1f);
-                    float fit = 0.9f * b.W / horiz;             // fill ~90% of the footprint
-                    float cap = KeepBldMaxH / Mathf.Max(a.Size.Y, 0.1f);   // stay under the keep
-                    node.Scale = Vector3.One * Mathf.Min(fit, cap);
+                    node.Scale = Vector3.One * BuildingScale(scene, b.W);
                     // Centre on the footprint. A tile at (x,y) is centred at (x,y),
                     // so a WxH footprint's centre is (x+(W-1)/2, y+(H-1)/2) — not W/2,
                     // which would sit half a tile off (unit positions are tile-centred).
                     node.Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f);
+                    // Apply the facing chosen at placement (render-only; footprint is
+                    // square, so it never moved which tiles this occupies).
+                    if (_pendingRot.TryGetValue(new Vector2I(b.X, b.Y), out int q))
+                    {
+                        node.Rotation = new Vector3(0, q * Mathf.Pi / 2f, 0);
+                        _pendingRot.Remove(new Vector2I(b.X, b.Y));
+                    }
                 }
                 AddChild(node);
                 _buildingNodes[b.Id] = node;
@@ -2057,6 +2121,15 @@ public partial class World3D : Node3D
             !terr.CtrlPressed && !terr.MetaPressed && !terr.AltPressed)
         {
             _showTerritory = !_showTerritory;
+            return;
+        }
+
+        // R rotates the building being placed a quarter-turn, so you can face it
+        // whichever way looks best before committing.
+        if (e is InputEventKey rot && rot.Pressed && rot.Keycode == Key.R &&
+            !rot.CtrlPressed && !rot.MetaPressed && !rot.AltPressed && _buildType != null)
+        {
+            _ghostRot = (_ghostRot + 1) & 3;
             return;
         }
 
