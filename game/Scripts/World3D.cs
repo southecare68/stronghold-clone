@@ -37,7 +37,20 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
-    PackedScene _keepTowerL, _keepTowerS, _keepRoof, _keepWall, _keepGate;   // the keep is composed from castle pieces
+    PackedScene _keepWall, _keepGate;   // the keep is composed from castle pieces
+
+    // The keep is a flat-topped fighting platform (Stronghold-style): troops climb a
+    // stair onto its crenellated roof and fire from it. These carry the roof height,
+    // each keep's stair foot/crown for the climb, and the spots troops stand at.
+    const float KeepRoofY = 2.6f;
+    readonly Dictionary<int, (Vector3 Base, Vector3 Top)> _keepStair = new();   // keep id -> stair
+    readonly Dictionary<int, int> _keepIdx = new();                            // unit id -> roof-spot index
+    static readonly Vector3[] RoofOffsets =
+    {
+        new(0, 0, 1.05f), new(1.05f, 0, 0), new(0, 0, -1.05f), new(-1.05f, 0, 0),   // edge posts, facing out
+        new(0.85f, 0, 0.85f), new(-0.85f, 0, 0.85f), new(0.85f, 0, -0.85f), new(-0.85f, 0, -0.85f),
+        new(0, 0, 0),   // the last-stand spot, dead centre — the lord's post
+    };
     readonly HashSet<(int, int)> _wallSet = new();
 
     // Netcode. The renderer no longer owns a bare Simulation; it drives a lockstep
@@ -239,10 +252,14 @@ public partial class World3D : Node3D
         var walls = new List<Building>();
         for (int i = 0; i < 6; i++) walls.Add(sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
 
-        int k = 1;   // spread them along the wall, leaving the near tiles clear
+        var keep = sim.Buildings.Find(b => b.Type == BuildingType.Keep && b.Owner == 1);
+        int k = 1;              // spread the rest along the wall, leaving the near tiles clear
+        bool lordSet = false;
         foreach (var u in sim.Units)
         {
-            if (u.Owner != 1 || u.IsPeasant || k >= walls.Count) continue;
+            if (u.Owner != 1 || u.IsPeasant) continue;
+            if (!lordSet && keep != null) { u.GarrisonId = keep.Id; lordSet = true; continue; }  // the lord mans the keep
+            if (k >= walls.Count) continue;
             var w = walls[k]; k += 2;
             if (w != null) u.GarrisonId = w.Id;   // no snap — they walk to the stair and climb up
         }
@@ -373,11 +390,8 @@ public partial class World3D : Node3D
 
         // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
         // body to skirt them, assembled in MakeKeep into a small castle.
-        _keepTowerL = Load("Castle/SM_Bld_Castle_Wall_Tower_L_01");
-        _keepTowerS = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");
-        _keepRoof   = Load("Castle/SM_Bld_Castle_Roof_Cap_Round_02");   // domed cap; the pack's pointier caps are finials/flat lids that read worse
-        _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
-        _keepGate   = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
+        _keepWall = Load("Castle/SM_Bld_Castle_Wall_01");
+        _keepGate = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -1216,8 +1230,31 @@ public partial class World3D : Node3D
 
     static Vector2 SimXZ(Unit u) => new Vector2(u.X / (float)Fixed.One, u.Y / (float)Fixed.One);
 
+    // Give each unit garrisoned on a keep a distinct roof-spot index, so a group
+    // spreads around the parapet instead of stacking. Stable order (by id) means the
+    // same men take the same posts each frame.
+    void AssignKeepRoofSpots()
+    {
+        _keepIdx.Clear();
+        var byKeep = new Dictionary<int, List<int>>();
+        foreach (var u in _sim.Units)
+        {
+            if (u.GarrisonId == 0 || !u.Alive) continue;
+            var b = BuildingById(u.GarrisonId);
+            if (b == null || b.Type != BuildingType.Keep) continue;
+            if (!byKeep.TryGetValue(b.Id, out var list)) byKeep[b.Id] = list = new List<int>();
+            list.Add(u.Id);
+        }
+        foreach (var list in byKeep.Values)
+        {
+            list.Sort();
+            for (int i = 0; i < list.Count; i++) _keepIdx[list[i]] = i;
+        }
+    }
+
     void SyncUnits(double delta)
     {
+        AssignKeepRoofSpots();
         var live = new HashSet<int>();
         foreach (var u in _sim.Units)
         {
@@ -1263,21 +1300,37 @@ public partial class World3D : Node3D
             var wall = u.GarrisonId != 0 ? BuildingById(u.GarrisonId) : null;
             if (wall != null)
             {
-                var top = new Vector3(wall.X + (wall.W - 1) / 2f, WallTopY, wall.Y + (wall.H - 1) / 2f);
-                if (_onWall.Contains(u.Id))
+                // A wall garrison stands on the walkway; a keep garrison takes a spot
+                // on the roof deck and faces outward. Each uses its own stair.
+                Vector3 top, sbase, stop, outward = Vector3.Zero;
+                if (wall.Type == BuildingType.Keep)
                 {
-                    // Up and stood to. Hold the spot; keep the heading it arrived on.
-                    pos = top; face = Vector3.Zero; walking = false;
+                    var off = RoofOffsets[(_keepIdx.TryGetValue(u.Id, out var ki) ? ki : 0) % RoofOffsets.Length];
+                    top = new Vector3(wall.X + (wall.W - 1) / 2f, KeepRoofY, wall.Y + (wall.H - 1) / 2f) + off;
+                    outward = new Vector3(off.X, 0, off.Z);
+                    var st = _keepStair.TryGetValue(wall.Id, out var ks) ? ks : (top, top);
+                    sbase = st.Item1; stop = st.Item2;
                 }
                 else
                 {
-                    // March to the stair, up it, and along the walkway to the spot.
+                    top = new Vector3(wall.X + (wall.W - 1) / 2f, WallTopY, wall.Y + (wall.H - 1) / 2f);
+                    sbase = _stairBase; stop = _stairTop;
+                }
+
+                if (_onWall.Contains(u.Id))
+                {
+                    // Up and stood to. Keep archers facing out; on a wall, hold heading.
+                    pos = top; face = outward; walking = false;
+                }
+                else
+                {
+                    // March to the stair, up it, and along the top to the spot.
                     if (!_climb.TryGetValue(u.Id, out var cl))
-                        cl = _climb[u.Id] = new Climb { Pts = new[] { new Vector3(draw.X, 0, draw.Y), _stairBase, _stairTop, top } };
+                        cl = _climb[u.Id] = new Climb { Pts = new[] { new Vector3(draw.X, 0, draw.Y), sbase, stop, top } };
                     cl.Dist += (float)delta * ClimbSpeed;
                     pos = SamplePath(cl.Pts, cl.Dist, out face, out bool done);
                     walking = true;
-                    if (done) { _onWall.Add(u.Id); _climb.Remove(u.Id); pos = top; walking = false; }
+                    if (done) { _onWall.Add(u.Id); _climb.Remove(u.Id); pos = top; walking = false; face = outward; }
                 }
             }
             else
@@ -1353,90 +1406,119 @@ public partial class World3D : Node3D
         return pts[^1];
     }
 
-    // A small castle keep, assembled from the modular castle kit (there is no
-    // single "castle" prefab): a tall central donjon on the 3x3 footprint's centre,
-    // a turret at each corner, every tower capped with a conical roof, and a low
-    // wall skirt tying them together. Placed once, since a keep never moves.
+    // The keep: a flat-topped stone stronghold (Stronghold-style), not a roofed
+    // tower. Four tall faces box the 3x3 footprint up to a crenellated roof deck the
+    // troops stand and fight on; a gate breaks the front, small turrets mark the
+    // corners, and a stair climbs the back up to the roof. Placed once; a keep never
+    // moves. The stair foot/crown are stored for the garrison climb.
     Node3D MakeKeep(Building b)
     {
         var root = new Node3D { Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f) };
-        float s = _bldScale[BuildingType.Keep];   // 0.5, the shared building scale
-
-        // Four corners of the 3x3, a tile out toward each.
-        const float d = 1.05f;
+        const float d = 1.5f;   // half the 3x3 footprint
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // Crenellated curtain on three sides; the front (south, toward the map) gets
-        // a gatehouse in the middle with a short wall on each side of it.
-        CurtainWall(root, nw, ne);   // north
-        CurtainWall(root, nw, sw);   // west
-        CurtainWall(root, ne, se);   // east
-        const float gw = 0.62f;      // half-width of the gate opening
-        var gl = new Vector3(-gw, 0, d); var gr = new Vector3(gw, 0, d);
-        CurtainWall(root, sw, gl);   // left of the gate
-        CurtainWall(root, gr, se);   // right of the gate
+        // Solid faces up to the roof, the front broken by a gate.
+        KeepFace(root, nw, ne);   // north (back)
+        KeepFace(root, nw, sw);   // west
+        KeepFace(root, ne, se);   // east
+        const float gw = 0.7f;
+        KeepFace(root, sw, new Vector3(-gw, 0, d));   // south, left of gate
+        KeepFace(root, new Vector3(gw, 0, d), se);    // south, right of gate
         Gate(root, new Vector3(0, 0, d));
 
-        // Central donjon, taller and broader than the corner turrets.
-        Turret(root, Vector3.Zero, s * 1.25f, _keepTowerL);
+        // The flat roof deck the garrison stands on.
+        var deck = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(2 * d, 0.2f, 2 * d) },
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f) },
+            Position = new Vector3(0, KeepRoofY - 0.1f, 0),
+        };
+        deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        root.AddChild(deck);
 
-        // A turret at each corner.
-        foreach (var c in new[] { nw, ne, sw, se })
-            Turret(root, c, s * 0.72f, _keepTowerS);
+        // Crenellated parapet around the roof edge, and a squat crenellated post at
+        // each corner rising a little above it — bartizans, not domed towers.
+        Parapet(root, nw, ne); Parapet(root, sw, se); Parapet(root, nw, sw); Parapet(root, ne, se);
+        foreach (var c in new[] { nw, ne, sw, se }) CornerPost(root, c);
+
+        // Stair up the back, and remember its foot and crown for the climb.
+        BuildKeepStair(root, b.Id, -d);
 
         return root;
     }
 
-    const float CurtainScaleY = 0.26f;                 // Wall_01 is native 5 tall -> ~1.3
-    static readonly float CurtainTop = 5f * CurtainScaleY;
-
-    // A curtain-wall segment between two points, crenellated on top. Wall_01 and the
-    // Battlements are native 5x5x0.5 with their length on local X, so scale X to the
-    // span and turn the piece to run along the edge.
-    void CurtainWall(Node3D root, Vector3 a, Vector3 c)
+    // One tall keep face — a Wall_01 (native 5x5x0.5, length on local X) scaled to
+    // span the edge and rise to the roof, turned to run along it.
+    void KeepFace(Node3D root, Vector3 a, Vector3 c)
     {
         var seg = c - a;
         float len = seg.Length();
         if (len < 0.05f) return;
-        float yaw = Mathf.Atan2(-seg.Z, seg.X);   // local +X along the edge
-        var mid = (a + c) * 0.5f;
+        var w = _keepWall.Instantiate<Node3D>();
+        w.Scale = new Vector3(len / 5f, KeepRoofY / 5f, 1.0f);
+        w.Position = (a + c) * 0.5f;
+        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
+        root.AddChild(w);
+    }
 
+    // A short crenellated corner post — a Wall_01 stub with battlements, standing a
+    // touch taller than the parapet to mark the corner.
+    void CornerPost(Node3D root, Vector3 at)
+    {
         var body = _keepWall.Instantiate<Node3D>();
-        body.Scale = new Vector3(len / 5f, CurtainScaleY, 1.0f);
-        body.Position = mid;
-        body.Rotation = new Vector3(0, yaw, 0);
+        body.Scale = new Vector3(0.11f, (KeepRoofY + 0.5f) / 5f, 0.55f);   // narrow, a bit above the roof
+        body.Position = at;
         root.AddChild(body);
+        var cap = _wallBat.Instantiate<Node3D>();
+        cap.Scale = new Vector3(0.11f, 0.28f, 0.55f);
+        cap.Position = at + new Vector3(0, KeepRoofY + 0.5f, 0);
+        root.AddChild(cap);
+    }
 
-        var parapet = _wallBat.Instantiate<Node3D>();
-        parapet.Scale = new Vector3(len / 5f, 0.3f, 0.7f);
-        parapet.Position = mid + new Vector3(0, CurtainTop, 0);
-        parapet.Rotation = new Vector3(0, yaw, 0);
-        root.AddChild(parapet);
+    // The Battlements strip laid along a roof edge, at deck height.
+    void Parapet(Node3D root, Vector3 a, Vector3 c)
+    {
+        var seg = c - a;
+        float len = seg.Length();
+        var p = _wallBat.Instantiate<Node3D>();
+        p.Scale = new Vector3(len / 5f, 0.3f, 0.7f);
+        p.Position = (a + c) * 0.5f + new Vector3(0, KeepRoofY, 0);
+        p.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
+        root.AddChild(p);
+    }
+
+    // A stone stair from the ground up to the roof on the keep's `faceZ` side,
+    // storing its foot and crown (in world space) so the garrison can climb it.
+    void BuildKeepStair(Node3D root, int keepId, float faceZ)
+    {
+        const int steps = 11;
+        const float run = 2.8f;
+        var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f) };
+        float stepH = KeepRoofY / steps, stepDepth = run / steps;
+        for (int i = 0; i < steps; i++)
+        {
+            float topY = stepH * (i + 1);
+            float z = faceZ - run + (i + 0.5f) * stepDepth;   // foot furthest out, rising to the face
+            root.AddChild(new MeshInstance3D
+            {
+                Mesh = new BoxMesh { Size = new Vector3(1.0f, topY, stepDepth + 0.02f) },
+                MaterialOverride = mat,
+                Position = new Vector3(0, topY * 0.5f, z),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
+        }
+        _keepStair[keepId] = (root.Position + new Vector3(0, 0, faceZ - run),
+                              root.Position + new Vector3(0, KeepRoofY, faceZ));
     }
 
     // The gatehouse module set into the front wall, opening outward.
     void Gate(Node3D root, Vector3 at)
     {
         var g = _keepGate.Instantiate<Node3D>();
-        g.Scale = new Vector3(0.26f, 0.32f, 0.5f);
+        g.Scale = new Vector3(0.28f, 0.5f, 0.5f);   // tall enough to fill the keep face
         g.Position = at;
         root.AddChild(g);
-    }
-
-    // One castle tower with a conical roof set on its crown.
-    void Turret(Node3D root, Vector3 offset, float scale, PackedScene towerScene)
-    {
-        var tower = towerScene.Instantiate<Node3D>();
-        tower.Scale = Vector3.One * scale;
-        tower.Position = offset;
-        root.AddChild(tower);
-
-        float topY = (ModelAabb(towerScene).End.Y) * scale;   // the crown, in world units
-        var roof = _keepRoof.Instantiate<Node3D>();
-        roof.Scale = Vector3.One * scale;
-        roof.Position = offset + new Vector3(0, topY, 0);
-        root.AddChild(roof);
     }
 
     void SyncBuildings()

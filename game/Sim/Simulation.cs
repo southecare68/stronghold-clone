@@ -277,7 +277,10 @@ namespace Sim
         // A unit stationed on a wall shoots two tiles further (height) and takes
         // half damage (cover). Only 1x1 ramparts can be manned.
         static readonly int GarrisonRangeBonus = Fixed.FromInt(2);
-        static bool CanGarrison(BuildingType t) => t == BuildingType.Wall || t == BuildingType.Gatehouse;
+        // The keep is manned like a rampart — its flat roof is a fighting platform,
+        // so troops climb up and fire from it, the last strongpoint of a base.
+        static bool CanGarrison(BuildingType t) =>
+            t == BuildingType.Wall || t == BuildingType.Gatehouse || t == BuildingType.Keep;
 
         // --- Economy tuning ---------------------------------------------------
         static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
