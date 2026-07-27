@@ -1813,6 +1813,18 @@ public partial class World3D : Node3D
 
     public override void _UnhandledInput(InputEvent e)
     {
+        // Toggle fullscreen. F11 is the universal key on Linux/Windows; on macOS
+        // that keycode is the OS "Show Desktop" gesture and never reaches us, so
+        // Cmd+Ctrl+F (the macOS-standard fullscreen chord) is offered as well.
+        if (e is InputEventKey f && f.Pressed &&
+            (f.Keycode == Key.F11 || (f.Keycode == Key.F && f.MetaPressed && f.CtrlPressed)))
+        {
+            var w = DisplayServer.WindowGetMode();
+            bool full = w == DisplayServer.WindowMode.Fullscreen || w == DisplayServer.WindowMode.ExclusiveFullscreen;
+            DisplayServer.WindowSetMode(full ? DisplayServer.WindowMode.Windowed : DisplayServer.WindowMode.Fullscreen);
+            return;
+        }
+
         // Escape leaves build mode (or, harmlessly, does nothing).
         if (e is InputEventKey k && k.Pressed && k.Keycode == Key.Escape && _buildType != null)
         {
