@@ -19,6 +19,7 @@ static class Program
         ABarracksTrainsSoldiers();
         DemolishRefundsFreesWorkerAndClearsGround();
         ATurretReplacesYourOwnWall();
+        ATurretBridgesAOneTileGapToTheWall();
         MoveOnlyBuildsNothing();
         TwoClientsAgreeOnBuildAndTrain();
         BuildingsSurviveARejoin();
@@ -355,6 +356,33 @@ static class Program
         Order(sim, Build(1, BuildingType.Turret, 20, 20));
         Check("an enemy wall cannot be replaced", sim.Buildings.Contains(foeWall) &&
               sim.Buildings.Find(b => b.Type == BuildingType.Turret && b.X == 20) == null);
+    }
+
+    // A turret dropped one tile past the end of a wall used to leave an open tile
+    // an invader could walk through, and the player had to notice and wall it. Now
+    // the turret bridges that single gap itself, so the line stays continuous — the
+    // fix for "the turret at the end of the wall creates a gap."
+    static void ATurretBridgesAOneTileGapToTheWall()
+    {
+        Console.WriteLine("\na turret one tile off the wall bridges the gap:");
+        var sim = new Simulation(TileMap.Open(48));
+        Give(sim, 1, wood: 200, stone: 200);
+        for (int x = 10; x <= 15; x++) sim.PlaceBuilding(BuildingType.Wall, 1, x, 10);  // wall ends at 15
+
+        Order(sim, Build(1, BuildingType.Turret, 17, 10));      // one empty tile (16) between
+        Check("the turret was raised", sim.Buildings.Find(b => b.Type == BuildingType.Turret && b.X == 17) != null);
+        Check("the one-tile gap was bridged with a wall",
+              sim.Buildings.Find(b => b.Type == BuildingType.Wall && b.X == 16 && b.Y == 10) != null);
+        Check("so the line is solid — the gap tile is now blocked", !sim.Map.Passable(16, 10));
+
+        // Only a SINGLE open tile is a connector — a two-tile gap is left for the
+        // player to wall deliberately, so a turret never sprouts a long free wall.
+        var s2 = new Simulation(TileMap.Open(48));
+        Give(s2, 1, wood: 200, stone: 200);
+        for (int x = 10; x <= 15; x++) s2.PlaceBuilding(BuildingType.Wall, 1, x, 10);
+        Order(s2, Build(1, BuildingType.Turret, 18, 10));       // two empty tiles (16, 17)
+        Check("a two-tile gap is not auto-bridged",
+              s2.Map.Passable(16, 10) && s2.Map.Passable(17, 10));
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

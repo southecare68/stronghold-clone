@@ -910,6 +910,7 @@ namespace Sim
                     Pay(cmd.Owner, BuildCost[(int)type]);
                     if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
+                    if (type == BuildingType.Turret) BridgeTurretToWalls(cmd.Owner, cmd.X, cmd.Y);
                     break;
 
                 case CommandType.Train:
@@ -978,6 +979,24 @@ namespace Sim
                     TearDownBuilding(razing);
                     Buildings.Remove(razing);
                     break;
+            }
+        }
+
+        // A turret belongs IN a continuous wall line. If it lands one empty tile
+        // away from a friendly rampart on a cardinal side, raise a wall in that gap
+        // so the line stays solid — the fix for "the turret at the end of the wall
+        // leaves a gap invaders can walk through." A courtesy connector: it spans a
+        // single open tile only, and is free (you already paid for the tower).
+        void BridgeTurretToWalls(int owner, int x, int y)
+        {
+            foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            {
+                int gx = x + dx, gy = y + dy;              // the tile beside the turret
+                int bx = x + 2 * dx, by = y + 2 * dy;      // one further along
+                if (!Map.Passable(gx, gy)) continue;       // the gap must be open ground
+                var beyond = Buildings.Find(b => b.Alive && b.Owner == owner && b.X == bx && b.Y == by &&
+                    (b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse || b.Type == BuildingType.Turret));
+                if (beyond != null) PlaceBuilding(BuildingType.Wall, owner, gx, gy);
             }
         }
 
