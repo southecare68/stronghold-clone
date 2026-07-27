@@ -213,11 +213,17 @@ public partial class World3D : Node3D
         // and stay in lockstep. It replaces the scaffold rather than joining it.
         bool ai = HasFlag("--ai") || FlagValue("--ai") != null;
         var aiLevel = AiLevelArg();
+        // --no-fog reveals the whole map. FogEnabled is sim state (it gates orders
+        // and is checksummed), so it must be flipped on EVERY client identically or
+        // the two would desync — hence it lives in the same per-client setup loop.
+        // In a networked match both machines must pass it, like the match seed.
+        bool noFog = HasFlag("--no-fog");
         bool demo = _mode == "LOCAL" && !ai;
         int aiOwner = MyPlayer == 2 ? 1 : 2;
         foreach (var c in Clients())
         {
             Skirmish.Setup(c.Sim, MapSize);
+            if (noFog) c.Sim.FogEnabled = false;
             if (demo) ScaffoldWall(c.Sim);
             if (ai) c.Sim.EnableAi(aiOwner, aiLevel);
         }
