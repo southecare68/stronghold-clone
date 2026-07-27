@@ -37,6 +37,7 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
+    PackedScene _keepTowerL, _keepTowerS, _keepRoof, _keepWall;   // the keep is composed from castle pieces
     readonly HashSet<(int, int)> _wallSet = new();
 
     // Netcode. The renderer no longer owns a bare Simulation; it drives a lockstep
@@ -369,6 +370,13 @@ public partial class World3D : Node3D
 
         _mTree = Load("Environments/SM_Env_Tree_Round_01");
         _mRock = Load("Environments/SM_Env_Rock_Chunk_02");
+
+        // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
+        // body to skirt them, assembled in MakeKeep into a small castle.
+        _keepTowerL = Load("Castle/SM_Bld_Castle_Wall_Tower_L_01");
+        _keepTowerS = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");
+        _keepRoof   = Load("Castle/SM_Bld_Castle_Roof_Cap_Round_02");
+        _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -1344,6 +1352,41 @@ public partial class World3D : Node3D
         return pts[^1];
     }
 
+    // A small castle keep, assembled from the modular castle kit (there is no
+    // single "castle" prefab): a tall central donjon on the 3x3 footprint's centre,
+    // a turret at each corner, every tower capped with a conical roof, and a low
+    // wall skirt tying them together. Placed once, since a keep never moves.
+    Node3D MakeKeep(Building b)
+    {
+        var root = new Node3D { Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f) };
+        float s = _bldScale[BuildingType.Keep];   // 0.5, the shared building scale
+
+        // Central donjon, taller and broader than the corner turrets.
+        Turret(root, Vector3.Zero, s * 1.25f, _keepTowerL);
+
+        // Four corner turrets, one tile out toward each corner of the 3x3.
+        const float d = 1.05f;
+        foreach (var c in new[] { new Vector3(-d, 0, -d), new Vector3(d, 0, -d), new Vector3(-d, 0, d), new Vector3(d, 0, d) })
+            Turret(root, c, s * 0.72f, _keepTowerS);
+
+        return root;
+    }
+
+    // One castle tower with a conical roof set on its crown.
+    void Turret(Node3D root, Vector3 offset, float scale, PackedScene towerScene)
+    {
+        var tower = towerScene.Instantiate<Node3D>();
+        tower.Scale = Vector3.One * scale;
+        tower.Position = offset;
+        root.AddChild(tower);
+
+        float topY = (ModelAabb(towerScene).End.Y) * scale;   // the crown, in world units
+        var roof = _keepRoof.Instantiate<Node3D>();
+        roof.Scale = Vector3.One * scale;
+        roof.Position = offset + new Vector3(0, topY, 0);
+        root.AddChild(roof);
+    }
+
     void SyncBuildings()
     {
         // Rampart tiles, so a wall knows which way its run goes.
@@ -1365,6 +1408,11 @@ public partial class World3D : Node3D
                 {
                     node.QueueFree();          // the generic instance isn't used for walls
                     node = MakeWall(b);
+                }
+                else if (b.Type == BuildingType.Keep)
+                {
+                    node.QueueFree();          // composed from castle pieces, not one model
+                    node = MakeKeep(b);
                 }
                 else
                 {
