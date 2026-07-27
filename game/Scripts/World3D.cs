@@ -37,7 +37,7 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
-    PackedScene _keepWall, _keepDoor, _keepTurret;   // the keep is composed from castle pieces
+    PackedScene _keepWall, _keepTurret;   // the keep is composed from castle pieces
 
     // The keep is a flat-topped fighting platform (Stronghold-style): troops climb a
     // stair onto its crenellated roof and fire from it. These carry the roof height,
@@ -391,7 +391,6 @@ public partial class World3D : Node3D
         // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
         // body to skirt them, assembled in MakeKeep into a small castle.
         _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
-        _keepDoor   = Load("Castle/SM_Bld_Castle_Wall_Door_01");      // wall segment with a door
         _keepTurret = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");   // round corner tower
     }
 
@@ -1434,12 +1433,10 @@ public partial class World3D : Node3D
         KeepFace(root, nw, ne);   // north (back)
         KeepFace(root, nw, sw);   // west
         KeepFace(root, ne, se);   // east
-        // South (front): solid wall either side of a door segment in the middle. The
-        // solid core sits right behind the door, so it's an entrance, not a hole.
-        const float dw = 0.65f;   // half-width of the door segment
-        KeepFace(root, sw, new Vector3(-dw, 0, d));
-        KeepFace(root, new Vector3(dw, 0, d), se);
-        DoorFace(root, new Vector3(-dw, 0, d), new Vector3(dw, 0, d));
+        // South (front): a solid wall with a stone-framed doorway and a wooden door
+        // built proud of it — the marked entrance. Solid core behind, so no opening.
+        KeepFace(root, sw, se);
+        DoorLeaf(root, new Vector3(0, 0, d));
 
         // The flat roof deck the garrison stands on.
         var deck = new MeshInstance3D
@@ -1501,18 +1498,32 @@ public partial class World3D : Node3D
         root.AddChild(p);
     }
 
-    // The door segment of the front wall — a Wall_Door piece scaled and turned like
-    // a face, so the door faces out and the solid core behind reads as the threshold.
-    void DoorFace(Node3D root, Vector3 a, Vector3 c)
+    // A stone-framed doorway with a wooden plank door, built from boxes so it lines
+    // up exactly at `at` (on the front, ground level) and stands proud of the wall.
+    void DoorLeaf(Node3D root, Vector3 at)
     {
-        var seg = c - a;
-        float len = seg.Length();
-        if (len < 0.05f) return;
-        var w = _keepDoor.Instantiate<Node3D>();
-        w.Scale = new Vector3(len / 5f, KeepRoofY / 5f, 1.0f);
-        w.Position = (a + c) * 0.5f;
-        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
-        root.AddChild(w);
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.6f, 0.58f, 0.53f), Roughness = 1f };
+        var wood  = new StandardMaterial3D { AlbedoColor = new Color(0.4f, 0.26f, 0.14f), Roughness = 1f };
+        var iron  = new StandardMaterial3D { AlbedoColor = new Color(0.16f, 0.15f, 0.14f), Roughness = 1f };
+
+        const float w = 0.82f, h = 1.6f, z = 0.06f;   // door width, height, proud of the wall
+
+        MeshInstance3D Box(Material m, Vector3 size, Vector3 pos)
+        {
+            var mi = new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = m, Position = at + pos };
+            mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+            return mi;
+        }
+
+        // Frame: two jambs and a lintel, standing out from the wall.
+        root.AddChild(Box(stone, new Vector3(0.16f, h + 0.14f, 0.2f), new Vector3(-w / 2 - 0.09f, (h + 0.14f) / 2, z)));
+        root.AddChild(Box(stone, new Vector3(0.16f, h + 0.14f, 0.2f), new Vector3(w / 2 + 0.09f, (h + 0.14f) / 2, z)));
+        root.AddChild(Box(stone, new Vector3(w + 0.34f, 0.16f, 0.2f), new Vector3(0, h + 0.07f, z)));
+
+        // The wooden door, with two iron braces across the planks.
+        root.AddChild(Box(wood, new Vector3(w, h, 0.1f), new Vector3(0, h / 2, z + 0.03f)));
+        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.13f), new Vector3(0, h * 0.28f, z + 0.05f)));
+        root.AddChild(Box(iron, new Vector3(w + 0.03f, 0.09f, 0.13f), new Vector3(0, h * 0.72f, z + 0.05f)));
     }
 
     void SyncBuildings()
