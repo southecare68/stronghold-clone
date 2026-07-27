@@ -17,6 +17,7 @@ static class Program
         AFootprintBlocksPathing();
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
+        DemolishRefundsFreesWorkerAndClearsGround();
         MoveOnlyBuildsNothing();
         TwoClientsAgreeOnBuildAndTrain();
         BuildingsSurviveARejoin();
@@ -277,7 +278,47 @@ static class Program
 
     // ---- helpers -----------------------------------------------------------
 
+    // Demolishing gives back half the cost, returns the worker to the labour pool,
+    // clears the ground — and never applies to the keep.
+    static void DemolishRefundsFreesWorkerAndClearsGround()
+    {
+        Console.WriteLine("\ndemolishing refunds, frees the worker, and clears the ground:");
+        var sim = new Simulation(TileMap.Open(48));
+        Give(sim, 1, wood: 100, stone: 100);
+        var keep = sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);   // sets the drop-off (free, setup path)
+        sim.SpawnNode(ResourceType.Wood, 12, 12, 100);
+        sim.SpawnPeasant(1);                                        // idle, at the keep
+
+        Order(sim, Build(1, BuildingType.WoodcutterHut, 10, 10));   // charges 15 wood
+        var hut = sim.Buildings.Find(b => b.Type == BuildingType.WoodcutterHut);
+        Check("the hut was built", hut != null);
+        for (int i = 0; i < 5; i++) sim.Tick(new List<Command>());  // let it hire the idle peasant
+        Check("the hut took on a worker", hut.WorkerId != 0 && sim.IdlePeasantCount(1) == 0);
+
+        int woodBefore = sim.Stockpile(1, ResourceType.Wood);
+        Order(sim, Demolish(1, hut.Id));
+        Check("the hut is gone", sim.Buildings.Find(b => b.Type == BuildingType.WoodcutterHut) == null);
+        Check("its footprint is walkable again", sim.Map.Passable(10, 10));
+        Check($"half the 15-wood cost is refunded (+7, got {sim.Stockpile(1, ResourceType.Wood) - woodBefore})",
+              sim.Stockpile(1, ResourceType.Wood) == woodBefore + 7);
+        Check("the worker rejoined the idle pool", sim.IdlePeasantCount(1) == 1);
+
+        // The keep is not demolishable — that would be a defeat, not a refund.
+        int woodNow = sim.Stockpile(1, ResourceType.Wood);
+        Order(sim, Demolish(1, keep.Id));
+        Check("the keep cannot be demolished", sim.Buildings.Contains(keep) &&
+              sim.Stockpile(1, ResourceType.Wood) == woodNow);
+
+        // You cannot demolish someone else's building.
+        var enemyHut = sim.PlaceBuilding(BuildingType.Barracks, 2, 30, 30);
+        Order(sim, Demolish(1, enemyHut.Id));
+        Check("an enemy's building is not yours to raze", sim.Buildings.Contains(enemyHut));
+    }
+
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
+
+    static Command Demolish(int owner, int buildingId) => new Command
+    { Owner = owner, Type = CommandType.Demolish, TargetId = buildingId };
 
     static void Give(Simulation sim, int owner, int wood = 0, int stone = 0, int food = 0)
     {

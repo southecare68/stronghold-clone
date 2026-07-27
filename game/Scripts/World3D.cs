@@ -912,8 +912,11 @@ public partial class World3D : Node3D
         _stat[5].Text = $"Pop {_sim.PeasantCount(me)}/{_sim.PopulationCap(me)}" + (idle > 0 ? $" ({idle} idle)" : "");
         _stat[6].Text = $"Army {_sim.ArmySize(me)}";
 
-        _selInfo.Text = _selected.Count == 0 ? "No selection"
-            : _selected.Count == 1 ? DescribeUnit(_selected) : $"{_selected.Count} units selected";
+        _selInfo.Text =
+              _selected.Count == 1 ? DescribeUnit(_selected)
+            : _selected.Count > 1 ? $"{_selected.Count} units selected"
+            : _selectedBuilding != null && _selectedBuilding.Alive ? DescribeBuilding(_selectedBuilding)
+            : "No selection";
 
         string state; Color tint;
         if (_me.Desync != null)     { state = $"DESYNC @ {_me.Desync.Tick}"; tint = new Color(0.95f, 0.4f, 0.35f); }
@@ -921,6 +924,21 @@ public partial class World3D : Node3D
         else                        { state = "in sync";                     tint = new Color(0.5f, 0.8f, 0.55f); }
         _netInfo.Text = $"{_mode}  ·  tick {_sim.TickNumber}  ·  {state}";
         _netInfo.AddThemeColorOverride("font_color", tint);
+    }
+
+    // A one-line description of a selected building. The keep cannot be razed; any
+    // other shows what the [Del] key would reclaim, so the demolish refund is
+    // discoverable rather than hidden.
+    string DescribeBuilding(Building b)
+    {
+        string head = $"{NameOf(b.Type)}  ·  {b.Hp} hp";
+        if (b.Type == BuildingType.Keep) return head;
+        string[] tag = { "w", "s", "f", "g" };
+        var r = _sim.RefundOf(b.Type);
+        var parts = new List<string>();
+        for (int i = 0; i < r.Length; i++) if (r[i] > 0) parts.Add($"{r[i]}{tag[i]}");
+        string refund = parts.Count == 0 ? "" : "  +" + string.Join(" ", parts);
+        return $"{head}  ·  [Del] demolish{refund}";
     }
 
     // A one-line description of a single selected unit.
@@ -1874,6 +1892,20 @@ public partial class World3D : Node3D
         {
             bool on = !_sim.FogEnabled;
             foreach (var c in Clients()) c.Sim.FogEnabled = on;
+            return;
+        }
+
+        // Delete / Backspace demolishes the selected building — reclaims half its
+        // cost, hands its worker back to the labour pool, and clears the ground. Not
+        // the keep (losing that is a defeat, not a refund), and not while placing.
+        // Goes through the normal lockstep command path, so it is fair and networked.
+        if (e is InputEventKey del && del.Pressed && _buildType == null &&
+            (del.Keycode == Key.Delete || del.Keycode == Key.Backspace) &&
+            _selectedBuilding != null && _selectedBuilding.Alive &&
+            _selectedBuilding.Type != BuildingType.Keep)
+        {
+            _me.Issue(new Command { Type = CommandType.Demolish, TargetId = _selectedBuilding.Id });
+            _selectedBuilding = null;
             return;
         }
 

@@ -17,7 +17,7 @@ namespace Sim
 {
     public enum CommandType
     {
-        Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7,
+        Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10 }
@@ -771,6 +771,20 @@ namespace Sim
 
         public IReadOnlyList<int> CostOf(BuildingType type) => BuildCost[(int)type];
 
+        // Demolishing a building reclaims this fraction of what it cost — half,
+        // rounded down per resource. Integer math so it is identical on every
+        // machine (no float ever touches the sim).
+        public const int RefundNum = 1, RefundDen = 2;
+
+        // What tearing a type down would refund, for a UI hint. Read-only.
+        public int[] RefundOf(BuildingType type)
+        {
+            var cost = BuildCost[(int)type];
+            var r = new int[cost.Length];
+            for (int i = 0; i < cost.Length; i++) r[i] = cost[i] * RefundNum / RefundDen;
+            return r;
+        }
+
         // Footprint of a type, so a renderer can size a placement ghost without
         // duplicating the tables. Read-only — touches no state.
         public (int W, int H) FootprintOf(BuildingType type) => (FootW[(int)type], FootH[(int)type]);
@@ -920,6 +934,22 @@ namespace Sim
                         var spot = NearestFreeTile(rampart.X, rampart.Y);
                         if (spot.HasValue) Order(u, spot.Value.X, spot.Value.Y);
                     }
+                    break;
+
+                case CommandType.Demolish:
+                    // TargetId carries the building id. You may only tear down your
+                    // own, and never your keep — losing that is a defeat, not a
+                    // refund. Reclaims RefundNum/RefundDen of the build cost, frees
+                    // the worker back to the idle pool, and clears the footprint (the
+                    // shared teardown), then drops the building from the list.
+                    var razing = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (razing == null || razing.Owner != cmd.Owner ||
+                        !razing.Alive || razing.Type == BuildingType.Keep) break;
+                    var back = BuildCost[(int)razing.Type];
+                    var stock = StockOf(cmd.Owner);
+                    for (int i = 0; i < back.Length; i++) stock[i] += back[i] * RefundNum / RefundDen;
+                    TearDownBuilding(razing);
+                    Buildings.Remove(razing);
                     break;
             }
         }
@@ -1724,23 +1754,32 @@ namespace Sim
             {
                 var b = Buildings[i];
                 if (b.Alive) continue;
-                BlockFootprint(b, false);
-                if (b.Type == BuildingType.Keep) _dropOff.Remove(b.Owner);
-                // A razed work building lets its peasant go — it stops working and
-                // rejoins the idle pool (still a peasant, ready to be re-hired),
-                // rather than serving a building that is gone.
-                if (NeedsWorker(b.Type) && b.WorkerId != 0)
-                {
-                    var w = Units.Find(u => u.Id == b.WorkerId);
-                    if (w != null) EndJob(w);
-                }
-                // A fallen rampart drops its garrison to the rubble (now walkable,
-                // so no relocation is needed) — they become field units again.
-                if (CanGarrison(b.Type))
-                    foreach (var u in Units)
-                        if (u.GarrisonId == b.Id) u.GarrisonId = 0;
+                TearDownBuilding(b);
                 Buildings.RemoveAt(i);
             }
+        }
+
+        // Unwind a building's ties to the rest of the world, short of removing it
+        // from the list: free its footprint, drop a keep's drop-off, release its
+        // worker to the idle pool, and turn out any garrison. Shared by combat
+        // destruction and a player's own demolition.
+        void TearDownBuilding(Building b)
+        {
+            BlockFootprint(b, false);
+            if (b.Type == BuildingType.Keep) _dropOff.Remove(b.Owner);
+            // A razed work building lets its peasant go — it stops working and
+            // rejoins the idle pool (still a peasant, ready to be re-hired), rather
+            // than serving a building that is gone.
+            if (NeedsWorker(b.Type) && b.WorkerId != 0)
+            {
+                var w = Units.Find(u => u.Id == b.WorkerId);
+                if (w != null) EndJob(w);
+            }
+            // A fallen rampart drops its garrison to the rubble (now walkable, so no
+            // relocation is needed) — they become field units again.
+            if (CanGarrison(b.Type))
+                foreach (var u in Units)
+                    if (u.GarrisonId == b.Id) u.GarrisonId = 0;
         }
 
         // Nearest living enemy within aggro range, ties broken by id so every
