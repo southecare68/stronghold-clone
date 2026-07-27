@@ -1700,23 +1700,19 @@ public partial class World3D : Node3D
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // A SOLID stone core fills the footprint, so the keep can never be seen
-        // through or into — no openings on any side. The textured Wall_01 faces are
-        // the outer skin over it, and a single closed door marks the front entrance.
+        // A SOLID stone core fills the footprint out to the walls, so the keep can
+        // never be seen through, and the textured Wall_01 faces are a THIN skin flush
+        // on its sides — no thick curtain slab standing proud of the body.
         var core = new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(2 * d - 0.15f, KeepRoofY, 2 * d - 0.15f) },
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.44f, 0.42f, 0.39f) },
+            Mesh = new BoxMesh { Size = new Vector3(2 * d - 0.02f, KeepRoofY, 2 * d - 0.02f) },
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.47f, 0.45f, 0.42f) },
             Position = new Vector3(0, KeepRoofY * 0.5f, 0),
         };
         root.AddChild(core);
 
-        KeepFace(root, nw, ne, KeepRoofY);   // north (back)
-        KeepFace(root, nw, sw, KeepRoofY);   // west
-        KeepFace(root, ne, se, KeepRoofY);   // east
-        // South (front): a solid wall with a stone-framed doorway and a wooden door
-        // built proud of it — the marked entrance. Solid core behind, so no opening.
-        KeepFace(root, sw, se, KeepRoofY);
+        // The core's own flat faces are the walls — no separate curtain panels laid
+        // over them (those read as slabs standing proud). A door on the front face.
         DoorLeaf(root, new Vector3(0, 0, d));
 
         // The flat roof deck the garrison stands on.
@@ -1729,9 +1725,11 @@ public partial class World3D : Node3D
         deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         root.AddChild(deck);
 
-        // Crenellated parapet around the roof edge.
-        Parapet(root, nw, ne, KeepRoofY); Parapet(root, sw, se, KeepRoofY);
-        Parapet(root, nw, sw, KeepRoofY); Parapet(root, ne, se, KeepRoofY);
+        // A clean grey crenellated parapet around the roof edge, flush with the
+        // body — grey merlons on a low lip, matching the stone rather than the pack's
+        // tan battlement strip standing proud.
+        GreyParapet(root, nw, ne); GreyParapet(root, sw, se);
+        GreyParapet(root, nw, sw); GreyParapet(root, ne, se);
 
         // A ROUND tower at each corner, each crowned with a green conical spire and
         // a red flag, around a central hall under a green peaked roof — the fairy-
@@ -1804,19 +1802,6 @@ public partial class World3D : Node3D
         });
     }
 
-    // One tall keep face — a Wall_01 (native 5x5x0.5, length on local X) scaled to
-    // span the edge and rise to `height`, turned to run along it.
-    void KeepFace(Node3D root, Vector3 a, Vector3 c, float height)
-    {
-        var seg = c - a;
-        float len = seg.Length();
-        if (len < 0.05f) return;
-        var w = _keepWall.Instantiate<Node3D>();
-        w.Scale = new Vector3(len / 5f, height / 5f, 1.0f);
-        w.Position = (a + c) * 0.5f;
-        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
-        root.AddChild(w);
-    }
 
     // A shadow-free box helper for keep detail (hall, flags, cores).
     static MeshInstance3D KeepBox(Material m, Vector3 size, Vector3 pos)
@@ -1826,16 +1811,40 @@ public partial class World3D : Node3D
         return mi;
     }
 
-    // The Battlements strip laid along an edge, at height `atY`.
-    void Parapet(Node3D root, Vector3 a, Vector3 c, float atY)
+    // A grey crenellated parapet along one deck edge: a low lip with a row of merlons
+    // on top, inset a touch so it sits flush with the body, not proud of it.
+    void GreyParapet(Node3D root, Vector3 a, Vector3 c)
     {
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.52f, 0.5f, 0.46f), Roughness = 1f };
         var seg = c - a;
         float len = seg.Length();
-        var p = _wallBat.Instantiate<Node3D>();
-        p.Scale = new Vector3(len / 5f, 0.3f, 0.7f);
-        p.Position = (a + c) * 0.5f + new Vector3(0, atY, 0);
-        p.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
-        root.AddChild(p);
+        if (len < 0.05f) return;
+        var dir = seg / len;
+        var mid = (a + c) * 0.5f - mid_inset(a, c);      // flush with the body face
+        float yaw = Mathf.Atan2(-seg.Z, seg.X);
+
+        // Low continuous lip.
+        var lip = KeepBox(stone, new Vector3(len, 0.16f, 0.1f), mid + new Vector3(0, KeepRoofY + 0.08f, 0));
+        lip.Rotation = new Vector3(0, yaw, 0);
+        root.AddChild(lip);
+
+        // Merlon teeth: tooth width == gap.
+        int teeth = Mathf.Max(2, Mathf.RoundToInt(len / 0.55f));
+        float tw = len / (teeth * 2 - 1);
+        for (int i = 0; i < teeth; i++)
+        {
+            var t = KeepBox(stone, new Vector3(tw, 0.24f, 0.1f),
+                            mid + dir * (-len / 2 + tw / 2 + i * 2 * tw) + new Vector3(0, KeepRoofY + 0.28f, 0));
+            t.Rotation = new Vector3(0, yaw, 0);
+            root.AddChild(t);
+        }
+    }
+
+    // Half-depth pull toward the keep centre, so an edge feature sits flush.
+    static Vector3 mid_inset(Vector3 a, Vector3 c)
+    {
+        var mid = (a + c) * 0.5f;
+        return mid.Normalized() * 0.06f;
     }
 
     // The front entrance: a wooden door sitting flush on the front wall's face — lit
@@ -1846,7 +1855,7 @@ public partial class World3D : Node3D
     {
         var wood = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.30f, 0.16f), Roughness = 1f };
         var iron = new StandardMaterial3D { AlbedoColor = new Color(0.18f, 0.17f, 0.16f), Roughness = 1f };
-        const float w = 0.86f, h = 1.7f, face = 0.24f;   // z from wall centre-line out to its face
+        const float w = 0.86f, h = 1.7f, face = 0.03f;   // the (now thin) front wall's outer face is the edge
 
         MeshInstance3D Box(Material m, Vector3 size, Vector3 pos)
         {
