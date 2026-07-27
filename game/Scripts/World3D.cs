@@ -184,8 +184,17 @@ public partial class World3D : Node3D
     int _myMinX, _myMinY, _myMaxX, _myMaxY;
     const int TerrMargin = 4;          // tiles of breathing room around the claimed area
     const int TerrResourceReach = 18;  // a camp claims resource nodes this near its buildings (= the sim's work range)
-    static readonly Color TerrMine = new(0.35f, 0.75f, 1f);       // matches the friendly ring
-    static readonly Color TerrEnemy = new(1f, 0.45f, 0.35f);      // matches the enemy ring
+    // One fixed colour per camp, by owner id — a camp keeps its colour whoever is
+    // looking (blue is player 1, so it also matches your own selection ring in the
+    // usual single-player game). More entries are ready for more than two players.
+    static readonly Color[] CampColors =
+    {
+        new(0.35f, 0.75f, 1f),    // player 1 — blue
+        new(1f, 0.45f, 0.35f),    // player 2 — red
+        new(0.5f, 0.85f, 0.45f),  // player 3 — green
+        new(0.95f, 0.8f, 0.3f),   // player 4 — gold
+    };
+    static Color TerrColor(int owner) => CampColors[Math.Clamp(owner - 1, 0, CampColors.Length - 1)];
 
     // Combat feedback: a floating health bar over a hurt unit, a spark where a
     // blow lands, a tracer for a ranged shot, a puff when a unit dies. All of it
@@ -693,7 +702,7 @@ public partial class World3D : Node3D
             // Tile (x,y) is centred at world (x,y), so the rectangle's outer edge is
             // half a tile beyond the extreme tile centres.
             float x0 = minX - 0.5f, x1 = maxX + 0.5f, z0 = minY - 0.5f, z1 = maxY + 0.5f;
-            Color col = owner == MyPlayer ? TerrMine : TerrEnemy;
+            Color col = TerrColor(owner);
             AddBorderLine(new Vector3(x0, yH, z0), new Vector3(x1, yH, z0), col);   // top
             AddBorderLine(new Vector3(x0, yH, z1), new Vector3(x1, yH, z1), col);   // bottom
             AddBorderLine(new Vector3(x0, yH, z0), new Vector3(x0, yH, z1), col);   // left
