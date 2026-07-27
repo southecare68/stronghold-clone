@@ -116,6 +116,10 @@ public partial class World3D : Node3D
     readonly Dictionary<int, Vector3> _firePit = new();     // owner -> pit world position
     readonly Dictionary<int, Vector3> _loiterPos = new();   // unit id -> current drift position
     const float LoiterSpeed = 1.9f;                          // units per second, walking to/from the fire
+    // Fire pits flicker each frame — render-only, so it may use wall-clock time.
+    sealed class FireFx { public MeshInstance3D[] Flames; public OmniLight3D Light; public float Phase; }
+    readonly List<FireFx> _fires = new();
+    float _fireTime;
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
@@ -1415,6 +1419,7 @@ public partial class World3D : Node3D
         UpdateRings();
         UpdateHud();
         UpdateFx(delta);
+        UpdateFires(delta);
         UpdateMusic(delta);
         UpdateGhost();
         UpdateTrainPanel();
@@ -1806,20 +1811,49 @@ public partial class World3D : Node3D
         var lA = KeepBox(log, new Vector3(0.55f, 0.1f, 0.14f), at + new Vector3(0, 0.08f, 0));
         var lB = KeepBox(log, new Vector3(0.14f, 0.1f, 0.55f), at + new Vector3(0, 0.11f, 0));
         root.AddChild(lA); root.AddChild(lB);
+        var flames = new MeshInstance3D[3];
         for (int i = 0; i < 3; i++)
-            root.AddChild(new MeshInstance3D
+        {
+            flames[i] = new MeshInstance3D
             {
                 Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 0.12f, Height = 0.36f + 0.12f * (i % 2), RadialSegments = 8 },
                 MaterialOverride = flame,
                 Position = at + new Vector3((i - 1) * 0.12f, 0.26f, 0),
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            });
-        root.AddChild(new OmniLight3D
+            };
+            root.AddChild(flames[i]);
+        }
+        var light = new OmniLight3D
         {
             Position = at + new Vector3(0, 0.5f, 0),
             LightColor = new Color(1f, 0.62f, 0.28f),
             OmniRange = 3.6f, LightEnergy = 1.5f,
-        });
+        };
+        root.AddChild(light);
+        _fires.Add(new FireFx { Flames = flames, Light = light, Phase = _fires.Count * 1.7f });
+    }
+
+    // Flicker every live fire pit — flame height and the warm glow, from a couple of
+    // out-of-step waves so it reads as fire, not a pulse. Prunes pits whose keep fell.
+    void UpdateFires(double delta)
+    {
+        _fireTime += (float)delta;
+        for (int i = _fires.Count - 1; i >= 0; i--)
+        {
+            var f = _fires[i];
+            if (!GodotObject.IsInstanceValid(f.Light)) { _fires.RemoveAt(i); continue; }
+            float t = _fireTime + f.Phase;
+            float lf = 0.6f * Mathf.Sin(t * 11f) + 0.4f * Mathf.Sin(t * 19f + 1.3f);   // ~[-1,1]
+            f.Light.LightEnergy = 1.4f + 0.5f * lf;
+            for (int j = 0; j < f.Flames.Length; j++)
+            {
+                var fl = f.Flames[j];
+                if (!GodotObject.IsInstanceValid(fl)) continue;
+                float ph = t * 13f + j * 2.1f;
+                float h = 1f + 0.24f * Mathf.Sin(ph) + 0.1f * Mathf.Sin(ph * 1.7f + 0.5f);
+                fl.Scale = new Vector3(1f - 0.06f * (h - 1f), h, 1f - 0.06f * (h - 1f));   // taller = a touch thinner
+            }
+        }
     }
 
     // A stable loitering slot around the fire pit, spread by unit id so the idle
