@@ -399,14 +399,24 @@ namespace Sim
         public const uint DefaultSeed = 0xC0FFEE11u;
         readonly Rng _rng;
 
-        // Owners played by the computer. Sorted so multi-AI turn order is identical
-        // on every machine; empty by default, so a match without an AI (every test,
-        // and any human-only game) runs exactly as before. The AI itself lives in
-        // SimAi.cs. Not hashed and not snapshotted — it is a match setting, not
-        // evolving state, and each machine is told who is a bot at setup.
-        readonly SortedSet<int> _aiOwners = new();
-        public void EnableAi(int owner) => _aiOwners.Add(owner);
-        public bool IsAi(int owner) => _aiOwners.Contains(owner);
+        // Owners played by the computer, each with a difficulty. Sorted so multi-AI
+        // turn order is identical on every machine; empty by default, so a match
+        // without an AI (every test, and any human-only game) runs exactly as
+        // before. The AI itself lives in SimAi.cs. Not hashed and not snapshotted —
+        // it is a match setting, not evolving state, and each machine is told who is
+        // a bot, and how tough, at setup.
+        readonly SortedDictionary<int, AiLevel> _aiOwners = new();
+        public void EnableAi(int owner, AiLevel level = AiLevel.Normal)
+        {
+            _aiOwners[owner] = level;
+            // Apply the difficulty handicap once, at setup. Deterministic: every
+            // machine calls this at the same point with the same level, so the bonus
+            // hands and timber are identical everywhere and travel in a snapshot.
+            var t = TuningFor(level);
+            for (int i = 0; i < t.BonusPeasants; i++) SpawnPeasant(owner);
+            if (t.BonusWood > 0) AddResource(owner, ResourceType.Wood, t.BonusWood);
+        }
+        public bool IsAi(int owner) => _aiOwners.ContainsKey(owner);
 
         // Scratch buffers for pathfinding, reused across calls. Working memory,
         // not game state: nothing here survives a call, so none of it is hashed.

@@ -211,14 +211,15 @@ public partial class World3D : Node3D
         // the sim, so it is enabled on EVERY client's Simulation identically and
         // needs no network traffic — the two loopback sims each run the same bot
         // and stay in lockstep. It replaces the scaffold rather than joining it.
-        bool ai = HasFlag("--ai");
+        bool ai = HasFlag("--ai") || FlagValue("--ai") != null;
+        var aiLevel = AiLevelArg();
         bool demo = _mode == "LOCAL" && !ai;
         int aiOwner = MyPlayer == 2 ? 1 : 2;
         foreach (var c in Clients())
         {
             Skirmish.Setup(c.Sim, MapSize);
             if (demo) ScaffoldWall(c.Sim);
-            if (ai) c.Sim.EnableAi(aiOwner);
+            if (ai) c.Sim.EnableAi(aiOwner, aiLevel);
         }
 
         LoadModels();
@@ -255,7 +256,8 @@ public partial class World3D : Node3D
 
         SnapshotPositions();
         SeedObservation();   // baseline so the starting world fires no sounds
-        GD.Print("[3d] world ready — mode ", _mode, ", player ", MyPlayer, ", ",
+        GD.Print("[3d] world ready — mode ", _mode, ", player ", MyPlayer,
+                 ai ? ", vs " + aiLevel + " AI" : "", ", ",
                  _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
     }
 
@@ -351,6 +353,23 @@ public partial class World3D : Node3D
         foreach (var a in OS.GetCmdlineArgs()) if (a == flag) return true;
         return false;
     }
+
+    // The value of a `--flag=value` argument, or null if it was not passed.
+    static string FlagValue(string flag)
+    {
+        string pre = flag + "=";
+        foreach (var a in OS.GetCmdlineUserArgs()) if (a.StartsWith(pre)) return a.Substring(pre.Length);
+        foreach (var a in OS.GetCmdlineArgs()) if (a.StartsWith(pre)) return a.Substring(pre.Length);
+        return null;
+    }
+
+    // Difficulty from `--ai`, `--ai=easy|normal|hard`. Unknown values fall to Normal.
+    static Sim.AiLevel AiLevelArg() => (FlagValue("--ai") ?? "").ToLower() switch
+    {
+        "easy"  => Sim.AiLevel.Easy,
+        "hard"  => Sim.AiLevel.Hard,
+        _       => Sim.AiLevel.Normal,
+    };
 
     // The union AABB of a model's meshes in its own space — used to size and place
     // the wall pieces and to know how high the ramparts stand.

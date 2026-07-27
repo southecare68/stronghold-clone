@@ -19,36 +19,66 @@ using System.Collections.Generic;
 
 namespace Sim
 {
+    // How tough the computer plays. Easy thinks slowly, keeps a small army, and
+    // commits it late; Hard thinks fast, runs a second food chain to grow a much
+    // larger population, and fields a big army. Normal sits between.
+    public enum AiLevel { Easy = 0, Normal = 1, Hard = 2 }
+
     public sealed partial class Simulation
     {
-        const int AiInterval = 12;      // ticks between decisions
-        const int AiArmyTarget = 16;    // stop training once the army reaches this
-        const int AiAttackAt = 5;       // and march out once it reaches this
+        // The dials difficulty turns. Interval is ticks between decisions (lower =
+        // acts faster at everything); FoodChains is how many farm->mill->bakery sets
+        // it runs (more food -> more population -> more soldiers); Woodcutters and
+        // MaxHouses size the rest of the economy; ArmyCap caps recruiting; AttackAt
+        // is the army size that triggers the march. BonusPeasants/BonusWood are a
+        // start-of-match handicap — a tougher bot begins with more hands and timber
+        // so it can staff a second food chain at once and reach a genuinely bigger
+        // economy, the standard way an RTS makes an AI harder without cheating in
+        // play (it still obeys fog, cost, and placement like anyone else).
+        readonly struct AiTuning
+        {
+            public readonly int Interval, FoodChains, Woodcutters, MaxHouses, ArmyCap, AttackAt, BonusPeasants, BonusWood;
+            public AiTuning(int interval, int foodChains, int woodcutters, int maxHouses, int armyCap, int attackAt, int bonusPeasants, int bonusWood)
+            {
+                Interval = interval; FoodChains = foodChains; Woodcutters = woodcutters; MaxHouses = maxHouses;
+                ArmyCap = armyCap; AttackAt = attackAt; BonusPeasants = bonusPeasants; BonusWood = bonusWood;
+            }
+        }
+
+        static AiTuning TuningFor(AiLevel level) => level switch
+        {
+            //                          interval chains wood houses armyCap attackAt +peas +wood
+            AiLevel.Easy   => new AiTuning(30,     1,    1,    1,      4,      4,      0,     0),
+            AiLevel.Hard   => new AiTuning(8,      2,    2,    6,     30,      6,     10,   400),
+            _  /* Normal*/ => new AiTuning(12,     1,    2,    3,     12,      5,      4,   150),
+        };
+
         const int AiWorkerReserve = 1;  // idle peasants to keep spare (buildings hire the rest)
 
         void StepAi()
         {
-            if (TickNumber % AiInterval != 0) return;
-            foreach (int owner in _aiOwners) StepAiOwner(owner);   // SortedSet: same order everywhere
+            foreach (var kv in _aiOwners) StepAiOwner(kv.Key, kv.Value);   // SortedDictionary: same order everywhere
         }
 
-        void StepAiOwner(int owner)
+        void StepAiOwner(int owner, AiLevel level)
         {
+            var t = TuningFor(level);
+            if (TickNumber % t.Interval != 0) return;   // the cadence, per difficulty
+
             var keep = AiKeep(owner);
             if (keep == null) return;    // no keep — the bot has been beaten, nothing to do
 
             // One considered step per cadence — helpers return true once they have
             // spent on a build, so the bot never empties its purse at once.
             //
-            // 1) The self-running food economy comes up FIRST and in strict order:
-            //    woodcutter, then farm -> mill -> bakery. The mill and bakery cost
-            //    grain and flour the farm has not produced yet, so the bot must WAIT
-            //    for them — the `return` after each unbuilt link idles its spare
+            // 1) The FIRST food chain comes up before anything else and in strict
+            //    order: woodcutter, then farm -> mill -> bakery. The mill and bakery
+            //    cost grain and flour the farm has not produced yet, so the bot must
+            //    WAIT for them — the `return` after each unbuilt link idles its spare
             //    peasants rather than spending them on expansion or an army. That
-            //    reservation is the whole fix: over-building past the four starting
-            //    peasants (the earlier bug) left the bakery unmanned, and a broken
-            //    chain bakes no bread, breeds no population, and the bot froze at
-            //    four peasants forever.
+            //    reservation is the whole point: over-building past the four starting
+            //    peasants left the bakery unmanned, and a broken chain bakes no
+            //    bread, breeds no population, and the bot froze at four peasants.
             if (AiCount(owner, BuildingType.WoodcutterHut) < 1 &&
                 AiBuildHarvester(owner, keep, BuildingType.WoodcutterHut, ResourceType.Wood)) return;
             if (AiCount(owner, BuildingType.Farm) < 1 && AiBuildWork(owner, keep, BuildingType.Farm)) return;
@@ -56,21 +86,29 @@ namespace Sim
             if (AiCount(owner, BuildingType.Bakery) < 1) { AiBuildWork(owner, keep, BuildingType.Bakery); return; }
 
             // 2) With bread flowing, a barracks and housing — neither needs a worker,
-            //    so they never starve the economy. House early to give food the room
-            //    to breed the peasants that become both workers and soldiers.
+            //    so they never starve the economy. House up to the level's cap to
+            //    give food the room to breed the peasants that become both workers
+            //    and soldiers; a higher cap is most of why Hard fields a bigger army.
             if (AiCount(owner, BuildingType.Barracks) < 1 && AiBuildByKeep(owner, keep, BuildingType.Barracks)) return;
-            if (PeasantCount(owner) >= PopulationCap(owner) - 2 &&
+            if (AiCount(owner, BuildingType.House) < t.MaxHouses &&
+                PeasantCount(owner) >= PopulationCap(owner) - 2 &&
                 AiBuildByKeep(owner, keep, BuildingType.House)) return;
 
-            // 3) Expansion, once the grown population can spare the hands for it.
-            if (AiCount(owner, BuildingType.WoodcutterHut) < 2 &&
+            // 3) Expansion, once the grown population can spare the hands for it:
+            //    extra food chains (each a farm -> mill -> bakery set, gated so a
+            //    link is only raised when there is a peasant to run it), more
+            //    woodcutters, and a quarry.
+            if (AiCount(owner, BuildingType.Farm) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Farm)) return;
+            if (AiCount(owner, BuildingType.Mill) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Mill)) return;
+            if (AiCount(owner, BuildingType.Bakery) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Bakery)) return;
+            if (AiCount(owner, BuildingType.WoodcutterHut) < t.Woodcutters &&
                 AiBuildHarvester(owner, keep, BuildingType.WoodcutterHut, ResourceType.Wood)) return;
             if (AiCount(owner, BuildingType.Quarry) < 1 &&
                 AiBuildHarvester(owner, keep, BuildingType.Quarry, ResourceType.Stone)) return;
 
-            // 4) Arm the surplus peasants, then send the army at the enemy.
-            if (AiTryTrain(owner)) return;
-            AiCommandArmy(owner);
+            // 4) Arm the surplus peasants up to the cap, then send the army out.
+            if (AiTryTrain(owner, t.ArmyCap)) return;
+            AiCommandArmy(owner, t.AttackAt);
         }
 
         Building AiKeep(int owner)
@@ -175,9 +213,9 @@ namespace Sim
             }
         }
 
-        bool AiTryTrain(int owner)
+        bool AiTryTrain(int owner, int armyCap)
         {
-            if (ArmySize(owner) >= AiArmyTarget) return false;
+            if (ArmySize(owner) >= armyCap) return false;
             if (IdlePeasantCount(owner) < AiWorkerReserve + 1) return false;   // keep the workforce
             if (!CanAfford(owner, new[] { TrainCostWood, 0, 0 })) return false;
             Building barracks = null;
@@ -192,9 +230,9 @@ namespace Sim
         // enemy keep once we have scouted it, else advance on it to reveal the way.
         // Only units with no current order are (re)directed, so a soldier already
         // locked in a fight is left to it — combat chains its own next target.
-        void AiCommandArmy(int owner)
+        void AiCommandArmy(int owner, int attackAt)
         {
-            if (ArmySize(owner) < AiAttackAt) return;   // stay home massing until strong
+            if (ArmySize(owner) < attackAt) return;   // stay home massing until strong
 
             var idle = new List<int>();
             foreach (var u in Units)   // id order

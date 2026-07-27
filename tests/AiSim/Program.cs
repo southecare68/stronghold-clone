@@ -1,11 +1,15 @@
-// AiSim — run a bot-vs-bot skirmish and check two things:
+// AiSim — run bot skirmishes and check three things:
 //   1. Determinism: two independent sims stepped identically stay bit-for-bit
-//      equal at every tick, and a fresh re-run reproduces the same final state.
-//      The AI runs inside the tick and touches shared state, so this is the guard
-//      that it cannot silently desync a networked match.
+//      equal at every tick, at every difficulty, and a fresh re-run reproduces the
+//      same final state. The AI runs inside the tick and touches shared state, so
+//      this is the guard that it cannot silently desync a networked match.
 //   2. Liveness: the bot actually plays — it raises buildings, arms an army, and
 //      marches it into a fight. A bot that does nothing would "pass" a pure
 //      determinism check, so we assert it is alive too.
+//   3. Difficulty: the levels form a real gradient. Measured against a PASSIVE
+//      opponent (so two equal bots don't just clash and cap each other's growth),
+//      a Hard bot grows a bigger economy and army than Normal, and Normal than
+//      Easy — so the setting means something.
 
 using System;
 using System.Collections.Generic;
@@ -13,84 +17,89 @@ using Sim;
 
 static class Program
 {
-    const int Ticks = 2000;   // long enough to build an economy, train, and march across to clash
+    const int Ticks = 2000;      // determinism/liveness: build, train, march, clash
+    const int GradientTicks = 3500;  // long enough for Hard's second food chain to mature
+    const int FullKeep = 600;    // BuildHp[Keep]
     static readonly List<Command> None = new();
 
-    static Simulation FreshMatch()
+    struct Outcome
+    {
+        public bool InSync;
+        public uint Checksum;
+        public int PeakArmy1, PeakArmy2, PeakUnits, FinalUnits, Builds1, Builds2, Keep1, Keep2;
+        public int PeakPeas2, PeakArmyP2;   // player-2 economy/army peaks, for the gradient
+    }
+
+    static Simulation FreshMatch(AiLevel level, bool botVsBot)
     {
         var sim = new Simulation(TileMap.Skirmish(Skirmish.DefaultSize));
         Skirmish.Setup(sim, Skirmish.DefaultSize);
-        sim.EnableAi(1);
-        sim.EnableAi(2);
+        sim.EnableAi(2, level);
+        if (botVsBot) sim.EnableAi(1, level);
         return sim;
+    }
+
+    // Run the same match on two independent sims and confirm they never diverge.
+    static Outcome Run(AiLevel level, bool botVsBot, int ticks)
+    {
+        var a = FreshMatch(level, botVsBot);
+        var b = FreshMatch(level, botVsBot);
+        var o = new Outcome { InSync = true, PeakUnits = a.Units.Count };
+        for (int t = 0; t < ticks; t++)
+        {
+            a.Tick(None);
+            b.Tick(None);
+            if (o.InSync && a.StateChecksum() != b.StateChecksum()) o.InSync = false;
+            o.PeakUnits = Math.Max(o.PeakUnits, a.Units.Count);
+            o.PeakArmy1 = Math.Max(o.PeakArmy1, a.ArmySize(1));
+            o.PeakArmy2 = Math.Max(o.PeakArmy2, a.ArmySize(2));
+            o.PeakPeas2 = Math.Max(o.PeakPeas2, a.PeasantCount(2));
+            o.PeakArmyP2 = Math.Max(o.PeakArmyP2, a.ArmySize(2));
+        }
+        o.Checksum = a.StateChecksum();
+        o.FinalUnits = a.Units.Count;
+        o.Builds1 = a.Buildings.FindAll(x => x.Owner == 1 && x.Alive).Count;
+        o.Builds2 = a.Buildings.FindAll(x => x.Owner == 2 && x.Alive).Count;
+        o.Keep1 = KeepHp(a, 1);
+        o.Keep2 = KeepHp(a, 2);
+        return o;
     }
 
     static int Main()
     {
-        var a = FreshMatch();
-        var b = FreshMatch();
+        // Determinism + liveness on a Normal bot-vs-bot match.
+        var normal = Run(AiLevel.Normal, botVsBot: true, Ticks);
+        var rerun = FreshMatch(AiLevel.Normal, botVsBot: true);
+        for (int t = 0; t < Ticks; t++) rerun.Tick(None);
+        bool reproducible = rerun.StateChecksum() == normal.Checksum;
 
-        int firstDivergeTick = -1;
-        int peakUnits = a.Units.Count, peakArmy1 = 0, peakArmy2 = 0;
-        for (int t = 0; t < Ticks; t++)
-        {
-            a.Tick(None);
-            b.Tick(None);
-            if (firstDivergeTick < 0 && a.StateChecksum() != b.StateChecksum())
-                firstDivergeTick = t;
-            peakUnits = Math.Max(peakUnits, a.Units.Count);
-            peakArmy1 = Math.Max(peakArmy1, a.ArmySize(1));
-            peakArmy2 = Math.Max(peakArmy2, a.ArmySize(2));
-            if (Environment.GetEnvironmentVariable("AIDBG") == "1" && t % 200 == 199)
-            {
-                int soldiers = 0, minX = 9999, maxX = -1, targeting = 0;
-                foreach (var u in a.Units)
-                    if (u.Owner == 2 && u.Alive && !u.IsPeasant)
-                    {
-                        soldiers++;
-                        int tx = u.X >> 16; if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
-                        if (u.TargetId != 0 || u.TargetBuildingId != 0) targeting++;
-                    }
-                Console.WriteLine($"t{t+1}: peas={a.PeasantCount(2)} idle={a.IdlePeasantCount(2)} army={a.ArmySize(2)} " +
-                    $"food={a.Stockpile(2,ResourceType.Food)} wood={a.Stockpile(2,ResourceType.Wood)} " +
-                    $"P2 soldiers x∈[{minX},{maxX}] targeting={targeting}  (enemy keep x≈{Skirmish.West(Skirmish.DefaultSize)})");
-            }
-        }
+        // Gradient: each level against a passive opponent.
+        var easy = Run(AiLevel.Easy, botVsBot: false, GradientTicks);
+        var norm = Run(AiLevel.Normal, botVsBot: false, GradientTicks);
+        var hard = Run(AiLevel.Hard, botVsBot: false, GradientTicks);
 
-        bool inSync = firstDivergeTick < 0;
-
-        // Reproducibility: a brand-new match, same seed, same final state.
-        var c = FreshMatch();
-        for (int t = 0; t < Ticks; t++) c.Tick(None);
-        bool reproducible = c.StateChecksum() == a.StateChecksum();
-
-        // Liveness — did the bots actually play? Judge against PEAKS over the match,
-        // not the final frame: peasant breeding inflates the unit count and then a
-        // battle cuts it back, so a snapshot at the end understates both.
-        int builtP2 = a.Buildings.FindAll(x => x.Owner == 2 && x.Alive).Count;
-        int builtP1 = a.Buildings.FindAll(x => x.Owner == 1 && x.Alive).Count;
-        bool built = builtP1 > 1 && builtP2 > 1;              // more than just the starting keep
-        bool trained = peakArmy1 > 3 && peakArmy2 > 3;        // both armed beyond the 3 they start with
-        // A clash: the living-unit count fell from its peak (soldiers died) or a
-        // keep took a hit.
-        int keepHpP1 = KeepHp(a, 1), keepHpP2 = KeepHp(a, 2);
-        int units = a.Units.Count;
-        bool fought = units < peakUnits || keepHpP1 < FullKeep || keepHpP2 < FullKeep;
+        bool inSync = normal.InSync && easy.InSync && norm.InSync && hard.InSync;
+        bool built = normal.Builds1 > 1 && normal.Builds2 > 1;                 // more than the starting keep
+        bool trained = normal.PeakArmy1 > 3 && normal.PeakArmy2 > 3;           // armed beyond the 3 they start with
+        bool fought = normal.FinalUnits < normal.PeakUnits ||                  // soldiers died...
+                      normal.Keep1 < FullKeep || normal.Keep2 < FullKeep;      // ...or a keep took a hit
+        bool gradient = hard.PeakArmyP2 > norm.PeakArmyP2 && norm.PeakArmyP2 > easy.PeakArmyP2;
 
         Console.WriteLine("Stronghold — AI skirmish check");
-        Console.WriteLine($"  ran {Ticks} ticks, bot vs bot, seed 0x{Simulation.DefaultSeed:X8}\n");
-        Line(inSync,       "two sims stay in sync",       inSync ? "identical every tick" : $"DIVERGED at tick {firstDivergeTick}");
-        Line(reproducible, "re-run reproduces state",     $"final 0x{a.StateChecksum():X8}");
-        Line(built,        "bots raise buildings",        $"P1 {builtP1}, P2 {builtP2} standing");
-        Line(trained,      "bots train an army",          $"peak P1 {peakArmy1}, P2 {peakArmy2} soldiers");
-        Line(fought,       "the armies actually clash",   $"{peakUnits} units at peak, {units} left; keeps {keepHpP1}/{keepHpP2}");
+        Console.WriteLine($"  seed 0x{Simulation.DefaultSeed:X8}\n");
+        Line(inSync,       "sims stay in sync (all levels)", inSync ? "identical every tick" : "DIVERGED");
+        Line(reproducible, "re-run reproduces state",        $"Normal 0x{normal.Checksum:X8}");
+        Line(built,        "bots raise buildings",           $"Normal: P1 {normal.Builds1}, P2 {normal.Builds2} standing");
+        Line(trained,      "bots train an army",             $"Normal peak P1 {normal.PeakArmy1}, P2 {normal.PeakArmy2}");
+        Line(fought,       "the armies actually clash",      $"Normal: {normal.PeakUnits} at peak, {normal.FinalUnits} left; keeps {normal.Keep1}/{normal.Keep2}");
+        Line(gradient,     "difficulty scales the bot",      $"vs passive — peak peasants e{easy.PeakPeas2}/n{norm.PeakPeas2}/h{hard.PeakPeas2}, " +
+                                                             $"peak army e{easy.PeakArmyP2}/n{norm.PeakArmyP2}/h{hard.PeakArmyP2}");
 
-        bool pass = inSync && reproducible && built && trained && fought;
-        Console.WriteLine("\nRESULT: " + (pass ? "PASS — the bot plays, and plays deterministically." : "FAIL"));
+        bool pass = inSync && reproducible && built && trained && fought && gradient;
+        Console.WriteLine("\nRESULT: " + (pass ? "PASS — the bot plays deterministically, and the levels form a real gradient." : "FAIL"));
         return pass ? 0 : 1;
     }
 
-    const int FullKeep = 600;   // BuildHp[Keep]
     static int KeepHp(Simulation s, int owner)
     {
         foreach (var b in s.Buildings)
