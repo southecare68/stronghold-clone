@@ -2494,17 +2494,21 @@ public partial class World3D : Node3D
     Building BuildingAtScreen(Vector2 screen)
     {
         Building best = null;
-        float bestD = 90f * 90f;
+        float bestD = float.MaxValue;
         foreach (var b in _sim.Buildings)
         {
-            if (b.Owner != MyPlayer || !b.Alive || b.Type == BuildingType.Wall) continue;
+            if (b.Owner != MyPlayer || !b.Alive) continue;
+            // Walls (now selectable, so they can be demolished) get a tighter pick
+            // radius than a big building, so a click grabs the one you mean rather
+            // than a neighbour in the run.
+            float reach = b.Type == BuildingType.Wall ? 42f * 42f : 90f * 90f;
             // Test a couple of heights up the model, since a click can land low on
             // the body or high on the roof; take the nearer.
             var c = new Vector3(b.X + (b.W - 1) / 2f, 0f, b.Y + (b.H - 1) / 2f);
             float d = Mathf.Min(
                 _cam.UnprojectPosition(c + Vector3.Up * 0.6f).DistanceSquaredTo(screen),
                 _cam.UnprojectPosition(c + Vector3.Up * 1.6f).DistanceSquaredTo(screen));
-            if (d < bestD) { bestD = d; best = b; }
+            if (d < reach && d < bestD) { bestD = d; best = b; }
         }
         return best;
     }

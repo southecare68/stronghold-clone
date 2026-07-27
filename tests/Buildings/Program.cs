@@ -313,6 +313,19 @@ static class Program
         var enemyHut = sim.PlaceBuilding(BuildingType.Barracks, 2, 30, 30);
         Order(sim, Demolish(1, enemyHut.Id));
         Check("an enemy's building is not yours to raze", sim.Buildings.Contains(enemyHut));
+
+        // A WALL can be demolished too — it refunds its stone and turns its garrison
+        // back into a field unit.
+        Give(sim, 1, wood: 0, stone: 20);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 6, 6);
+        var soldier = sim.SpawnUnit(1, 6, 8);
+        soldier.GarrisonId = wall.Id;
+        int stoneBefore = sim.Stockpile(1, ResourceType.Stone);
+        Order(sim, Demolish(1, wall.Id));
+        Check("a wall is demolished", sim.Buildings.Find(b => b.Type == BuildingType.Wall) == null);
+        Check($"half its 5 stone comes back (+2, got {sim.Stockpile(1, ResourceType.Stone) - stoneBefore})",
+              sim.Stockpile(1, ResourceType.Stone) == stoneBefore + 2);
+        Check("its garrison drops back to the field", soldier.GarrisonId == 0);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
