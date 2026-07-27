@@ -43,6 +43,7 @@ public partial class World3D : Node3D
     // stair onto its crenellated roof and fire from it. These carry the roof height,
     // each keep's stair foot/crown for the climb, and the spots troops stand at.
     const float KeepRoofY = 2.6f;
+    const float KeepBldMaxH = 1.9f;   // cap other buildings below the keep's roofline
     readonly Dictionary<int, (Vector3 Base, Vector3 Top)> _keepStair = new();   // keep id -> stair
     readonly Dictionary<int, int> _keepIdx = new();                            // unit id -> roof-spot index
     static readonly Vector3[] RoofOffsets =
@@ -1557,7 +1558,14 @@ public partial class World3D : Node3D
                 }
                 else
                 {
-                    node.Scale = Vector3.One * _bldScale[b.Type];
+                    // Size the model to its tile footprint rather than a fixed scale,
+                    // and never let it stand taller than the keep — the Synty house
+                    // models are big, so a flat 0.5 made them overshoot everything.
+                    var a = ModelAabb(scene);
+                    float horiz = Mathf.Max(Mathf.Max(a.Size.X, a.Size.Z), 0.1f);
+                    float fit = 0.9f * b.W / horiz;             // fill ~90% of the footprint
+                    float cap = KeepBldMaxH / Mathf.Max(a.Size.Y, 0.1f);   // stay under the keep
+                    node.Scale = Vector3.One * Mathf.Min(fit, cap);
                     // Centre on the footprint. A tile at (x,y) is centred at (x,y),
                     // so a WxH footprint's centre is (x+(W-1)/2, y+(H-1)/2) — not W/2,
                     // which would sit half a tile off (unit positions are tile-centred).
