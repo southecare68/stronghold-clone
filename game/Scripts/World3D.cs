@@ -179,11 +179,12 @@ public partial class World3D : Node3D
     bool _showTerritory = true;
     long _terrSig = long.MinValue;
     int _terrTick;
-    byte[] _terrOwn;      // per-tile owner: 0 neutral, else player id
-    int[] _terrBest;      // per-tile nearest-influence distance², for the assignment
+    // My territory as a rectangle in tile coords, so fog can be cleared inside it.
+    bool _myTerrValid;
+    int _myMinX, _myMinY, _myMaxX, _myMaxY;
+    const int TerrMargin = 4;   // tiles of breathing room around the buildings' bounds
     static readonly Color TerrMine = new(0.35f, 0.75f, 1f);       // matches the friendly ring
     static readonly Color TerrEnemy = new(1f, 0.45f, 0.35f);      // matches the enemy ring
-    static readonly Color TerrClash = new(0.95f, 0.8f, 0.3f);     // where two territories meet
 
     // Combat feedback: a floating health bar over a hurt unit, a spark where a
     // blow lands, a tracer for a ranged shot, a puff when a unit dies. All of it
@@ -591,8 +592,10 @@ public partial class World3D : Node3D
             for (int x = 0; x < MapSize; x++)
             {
                 int o = (y * MapSize + x) * 4;
+                // Your own territory is never veiled — you have standing awareness of
+                // the land you hold, so it reads as fully in the clear.
                 (byte R, byte G, byte B, byte A) c =
-                    _sim.CanSee(MyPlayer, x, y) ? default :
+                    InMyTerritory(x, y) || _sim.CanSee(MyPlayer, x, y) ? default :
                     _sim.HasExplored(MyPlayer, x, y) ? FogExplored : FogUnexplored;
                 _fogBytes[o] = c.R; _fogBytes[o + 1] = c.G; _fogBytes[o + 2] = c.B; _fogBytes[o + 3] = c.A;
             }
@@ -601,23 +604,14 @@ public partial class World3D : Node3D
     }
 
     // ---- territory overlay -------------------------------------------------
-
-    // How far a building's influence reaches, in tiles. The keep dominates; a wall
-    // claims only the ground it stands on, which is what lets a curtain wall push a
-    // border outward as you build it.
-    static int TerritoryRadius(BuildingType t) => t switch
-    {
-        BuildingType.Keep => 14,
-        BuildingType.Barracks => 9,
-        BuildingType.Gatehouse => 5,
-        BuildingType.Wall => 3,
-        _ => 7,               // houses, workshops, harvesters
-    };
+    //
+    // A player's territory is the axis-aligned rectangle that bounds their
+    // buildings, with a little margin — so it reads as a clean square/rectangle of
+    // straight lines, not an organic blob. Drawn in the owner's colour. Purely
+    // visual, computed here from the building set; the sim knows nothing of it.
 
     void SetupTerritory()
     {
-        _terrOwn = new byte[MapSize * MapSize];
-        _terrBest = new int[MapSize * MapSize];
         _territoryMesh = new ImmediateMesh();
         _territory = new MeshInstance3D
         {
@@ -626,6 +620,7 @@ public partial class World3D : Node3D
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 VertexColorUseAsAlbedo = true,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,   // flat ribbon — draw both faces
             },
         };
         AddChild(_territory);
@@ -634,10 +629,8 @@ public partial class World3D : Node3D
     void UpdateTerritory()
     {
         _territory.Visible = _showTerritory;
-        if (!_showTerritory) return;
-        // Rebuild only when something that shapes the border changes: the building
-        // set (a signature over id/owner/position) or, occasionally, newly-explored
-        // ground. Between those the mesh is static and free.
+        // Rebuild only when the building set (or explored ground) changes; my
+        // territory rectangle drives the fog reveal, so keep it current even hidden.
         long sig = 0;
         foreach (var b in _sim.Buildings)
             if (b.Alive) sig = sig * 1000003 + (((long)b.Id << 3) | (uint)b.Owner) * 131 + b.CenterX * 719 + b.CenterY;
@@ -649,91 +642,60 @@ public partial class World3D : Node3D
 
     void RebuildTerritory()
     {
-        int n = MapSize;
-        Array.Clear(_terrOwn, 0, _terrOwn.Length);
-        for (int i = 0; i < _terrBest.Length; i++) _terrBest[i] = int.MaxValue;
-
         bool fog = _sim.FogEnabled;
-        // Paint each building's influence disc; nearest building wins each tile.
+        // Bounding box of each owner's known buildings (footprint corners).
+        var box = new SortedDictionary<int, int[]>();   // owner -> {minX,minY,maxX,maxY}, owner order
         foreach (var b in _sim.Buildings)
         {
             if (!b.Alive) continue;
-            // Only claim from buildings this player knows about, or the enemy's zone
-            // would betray unscouted buildings — a maphack the fog exists to prevent.
+            // An enemy box may only be drawn from buildings you have scouted, or it
+            // would betray unseen ones — the maphack the fog exists to prevent.
             if (fog && b.Owner != MyPlayer && !_sim.HasExplored(MyPlayer, b.CenterX, b.CenterY)) continue;
-            int r = TerritoryRadius(b.Type), r2 = r * r, cx = b.CenterX, cy = b.CenterY;
-            int x0 = Math.Max(0, cx - r), x1 = Math.Min(n - 1, cx + r);
-            int y0 = Math.Max(0, cy - r), y1 = Math.Min(n - 1, cy + r);
-            for (int y = y0; y <= y1; y++)
-                for (int x = x0; x <= x1; x++)
-                {
-                    int dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
-                    if (d2 > r2) continue;
-                    int idx = y * n + x;
-                    if (d2 < _terrBest[idx]) { _terrBest[idx] = d2; _terrOwn[idx] = (byte)b.Owner; }
-                }
+            int lx = b.X, ly = b.Y, hx = b.X + b.W - 1, hy = b.Y + b.H - 1;
+            if (box.TryGetValue(b.Owner, out var r))
+            { r[0] = Math.Min(r[0], lx); r[1] = Math.Min(r[1], ly); r[2] = Math.Max(r[2], hx); r[3] = Math.Max(r[3], hy); }
+            else box[b.Owner] = new[] { lx, ly, hx, hy };
         }
 
-        // Collect boundary edges: a tile edge where the two sides differ in owner
-        // and the near side is one this player may see (fog again).
-        var edges = new List<(float ex, float ez, bool vert, Color col)>();
-        for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
-            {
-                int idx = y * n + x;
-                byte o = _terrOwn[idx];
-                if (x + 1 < n)
-                {
-                    byte o2 = _terrOwn[idx + 1];
-                    if (o != o2 && EdgeVisible(o, o2, x, y, x + 1, y, fog))
-                        edges.Add((x + 0.5f, y, true, EdgeColor(o, o2)));
-                }
-                if (y + 1 < n)
-                {
-                    byte o2 = _terrOwn[idx + n];
-                    if (o != o2 && EdgeVisible(o, o2, x, y, x, y + 1, fog))
-                        edges.Add((x, y + 0.5f, false, EdgeColor(o, o2)));
-                }
-            }
-
+        _myTerrValid = false;
         _territoryMesh.ClearSurfaces();
-        if (edges.Count == 0) return;   // nothing to draw — an empty surface would warn
+        if (box.Count == 0) return;   // nothing owned — an empty surface would warn
 
-        const float yH = 0.14f, w = 0.11f;   // just above the fog plane; ribbon half-width
+        const float yH = 0.14f;
         _territoryMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        foreach (var e in edges)
+        foreach (var kv in box)       // owner order, so it is stable frame to frame
         {
-            // A thin flat ribbon quad centred on the tile edge, at ground height.
-            Vector3 a, b2, c, d;
-            if (e.vert)   // vertical edge at world x = ex, running along z
-            {
-                a = new Vector3(e.ex - w, yH, e.ez - 0.5f); b2 = new Vector3(e.ex + w, yH, e.ez - 0.5f);
-                c = new Vector3(e.ex + w, yH, e.ez + 0.5f); d = new Vector3(e.ex - w, yH, e.ez + 0.5f);
-            }
-            else          // horizontal edge at world z = ez, running along x
-            {
-                a = new Vector3(e.ex - 0.5f, yH, e.ez - w); b2 = new Vector3(e.ex + 0.5f, yH, e.ez - w);
-                c = new Vector3(e.ex + 0.5f, yH, e.ez + w); d = new Vector3(e.ex - 0.5f, yH, e.ez + w);
-            }
-            foreach (var v in new[] { a, b2, c, a, c, d }) { _territoryMesh.SurfaceSetColor(e.col); _territoryMesh.SurfaceAddVertex(v); }
+            int owner = kv.Key;
+            var r = kv.Value;
+            int minX = Math.Max(0, r[0] - TerrMargin), minY = Math.Max(0, r[1] - TerrMargin);
+            int maxX = Math.Min(MapSize - 1, r[2] + TerrMargin), maxY = Math.Min(MapSize - 1, r[3] + TerrMargin);
+            // Tile (x,y) is centred at world (x,y), so the rectangle's outer edge is
+            // half a tile beyond the extreme tile centres.
+            float x0 = minX - 0.5f, x1 = maxX + 0.5f, z0 = minY - 0.5f, z1 = maxY + 0.5f;
+            Color col = owner == MyPlayer ? TerrMine : TerrEnemy;
+            AddBorderLine(new Vector3(x0, yH, z0), new Vector3(x1, yH, z0), col);   // top
+            AddBorderLine(new Vector3(x0, yH, z1), new Vector3(x1, yH, z1), col);   // bottom
+            AddBorderLine(new Vector3(x0, yH, z0), new Vector3(x0, yH, z1), col);   // left
+            AddBorderLine(new Vector3(x1, yH, z0), new Vector3(x1, yH, z1), col);   // right
+            if (owner == MyPlayer) { _myMinX = minX; _myMinY = minY; _myMaxX = maxX; _myMaxY = maxY; _myTerrValid = true; }
         }
         _territoryMesh.SurfaceEnd();
     }
 
-    // Your OWN border is always drawn — you know how far your own influence reaches,
-    // even past what you can currently see. The enemy's border shows only where you
-    // have scouted one of its sides, so the overlay never leaks unscouted enemy land.
-    bool EdgeVisible(byte oa, byte ob, int x1, int y1, int x2, int y2, bool fog) =>
-        !fog || oa == (byte)MyPlayer || ob == (byte)MyPlayer
-             || _sim.HasExplored(MyPlayer, x1, y1) || _sim.HasExplored(MyPlayer, x2, y2);
-
-    // Colour a boundary by whose it is: mine, the enemy's, or gold where they abut.
-    Color EdgeColor(byte a, byte b)
+    // A straight, flat ribbon from a to b in the ground plane — the fat "line" of a
+    // border edge. Widened sideways (perpendicular in XZ) so it reads at a distance.
+    void AddBorderLine(Vector3 a, Vector3 b, Color col)
     {
-        if (a != 0 && b != 0) return TerrClash;         // two owners meeting
-        byte owned = a != 0 ? a : b;                    // the one owned side
-        return owned == (byte)MyPlayer ? TerrMine : TerrEnemy;
+        const float w = 0.14f;
+        var d = (b - a); d.Y = 0;
+        var perp = new Vector3(d.Z, 0, -d.X).Normalized() * w;
+        Vector3[] quad = { a - perp, b - perp, b + perp, a - perp, b + perp, a + perp };
+        foreach (var v in quad) { _territoryMesh.SurfaceSetColor(col); _territoryMesh.SurfaceAddVertex(v); }
     }
+
+    // Is this tile inside my territory rectangle? Used to keep fog off my own land.
+    bool InMyTerritory(int x, int y) =>
+        _myTerrValid && x >= _myMinX && x <= _myMaxX && y >= _myMinY && y <= _myMaxY;
 
     // ---- combat feedback ---------------------------------------------------
 
@@ -1346,9 +1308,9 @@ public partial class World3D : Node3D
 
         SyncUnits(delta);
         SyncBuildings();
+        UpdateTerritory();   // before nodes/fog: my territory rect gates both
         SyncNodes();
         UpdateFog();
-        UpdateTerritory();
         UpdateRings();
         UpdateHud();
         UpdateFx(delta);
@@ -1816,7 +1778,7 @@ public partial class World3D : Node3D
         foreach (var n in _sim.NodeList)
         {
             live.Add(n.Id);
-            bool seen = !_sim.FogEnabled || _sim.HasExplored(MyPlayer, n.X, n.Y);
+            bool seen = !_sim.FogEnabled || _sim.HasExplored(MyPlayer, n.X, n.Y) || InMyTerritory(n.X, n.Y);
             if (!_nodeNodes.TryGetValue(n.Id, out var node))
             {
                 if (!seen) continue;
