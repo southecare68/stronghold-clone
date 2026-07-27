@@ -898,12 +898,17 @@ namespace Sim
                     // a refused build simply spends nothing and places nothing.
                     var type = (BuildingType)cmd.TargetId;
                     if ((int)type < 0 || (int)type >= BuildCost.Length) break;
-                    if (!CanPlace(type, cmd.X, cmd.Y) || !CanAfford(cmd.Owner, BuildCost[(int)type])) break;
+                    // A turret raised on one of your own walls replaces that
+                    // segment (a tower in the line) rather than being refused.
+                    var swap = type == BuildingType.Turret ? OwnWallAt(cmd.Owner, cmd.X, cmd.Y) : null;
+                    if (swap == null && !CanPlace(type, cmd.X, cmd.Y)) break;
+                    if (!CanAfford(cmd.Owner, BuildCost[(int)type])) break;
                     // No building on ground you have never laid eyes on. Checked
                     // over the whole footprint, so a keep cannot be half-planted
                     // in the dark.
                     if (!ExploredFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
                     Pay(cmd.Owner, BuildCost[(int)type]);
+                    if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
                     break;
 
@@ -974,6 +979,18 @@ namespace Sim
                     Buildings.Remove(razing);
                     break;
             }
+        }
+
+        // The owner's own 1x1 wall sitting exactly on this tile, if any. A turret
+        // may be raised in its place — towers stand IN the wall line, so aiming one
+        // at your own wall should replace that segment, not be refused as "blocked".
+        public Building OwnWallAt(int owner, int x, int y)
+        {
+            foreach (var b in Buildings)
+                if (b.Alive && b.Owner == owner && b.Type == BuildingType.Wall &&
+                    b.X == x && b.Y == y && b.W == 1 && b.H == 1)
+                    return b;
+            return null;
         }
 
         bool ExploredFootprint(int owner, BuildingType type, int x, int y)

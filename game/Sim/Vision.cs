@@ -145,6 +145,29 @@ namespace Sim
                     Set(vis, i);
                     if (accumulate) Set(seen, i);
                 }
+
+            // Second pass: fill the single-tile gaps a per-tile raycast leaves at
+            // the frontier. A naive "is the centre of this tile in line of sight"
+            // test speckles the rim of the disc — some tiles pass, their
+            // neighbours don't — which looked like dithered fog and, worse, made a
+            // dragged wall skip tiles it could not be built on. Here a tile is
+            // marked EXPLORED (remembered) when the neighbour one step back toward
+            // the watcher is visible, so the fill follows the light outward and
+            // never leaks behind rock — a shadowed tile has no lit inner neighbour.
+            // Only Explored is touched; Visible stays exactly what strict
+            // line-of-sight found, so vision, target acquisition and the sim
+            // checksum are unchanged — this smooths only what the player remembers.
+            if (accumulate)
+                for (int y = y0; y <= y1; y++)
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        int dx = x - cx, dy = y - cy;
+                        if (dx * dx + dy * dy > r2) continue;
+                        int i = _map.Index(x, y);
+                        if (Get(seen, i)) continue;
+                        int nx = x - Math.Sign(dx), ny = y - Math.Sign(dy);
+                        if (Get(vis, _map.Index(nx, ny))) Set(seen, i);
+                    }
         }
 
         // ---- snapshot / restore -------------------------------------------

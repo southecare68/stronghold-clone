@@ -18,6 +18,7 @@ static class Program
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
         DemolishRefundsFreesWorkerAndClearsGround();
+        ATurretReplacesYourOwnWall();
         MoveOnlyBuildsNothing();
         TwoClientsAgreeOnBuildAndTrain();
         BuildingsSurviveARejoin();
@@ -326,6 +327,34 @@ static class Program
         Check($"half its 5 stone comes back (+2, got {sim.Stockpile(1, ResourceType.Stone) - stoneBefore})",
               sim.Stockpile(1, ResourceType.Stone) == stoneBefore + 2);
         Check("its garrison drops back to the field", soldier.GarrisonId == 0);
+    }
+
+    // A tower stands IN the wall line, so raising a turret on one of your own wall
+    // segments replaces it rather than being refused as "tile blocked" — the fix
+    // for "the turret won't go next to the wall, it's red".
+    static void ATurretReplacesYourOwnWall()
+    {
+        Console.WriteLine("\na turret raised on your own wall replaces that segment:");
+        var sim = new Simulation(TileMap.Open(48));
+        Give(sim, 1, wood: 100, stone: 100);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        int wallId = wall.Id;
+        var soldier = sim.SpawnUnit(1, 10, 12);
+        soldier.GarrisonId = wall.Id;
+
+        Order(sim, Build(1, BuildingType.Turret, 10, 10));    // aim a turret at your own wall
+        var turret = sim.Buildings.Find(b => b.Type == BuildingType.Turret);
+        Check("the turret was raised on the tile", turret != null && turret.X == 10 && turret.Y == 10);
+        Check("the wall segment it stood on is gone", sim.Buildings.Find(b => b.Id == wallId) == null);
+        Check("the tile stays blocked (now the turret)", !sim.Map.Passable(10, 10));
+        Check("the old wall's garrison was turned out", soldier.GarrisonId == 0);
+
+        // But an ENEMY wall is not yours to build over.
+        Give(sim, 2, wood: 100, stone: 100);
+        var foeWall = sim.PlaceBuilding(BuildingType.Wall, 2, 20, 20);
+        Order(sim, Build(1, BuildingType.Turret, 20, 20));
+        Check("an enemy wall cannot be replaced", sim.Buildings.Contains(foeWall) &&
+              sim.Buildings.Find(b => b.Type == BuildingType.Turret && b.X == 20) == null);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

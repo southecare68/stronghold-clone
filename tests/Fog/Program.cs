@@ -21,6 +21,7 @@ static class Program
 
         FogOffChangesNothing();
         AUnitLightsItsSurroundings();
+        TheExploredFrontierHasNoHoles();
         RockBlocksSightButWaterDoesNot();
         ExploredRemembersWhatVisibleForgets();
         CannotOrderAnAttackOnWhatYouCannotSee();
@@ -91,6 +92,35 @@ static class Program
         // implementation that never checked its own geometry.
         Check("the corner of the bounding box is outside the disc",
               !sim.Fog.IsVisible(1, 30 + Vision.UnitSight, 30 + Vision.UnitSight));
+    }
+
+    // A naive "is the centre of this tile in line of sight" test speckles the rim
+    // of the vision disc — some tiles pass, their neighbours don't — which read as
+    // dithered fog and made a dragged wall skip tiles it could not build on. The
+    // fill closes those gaps: any tile whose neighbour toward the watcher is lit is
+    // itself remembered. Here we assert that invariant directly, near the ridge so
+    // rock actually casts the shadows that used to dither. Rock-hiding is untouched
+    // (a shadowed tile has no lit inner neighbour, so it stays dark).
+    static void TheExploredFrontierHasNoHoles()
+    {
+        Console.WriteLine("\nthe explored frontier is filled, not dithered:");
+        var sim = Fogged(TileMap.Skirmish(64));
+        int cx = 32, cy = 8;                        // by the ridge — 16 raw dither holes here
+        sim.SpawnUnit(1, cx, cy);
+        sim.Tick(Array.Empty<Command>());
+
+        int r = Vision.UnitSight, r2 = r * r, holes = 0;
+        for (int y = cy - r; y <= cy + r; y++)
+            for (int x = cx - r; x <= cx + r; x++)
+            {
+                int dx = x - cx, dy = y - cy;
+                if (dx * dx + dy * dy > r2) continue;
+                int nx = x - Math.Sign(dx), ny = y - Math.Sign(dy);
+                // Neighbour toward the unit is lit -> this tile must be remembered.
+                if (sim.Fog.IsVisible(1, nx, ny) && !sim.Fog.IsExplored(1, x, y)) holes++;
+            }
+        Check("the unit lit its own ground", sim.Fog.IsExplored(1, cx, cy));
+        Check($"no lit-adjacent tile is left unexplored ({holes} hole(s))", holes == 0);
     }
 
     static void RockBlocksSightButWaterDoesNot()

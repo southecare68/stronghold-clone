@@ -1273,7 +1273,9 @@ public partial class World3D : Node3D
     // — the same three gates the Build command applies, so the ghost tells the truth.
     bool Placeable(BuildingType t, int ox, int oy)
     {
-        if (!_sim.CanPlace(t, ox, oy)) return false;
+        // A turret may replace your own wall segment, so that tile counts as free.
+        bool swapWall = t == BuildingType.Turret && _sim.OwnWallAt(MyPlayer, ox, oy) != null;
+        if (!swapWall && !_sim.CanPlace(t, ox, oy)) return false;
         var (w, h) = _sim.FootprintOf(t);
         for (int y = oy; y < oy + h; y++)
             for (int x = ox; x < ox + w; x++)
