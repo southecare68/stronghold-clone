@@ -44,15 +44,15 @@ public partial class World3D : Node3D
     // stair onto its crenellated roof and fire from it. These carry the roof height,
     // each keep's stair foot/crown for the climb, and the spots troops stand at.
     const float KeepRoofY = 2.6f;
-    const float KeepTowerH = 3.05f;   // square corner towers rise above the wall-walk (keep2 style)
     const float KeepBldMaxH = 1.9f;   // cap other buildings below the keep's roofline
     readonly Dictionary<int, (Vector3 Base, Vector3 Top)> _keepStair = new();   // keep id -> stair
     readonly Dictionary<int, int> _keepIdx = new();                            // unit id -> roof-spot index
+    // Garrison posts on the deck, out on the perimeter ring — clear of the central
+    // hall in the middle and the round towers at the corners. Each faces outward.
     static readonly Vector3[] RoofOffsets =
     {
-        new(0, 0, 1.05f), new(1.05f, 0, 0), new(0, 0, -1.05f), new(-1.05f, 0, 0),   // edge posts, facing out
-        new(0.85f, 0, 0.85f), new(-0.85f, 0, 0.85f), new(0.85f, 0, -0.85f), new(-0.85f, 0, -0.85f),
-        new(0, 0, 0),   // the last-stand spot, dead centre — the lord's post
+        new(0, 0, 1.2f), new(0, 0, -1.2f), new(1.2f, 0, 0), new(-1.2f, 0, 0),        // wall midpoints
+        new(0.72f, 0, 1.2f), new(-0.72f, 0, 1.2f), new(0.72f, 0, -1.2f), new(-0.72f, 0, -1.2f),
     };
     readonly HashSet<(int, int)> _wallSet = new();
 
@@ -1729,15 +1729,15 @@ public partial class World3D : Node3D
         deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         root.AddChild(deck);
 
-        // Crenellated parapet around the roof edge, and a tall SQUARE tower at each
-        // corner — the four crenellated corner towers are what make it read as a
-        // Stronghold lord's keep.
+        // Crenellated parapet around the roof edge.
         Parapet(root, nw, ne, KeepRoofY); Parapet(root, sw, se, KeepRoofY);
         Parapet(root, nw, sw, KeepRoofY); Parapet(root, ne, se, KeepRoofY);
-        // Towers sit AT the corners, their outer faces flush with the walls (inset
-        // just inside to avoid z-fighting), so the keep reads as one enclosure with
-        // corner towers rising above the curtain — not four separate pillars.
-        foreach (var c in new[] { nw, ne, sw, se }) SquareTower(root, c * 0.63f);
+
+        // A ROUND tower at each corner, each crowned with a green conical spire and
+        // a red flag, around a central hall under a green peaked roof — the fairy-
+        // tale castle of keep1.
+        foreach (var c in new[] { nw, ne, sw, se }) RoundKeepTower(root, c);
+        CentralHall(root);
 
         // The hidden internal climb: the gate mouth (on the ground) and the inner
         // floor. From the floor the man rises straight up behind the walls onto the
@@ -1745,6 +1745,59 @@ public partial class World3D : Node3D
         _keepStair[b.Id] = (root.Position + new Vector3(0, 0, d), root.Position);
 
         return root;
+    }
+
+    // A round corner tower with a green conical spire and a red flag on top.
+    void RoundKeepTower(Node3D root, Vector3 at)
+    {
+        float towerH = KeepRoofY + 1.0f;
+        var aabb = ModelAabb(_keepTurret);
+        float s = towerH / Mathf.Max(0.1f, aabb.Size.Y);
+        var t = _keepTurret.Instantiate<Node3D>();
+        t.Scale = new Vector3(s * 0.68f, s, s * 0.68f);                 // a slim round tower
+        t.Position = at - new Vector3(0, aabb.Position.Y * s, 0);       // seat its base on the ground
+        root.AddChild(t);
+
+        // Conical spire — a cone (a cylinder tapered to a point), roof-green.
+        var green = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.41f, 0.33f), Roughness = 1f };
+        const float coneH = 1.15f, coneR = 0.52f;
+        var cone = new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = coneR, Height = coneH, RadialSegments = 12 },
+            MaterialOverride = green,
+            Position = at + new Vector3(0, towerH + coneH / 2f, 0),
+        };
+        root.AddChild(cone);
+        KeepFlag(root, at + new Vector3(0, towerH + coneH, 0));
+    }
+
+    // A little red flag on a pole, flown from a spire top.
+    void KeepFlag(Node3D root, Vector3 at)
+    {
+        var pole = new StandardMaterial3D { AlbedoColor = new Color(0.26f, 0.2f, 0.14f), Roughness = 1f };
+        var red  = new StandardMaterial3D { AlbedoColor = new Color(0.68f, 0.11f, 0.10f), Roughness = 1f };
+        const float poleH = 0.75f;
+        root.AddChild(KeepBox(pole, new Vector3(0.05f, poleH, 0.05f), at + new Vector3(0, poleH / 2f, 0)));
+        root.AddChild(KeepBox(red, new Vector3(0.02f, 0.26f, 0.38f), at + new Vector3(0, poleH - 0.16f, 0.21f)));
+    }
+
+    // The central hall (donjon top): a stone block rising from the deck under a
+    // green peaked (gabled) roof — the tall middle of keep1.
+    void CentralHall(Node3D root)
+    {
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
+        var green = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.41f, 0.33f), Roughness = 1f };
+        const float hw = 0.9f, bodyH = 0.9f, roofH = 0.8f;
+        float baseY = KeepRoofY;
+        root.AddChild(KeepBox(stone, new Vector3(2 * hw, bodyH, 2 * hw), new Vector3(0, baseY + bodyH / 2f, 0)));
+        // Gabled roof — a triangular prism (ridge runs along Z).
+        root.AddChild(new MeshInstance3D
+        {
+            Mesh = new PrismMesh { Size = new Vector3(2 * hw + 0.16f, roofH, 2 * hw + 0.16f) },
+            MaterialOverride = green,
+            Position = new Vector3(0, baseY + bodyH + roofH / 2f, 0),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        });
     }
 
     // One tall keep face — a Wall_01 (native 5x5x0.5, length on local X) scaled to
@@ -1761,49 +1814,7 @@ public partial class World3D : Node3D
         root.AddChild(w);
     }
 
-    // A tall square tower at a keep corner: four textured stone faces around a solid
-    // core, an overhanging cap, and a crown of merlons — the fighting keep's corner
-    // tower. Straddles the corner so it projects proud of the walls.
-    void SquareTower(Node3D root, Vector3 at)
-    {
-        const float hw = 0.5f;             // half-width; a ~1-tile-square tower, clear of its neighbours
-        float H = KeepTowerH;
-        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.47f, 0.45f, 0.42f), Roughness = 1f };
-
-        var a = at + new Vector3(-hw, 0, -hw); var b = at + new Vector3(hw, 0, -hw);
-        var c = at + new Vector3(hw, 0, hw);   var e = at + new Vector3(-hw, 0, hw);
-        KeepFace(root, a, b, H); KeepFace(root, b, c, H); KeepFace(root, c, e, H); KeepFace(root, e, a, H);
-
-        // Solid core so the tower can't be seen through.
-        root.AddChild(KeepBox(stone, new Vector3(2 * hw - 0.08f, H, 2 * hw - 0.08f), at + new Vector3(0, H / 2, 0)));
-        // Overhanging cap (machicolation) the merlons sit on.
-        float capHalf = hw + 0.09f;
-        root.AddChild(KeepBox(stone, new Vector3(2 * capHalf, 0.16f, 2 * capHalf), at + new Vector3(0, H + 0.08f, 0)));
-        Merlons(root, at, capHalf, H + 0.16f, stone);
-    }
-
-    // A crown of square merlons on a corner tower — teeth with gaps between them,
-    // but only on the two OUTWARD-facing edges (the inner sides face the courtyard
-    // and stay clear, which keeps the four towers' tops from clustering into noise).
-    void Merlons(Node3D root, Vector3 center, float half, float topY, Material m)
-    {
-        const int per = 2;                       // teeth per side
-        float tooth = 2 * half / (per * 2 - 1);  // tooth width == gap width
-        const float th = 0.28f;                  // how tall a tooth stands
-        bool north = center.Z < 0, south = center.Z > 0, west = center.X < 0, east = center.X > 0;
-        void Tooth(Vector3 pos) =>
-            root.AddChild(KeepBox(m, new Vector3(tooth, th, tooth), center + pos + new Vector3(0, topY + th / 2, 0)));
-        for (int i = 0; i < per; i++)
-        {
-            float t = -half + tooth / 2 + i * 2 * tooth;
-            if (north) Tooth(new Vector3(t, 0, -half));
-            if (south) Tooth(new Vector3(t, 0, half));
-            if (west) Tooth(new Vector3(-half, 0, t));
-            if (east) Tooth(new Vector3(half, 0, t));
-        }
-    }
-
-    // A shadow-free box helper for keep detail (merlons, caps, cores).
+    // A shadow-free box helper for keep detail (hall, flags, cores).
     static MeshInstance3D KeepBox(Material m, Vector3 size, Vector3 pos)
     {
         var mi = new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = m, Position = pos };
