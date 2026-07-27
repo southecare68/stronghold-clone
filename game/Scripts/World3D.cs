@@ -80,7 +80,10 @@ public partial class World3D : Node3D
     readonly Dictionary<int, Node3D> _unitNodes = new();
     readonly Dictionary<int, Node3D> _buildingNodes = new();
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
-    PackedScene _mTree, _mRock;
+    PackedScene _mTree, _mRock, _mWheat;
+    // A grain field's wheat bunches, so they can thin out as the field is reaped.
+    readonly Dictionary<int, List<Node3D>> _fieldCrop = new();
+    readonly Dictionary<int, int> _fieldPeak = new();      // most grain this field has held
 
     // Building selection drives the train panel: click your barracks to open it.
     Building _selectedBuilding;
@@ -388,6 +391,7 @@ public partial class World3D : Node3D
 
         _mTree = Load("Environments/SM_Env_Tree_Round_01");
         _mRock = Load("Environments/SM_Env_Rock_Chunk_02");
+        _mWheat = Load("Props/SM_Prop_Wheat_Bunch_01");   // standing crop for grain fields
 
         // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
         // body to skirt them, assembled in MakeKeep into a small castle.
@@ -1597,19 +1601,95 @@ public partial class World3D : Node3D
             if (!_nodeNodes.TryGetValue(n.Id, out var node))
             {
                 if (!seen) continue;
-                var scene = n.Type == ResourceType.Stone ? _mRock : _mTree;
-                node = scene.Instantiate<Node3D>();
-                float jitter = 1f + ((n.X * 13 + n.Y * 7) % 5) * 0.06f;
-                float baseS = n.Type == ResourceType.Stone ? 0.5f : (n.Type == ResourceType.Grain ? 0.28f : 0.42f);
-                node.Scale = Vector3.One * baseS * jitter;
-                node.Rotation = new Vector3(0, ((n.X * 31 + n.Y * 17) % 360) * Mathf.Pi / 180f, 0);
-                node.Position = new Vector3(n.X, 0, n.Y);
+                if (n.Type == ResourceType.Grain)
+                {
+                    node = MakeGrainField(n);            // plowed soil + wheat, not a tree
+                }
+                else
+                {
+                    var scene = n.Type == ResourceType.Stone ? _mRock : _mTree;
+                    node = scene.Instantiate<Node3D>();
+                    float jitter = 1f + ((n.X * 13 + n.Y * 7) % 5) * 0.06f;
+                    float baseS = n.Type == ResourceType.Stone ? 0.5f : 0.42f;
+                    node.Scale = Vector3.One * baseS * jitter;
+                    node.Rotation = new Vector3(0, ((n.X * 31 + n.Y * 17) % 360) * Mathf.Pi / 180f, 0);
+                    node.Position = new Vector3(n.X, 0, n.Y);
+                }
                 AddChild(node);
                 _nodeNodes[n.Id] = node;
             }
+            if (n.Type == ResourceType.Grain) ReapField(n);   // thin the wheat as it is harvested
             node.Visible = seen;
         }
         Prune(_nodeNodes, live);
+        // Forget the wheat bookkeeping for fields that have been reaped away.
+        var goneFields = new List<int>();
+        foreach (var id in _fieldCrop.Keys) if (!live.Contains(id)) goneFields.Add(id);
+        foreach (var id in goneFields) { _fieldCrop.Remove(id); _fieldPeak.Remove(id); }
+    }
+
+    // A grain field: a patch of plowed soil planted with wheat bunches. The bunches
+    // are kept in _fieldCrop so ReapField can hide them one by one as the node's
+    // grain is carried off, so a field visibly empties as it is worked.
+    Node3D MakeGrainField(ResourceNode n)
+    {
+        var root = new Node3D { Position = new Vector3(n.X, 0, n.Y) };
+
+        // A patch of tilled earth, just proud of the grass. The pack's farm-row
+        // prop is a single narrow furrow that reads as a stray cross on its own,
+        // so the bed is a plain dark-earth slab under the crop instead.
+        const float bed = 1.2f;
+        var soil = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(bed, 0.06f, bed) },
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.21f, 0.13f), Roughness = 1f },
+            Position = new Vector3(0, 0.03f, 0),
+        };
+        root.AddChild(soil);
+
+        // Wheat bunches in rows across the bed, so the patch reads as a crop field.
+        var wheatA = ModelAabb(_mWheat);
+        float wheatH = Mathf.Max(wheatA.Size.Y, 0.1f);
+        float wheatS = 0.55f / wheatH;                     // a bit over half a tile tall
+        const int rows = 4;                                // 4x4 = a full-looking field
+        float step = (bed - 0.24f) / (rows - 1);           // leave a margin inside the bed
+        var crop = new List<Node3D>();
+        // Fill in a serpentine order so ReapField empties the field row by row.
+        for (int gy = 0; gy < rows; gy++)
+        {
+            int order = (gy % 2 == 0) ? 1 : -1;
+            for (int c = 0; c < rows; c++)
+            {
+                int gx = order > 0 ? c : rows - 1 - c;
+                int h = (n.X * 71 + n.Y * 53 + gx * 17 + gy * 29);
+                float jx = ((h % 5) - 2) * 0.018f;
+                float jz = (((h / 5) % 5) - 2) * 0.018f;
+                var w = _mWheat.Instantiate<Node3D>();
+                float js = wheatS * (1f + ((h % 5) * 0.06f));
+                w.Scale = new Vector3(js, js, js);
+                w.Position = new Vector3(-bed / 2 + 0.12f + gx * step + jx, 0.06f - wheatA.Position.Y * js,
+                                         -bed / 2 + 0.12f + gy * step + jz);
+                w.Rotation = new Vector3(0, (h % 360) * Mathf.Pi / 180f, 0);
+                root.AddChild(w);
+                crop.Add(w);
+            }
+        }
+        _fieldCrop[n.Id] = crop;
+        _fieldPeak[n.Id] = Mathf.Max(n.Amount, 1);
+        return root;
+    }
+
+    // Show wheat bunches in proportion to the grain still standing, so a field
+    // empties from full to bare as farmers carry it off.
+    void ReapField(ResourceNode n)
+    {
+        if (!_fieldCrop.TryGetValue(n.Id, out var crop)) return;
+        if (!_fieldPeak.TryGetValue(n.Id, out var peak) || n.Amount > peak)
+            _fieldPeak[n.Id] = peak = Mathf.Max(n.Amount, 1);
+        float frac = Mathf.Clamp((float)n.Amount / peak, 0f, 1f);
+        int show = Mathf.CeilToInt(crop.Count * frac);     // at least one until truly empty
+        if (n.Amount <= 0) show = 0;
+        for (int i = 0; i < crop.Count; i++) crop[i].Visible = i < show;
     }
 
     // The resource node whose model sits nearest the cursor, within a small radius.
