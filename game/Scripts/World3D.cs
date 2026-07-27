@@ -1862,6 +1862,21 @@ public partial class World3D : Node3D
             return;
         }
 
+        // F toggles fog of war — solo only. FogEnabled is sim state, so it must be
+        // flipped on EVERY client sim together to stay in lockstep; in LOCAL both
+        // sit in this process and step in the same loop, so flipping them between
+        // ticks is safe. In a networked match one player revealing the map would be
+        // a maphack AND a desync, so the key is ignored there — use --no-fog (agreed
+        // by both machines at launch) instead. No modifiers, so it never collides
+        // with the Cmd+Ctrl+F fullscreen chord.
+        if (e is InputEventKey fog && fog.Pressed && fog.Keycode == Key.F &&
+            !fog.CtrlPressed && !fog.MetaPressed && !fog.AltPressed && _mode == "LOCAL")
+        {
+            bool on = !_sim.FogEnabled;
+            foreach (var c in Clients()) c.Sim.FogEnabled = on;
+            return;
+        }
+
         // Escape leaves build mode (or, harmlessly, does nothing).
         if (e is InputEventKey k && k.Pressed && k.Keycode == Key.Escape && _buildType != null)
         {
