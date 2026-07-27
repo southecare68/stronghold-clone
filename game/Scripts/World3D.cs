@@ -48,11 +48,14 @@ public partial class World3D : Node3D
     const float KeepBldMaxH = 1.9f;   // cap other buildings below the keep's roofline
     readonly Dictionary<int, (Vector3 Base, Vector3 Top)> _keepStair = new();   // keep id -> stair
     readonly Dictionary<int, int> _keepIdx = new();                            // unit id -> roof-spot index
+    // Garrison posts on the wall-walk ring (the front, south, is the open gateway,
+    // so nobody stands there). Each is out near a wall at deck height, facing out.
     static readonly Vector3[] RoofOffsets =
     {
-        new(0, 0, 1.05f), new(1.05f, 0, 0), new(0, 0, -1.05f), new(-1.05f, 0, 0),   // edge posts, facing out
-        new(0.85f, 0, 0.85f), new(-0.85f, 0, 0.85f), new(0.85f, 0, -0.85f), new(-0.85f, 0, -0.85f),
-        new(0, 0, 0),   // the last-stand spot, dead centre — the lord's post
+        new(0.55f, 0, -1.18f), new(-0.55f, 0, -1.18f),   // back (north) wall
+        new(1.18f, 0, -0.55f), new(1.18f, 0, 0.55f),     // east wall
+        new(-1.18f, 0, -0.55f), new(-1.18f, 0, 0.55f),   // west wall
+        new(1.18f, 0, -1.18f), new(-1.18f, 0, -1.18f),   // back corners, by the towers
     };
     readonly HashSet<(int, int)> _wallSet = new();
 
@@ -1700,51 +1703,76 @@ public partial class World3D : Node3D
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // A SOLID stone core fills the footprint, so the keep can never be seen
-        // through or into — no openings on any side. The textured Wall_01 faces are
-        // the outer skin over it, and a single closed door marks the front entrance.
-        var core = new MeshInstance3D
-        {
-            Mesh = new BoxMesh { Size = new Vector3(2 * d - 0.15f, KeepRoofY, 2 * d - 0.15f) },
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.44f, 0.42f, 0.39f) },
-            Position = new Vector3(0, KeepRoofY * 0.5f, 0),
-        };
-        root.AddChild(core);
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.47f, 0.45f, 0.42f), Roughness = 1f };
+        var flag  = new StandardMaterial3D { AlbedoColor = new Color(0.55f, 0.53f, 0.49f), Roughness = 1f };
 
-        KeepFace(root, nw, ne, KeepRoofY);   // north (back)
-        KeepFace(root, nw, sw, KeepRoofY);   // west
-        KeepFace(root, ne, se, KeepRoofY);   // east
-        // South (front): a solid wall with a stone-framed doorway and a wooden door
-        // built proud of it — the marked entrance. Solid core behind, so no opening.
-        KeepFace(root, sw, se, KeepRoofY);
-        DoorLeaf(root, new Vector3(0, 0, d));
+        // An OPEN courtyard: a flagstone floor at ground level, walls only on three
+        // sides, and no roof — you look down into it. The front (south) is an open
+        // gateway between the two front towers.
+        root.AddChild(KeepBox(flag, new Vector3(2 * d - 0.1f, 0.12f, 2 * d - 0.1f), new Vector3(0, 0.06f, 0)));
 
-        // The flat roof deck the garrison stands on.
-        var deck = new MeshInstance3D
-        {
-            Mesh = new BoxMesh { Size = new Vector3(2 * d, 0.2f, 2 * d) },
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f) },
-            Position = new Vector3(0, KeepRoofY - 0.1f, 0),
-        };
-        deck.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
-        root.AddChild(deck);
+        KeepFace(root, nw, ne, KeepRoofY);   // north (back) curtain
+        KeepFace(root, nw, sw, KeepRoofY);   // west curtain
+        KeepFace(root, ne, se, KeepRoofY);   // east curtain
+        // No south wall — the gap between the front towers is the way in.
 
-        // Crenellated parapet around the roof edge, and a tall SQUARE tower at each
-        // corner — the four crenellated corner towers are what make it read as a
-        // Stronghold lord's keep.
-        Parapet(root, nw, ne, KeepRoofY); Parapet(root, sw, se, KeepRoofY);
-        Parapet(root, nw, sw, KeepRoofY); Parapet(root, ne, se, KeepRoofY);
-        // Towers sit AT the corners, their outer faces flush with the walls (inset
-        // just inside to avoid z-fighting), so the keep reads as one enclosure with
-        // corner towers rising above the curtain — not four separate pillars.
-        foreach (var c in new[] { nw, ne, sw, se }) SquareTower(root, c * 0.63f);
+        // The wall-walk ring the garrison stands and fires from, and its crenellated
+        // parapet, on the three walled sides.
+        KeepWalk(root, d, stone);
+        Parapet(root, nw, ne, KeepRoofY); Parapet(root, nw, sw, KeepRoofY); Parapet(root, ne, se, KeepRoofY);
 
-        // The hidden internal climb: the gate mouth (on the ground) and the inner
-        // floor. From the floor the man rises straight up behind the walls onto the
-        // roof — reads as climbing unseen stairs inside.
-        _keepStair[b.Id] = (root.Position + new Vector3(0, 0, d), root.Position);
+        // Four tall SQUARE crenellated corner towers, seated flush at the corners so
+        // the keep reads as one enclosure — the front pair framing the gateway.
+        foreach (var c in new[] { nw, ne, sw, se }) SquareTower(root, c * 0.74f);
+
+        // The lord's throne on a red carpet at the back of the court, facing the
+        // gate, and a stone stair up to the wall-walk — the keep2 interior.
+        KeepThrone(root, d);
+        KeepInnerStair(root, d, stone);
+
+        // The climb: in through the gateway (ground), up the inner stair to the
+        // wall-walk, then along it to a post. Base = gate mouth, top = stair head.
+        _keepStair[b.Id] = (root.Position + new Vector3(0, 0.05f, d - 0.2f),
+                            root.Position + new Vector3(-0.95f, KeepRoofY, -d + 0.6f));
 
         return root;
+    }
+
+    // The wall-walk: a walkway ring at deck height along the inside of the three
+    // curtain walls, so the garrison has a surface to stand on over the open court.
+    void KeepWalk(Node3D root, float d, Material m)
+    {
+        const float ww = 0.52f;               // walk width
+        float inset = d - ww / 2f;            // its centreline, just inside the wall
+        float y = KeepRoofY - 0.075f;
+        root.AddChild(KeepBox(m, new Vector3(2 * d, 0.15f, ww), new Vector3(0, y, -inset)));       // north
+        root.AddChild(KeepBox(m, new Vector3(ww, 0.15f, 2 * d), new Vector3(inset, y, 0)));        // east
+        root.AddChild(KeepBox(m, new Vector3(ww, 0.15f, 2 * d), new Vector3(-inset, y, 0)));       // west
+    }
+
+    // The lord's throne on a red carpet at the back of the court, facing the gate.
+    void KeepThrone(Node3D root, float d)
+    {
+        var wood = new StandardMaterial3D { AlbedoColor = new Color(0.34f, 0.22f, 0.12f), Roughness = 1f };
+        var red  = new StandardMaterial3D { AlbedoColor = new Color(0.55f, 0.11f, 0.10f), Roughness = 1f };
+        var at = new Vector3(0, 0, -d + 0.55f);   // back-centre, inside
+        root.AddChild(KeepBox(red, new Vector3(0.66f, 0.05f, 1.7f), at + new Vector3(0, 0.1f, 0.95f)));   // carpet to the gate
+        root.AddChild(KeepBox(wood, new Vector3(0.6f, 0.45f, 0.5f), at + new Vector3(0, 0.28f, 0)));       // seat
+        root.AddChild(KeepBox(wood, new Vector3(0.6f, 0.95f, 0.16f), at + new Vector3(0, 0.55f, -0.22f))); // high back
+    }
+
+    // A straight stone stair against the west wall, from the courtyard floor up to
+    // the wall-walk — the visible way up in an open keep.
+    void KeepInnerStair(Node3D root, float d, Material m)
+    {
+        const int steps = 6;
+        float x = -(d - 0.45f);               // hard against the west wall
+        for (int i = 0; i < steps; i++)
+        {
+            float topY = KeepRoofY * (i + 1) / steps;
+            float z = -d + 0.6f + i * (2 * d - 1.2f) / steps;   // climbs from back toward the front
+            root.AddChild(KeepBox(m, new Vector3(0.5f, topY, (2 * d - 1.2f) / steps + 0.02f), new Vector3(x, topY * 0.5f, z)));
+        }
     }
 
     // One tall keep face — a Wall_01 (native 5x5x0.5, length on local X) scaled to
@@ -1766,7 +1794,7 @@ public partial class World3D : Node3D
     // tower. Straddles the corner so it projects proud of the walls.
     void SquareTower(Node3D root, Vector3 at)
     {
-        const float hw = 0.5f;             // half-width; a ~1-tile-square tower, clear of its neighbours
+        const float hw = 0.44f;            // half-width; slim enough to leave the courtyard open
         float H = KeepTowerH;
         var stone = new StandardMaterial3D { AlbedoColor = new Color(0.47f, 0.45f, 0.42f), Roughness = 1f };
 
@@ -1821,36 +1849,6 @@ public partial class World3D : Node3D
         p.Position = (a + c) * 0.5f + new Vector3(0, atY, 0);
         p.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
         root.AddChild(p);
-    }
-
-    // The front entrance: a stone porch standing well proud of the wall with a
-    // wooden plank door in it, so it reads as a clear gateway and can't be lost
-    // against the wall or hidden by the corner towers. Centred at `at` on the front.
-    void DoorLeaf(Node3D root, Vector3 at)
-    {
-        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.62f, 0.6f, 0.55f), Roughness = 1f };
-        var wood  = new StandardMaterial3D { AlbedoColor = new Color(0.42f, 0.27f, 0.14f), Roughness = 1f };
-        var iron  = new StandardMaterial3D { AlbedoColor = new Color(0.16f, 0.15f, 0.14f), Roughness = 1f };
-
-        const float w = 0.92f, h = 1.8f, out_ = 0.34f;   // door width, height, how far the porch stands out
-
-        MeshInstance3D Box(Material m, Vector3 size, Vector3 pos)
-        {
-            var mi = new MeshInstance3D { Mesh = new BoxMesh { Size = size }, MaterialOverride = m, Position = at + pos };
-            mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
-            return mi;
-        }
-
-        // Porch: two jambs and a lintel, running from the wall face out to `out_`.
-        float jz = out_ * 0.5f, jd = out_ + 0.1f;   // jamb centre z and depth
-        root.AddChild(Box(stone, new Vector3(0.2f, h + 0.24f, jd), new Vector3(-w / 2 - 0.13f, (h + 0.24f) / 2, jz)));
-        root.AddChild(Box(stone, new Vector3(0.2f, h + 0.24f, jd), new Vector3(w / 2 + 0.13f, (h + 0.24f) / 2, jz)));
-        root.AddChild(Box(stone, new Vector3(w + 0.46f, 0.22f, jd), new Vector3(0, h + 0.11f, jz)));
-
-        // The wooden door, hung at the front of the porch, with two iron braces.
-        root.AddChild(Box(wood, new Vector3(w, h, 0.12f), new Vector3(0, h / 2, out_ + 0.02f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.04f, 0.1f, 0.15f), new Vector3(0, h * 0.28f, out_ + 0.05f)));
-        root.AddChild(Box(iron, new Vector3(w + 0.04f, 0.1f, 0.15f), new Vector3(0, h * 0.72f, out_ + 0.05f)));
     }
 
     void SyncBuildings()
