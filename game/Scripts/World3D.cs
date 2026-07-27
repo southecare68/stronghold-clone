@@ -111,6 +111,12 @@ public partial class World3D : Node3D
     Vector3 _stairBase, _stairTop;   // set by BuildStaircase
     const float ClimbSpeed = 2.6f;   // units per second up the path
 
+    // Idle peasants drift to the fire pit in front of their keep and wait there —
+    // a render-only muster (the sim leaves an idle peasant standing where it is).
+    readonly Dictionary<int, Vector3> _firePit = new();     // owner -> pit world position
+    readonly Dictionary<int, Vector3> _loiterPos = new();   // unit id -> current drift position
+    const float LoiterSpeed = 1.9f;                          // units per second, walking to/from the fire
+
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
     PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher;
@@ -1579,7 +1585,21 @@ public partial class World3D : Node3D
             bool walking, attacking = false;
 
             var wall = u.GarrisonId != 0 ? BuildingById(u.GarrisonId) : null;
-            if (wall != null)
+            bool idle = u.IsPeasant && u.Job == Sim.Job.None && u.GarrisonId == 0;
+            if (idle && _firePit.TryGetValue(u.Owner, out var pit))
+            {
+                // Idle peasant: drift to a slot round the fire pit and wait, facing
+                // the fire. Render-only — its sim tile is left where the sim put it.
+                var slot = pit + LoiterSlot(u.Id);
+                var cur = _loiterPos.TryGetValue(u.Id, out var lp) ? lp : new Vector3(draw.X, 0, draw.Y);
+                cur = cur.MoveToward(slot, (float)delta * LoiterSpeed);
+                _loiterPos[u.Id] = cur;
+                pos = cur;
+                var v = slot - cur;
+                walking = v.LengthSquared() > 0.02f;
+                face = walking ? v : pit - slot;   // arrived: turn to the flames
+            }
+            else if (wall != null)
             {
                 // A wall garrison stands on the walkway; a keep garrison takes a spot
                 // on the roof deck and faces outward. Each uses its own stair.
@@ -1618,10 +1638,23 @@ public partial class World3D : Node3D
             {
                 // Field unit: on the ground, moving where the sim moves it.
                 _onWall.Remove(u.Id); _climb.Remove(u.Id);
-                pos = new Vector3(draw.X, 0, draw.Y);
-                face = new Vector3(vel.X, 0, vel.Y);
-                walking = vel.LengthSquared() > 1e-5f;
-                attacking = !walking && u.TargetId != 0;
+                var ground = new Vector3(draw.X, 0, draw.Y);
+                if (_loiterPos.TryGetValue(u.Id, out var lp))
+                {
+                    // Just left the fire pit (got a job) — walk back to the sim path
+                    // instead of snapping, then hand back to normal field movement.
+                    lp = lp.MoveToward(ground, (float)delta * LoiterSpeed * 1.6f);
+                    if (lp.DistanceSquaredTo(ground) < 0.02f) { _loiterPos.Remove(u.Id); pos = ground; face = new Vector3(vel.X, 0, vel.Y); }
+                    else { _loiterPos[u.Id] = lp; pos = lp; face = ground - lp; }
+                    walking = true;
+                }
+                else
+                {
+                    pos = ground;
+                    face = new Vector3(vel.X, 0, vel.Y);
+                    walking = vel.LengthSquared() > 1e-5f;
+                    attacking = !walking && u.TargetId != 0;
+                }
             }
 
             node.Position = pos;
@@ -1649,7 +1682,7 @@ public partial class World3D : Node3D
         }
         Prune(_unitNodes, live);
         foreach (var id in new List<int>(_skel.Keys))
-            if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); }
+            if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); _loiterPos.Remove(id); }
 
         // A unit that was here last frame and is gone now has died (or, for a
         // peasant, been trained away). Soldiers fall with a puff; drop its bar.
@@ -1742,7 +1775,60 @@ public partial class World3D : Node3D
         // roof — reads as climbing unseen stairs inside.
         _keepStair[b.Id] = (root.Position + new Vector3(0, 0, d), root.Position);
 
+        // A fire pit on the ground in front of the gate — the muster where idle
+        // peasants gather (see SyncUnits). Kept with the keep so it dies with it.
+        var pit = new Vector3(0, 0, d + 1.8f);
+        FirePit(root, pit);
+        _firePit[b.Owner] = root.Position + pit;
+
         return root;
+    }
+
+    // A little fire pit: a ring of stones round crossed logs and orange flames, with
+    // a warm glow. Purely decorative — the muster point for idle peasants.
+    void FirePit(Node3D root, Vector3 at)
+    {
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.3f, 0.29f, 0.27f), Roughness = 1f };
+        var log = new StandardMaterial3D { AlbedoColor = new Color(0.28f, 0.19f, 0.11f), Roughness = 1f };
+        var flame = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            AlbedoColor = new Color(1f, 0.55f, 0.15f),
+        };
+
+        const int ring = 8;
+        const float r = 0.42f;
+        for (int i = 0; i < ring; i++)
+        {
+            float a = i * Mathf.Tau / ring;
+            root.AddChild(KeepBox(stone, new Vector3(0.17f, 0.13f, 0.17f), at + new Vector3(Mathf.Cos(a) * r, 0.06f, Mathf.Sin(a) * r)));
+        }
+        var lA = KeepBox(log, new Vector3(0.55f, 0.1f, 0.14f), at + new Vector3(0, 0.08f, 0));
+        var lB = KeepBox(log, new Vector3(0.14f, 0.1f, 0.55f), at + new Vector3(0, 0.11f, 0));
+        root.AddChild(lA); root.AddChild(lB);
+        for (int i = 0; i < 3; i++)
+            root.AddChild(new MeshInstance3D
+            {
+                Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 0.12f, Height = 0.36f + 0.12f * (i % 2), RadialSegments = 8 },
+                MaterialOverride = flame,
+                Position = at + new Vector3((i - 1) * 0.12f, 0.26f, 0),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
+        root.AddChild(new OmniLight3D
+        {
+            Position = at + new Vector3(0, 0.5f, 0),
+            LightColor = new Color(1f, 0.62f, 0.28f),
+            OmniRange = 3.6f, LightEnergy = 1.5f,
+        });
+    }
+
+    // A stable loitering slot around the fire pit, spread by unit id so the idle
+    // peasants ring the fire rather than stack up.
+    static Vector3 LoiterSlot(int id)
+    {
+        float a = id * 2.3999632f;                 // golden angle — an even spread
+        float rad = 0.75f + (id % 3) * 0.32f;
+        return new Vector3(Mathf.Cos(a) * rad, 0, Mathf.Sin(a) * rad);
     }
 
     // A round corner tower with a green conical spire and a red flag on top. Built
