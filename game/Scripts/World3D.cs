@@ -1740,6 +1740,15 @@ public partial class World3D : Node3D
             return;
         }
 
+        // Trackpad pinch. Spreading the fingers (Factor > 1) zooms in and
+        // pinching zooms out, matching the OS gesture; same clamp as the wheel.
+        if (e is InputEventMagnifyGesture mag)
+        {
+            _camDist = Mathf.Clamp(_camDist / Mathf.Max(mag.Factor, 0.01f), 6f, 90f);
+            UpdateCamera();
+            return;
+        }
+
         if (e is InputEventMouseButton mb)
         {
             if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed)   { _camDist = Mathf.Max(6f, _camDist * 0.9f); UpdateCamera(); }
