@@ -568,6 +568,7 @@ public partial class World3D : Node3D
     void UpdateFog()
     {
         if (!_sim.FogEnabled) { _fogPlane.Visible = false; return; }
+        _fogPlane.Visible = true;   // re-show it when fog is toggled back ON (the F key)
         for (int y = 0; y < MapSize; y++)
             for (int x = 0; x < MapSize; x++)
             {
