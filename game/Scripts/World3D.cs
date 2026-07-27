@@ -1420,14 +1420,15 @@ public partial class World3D : Node3D
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // Solid faces up to the roof, the front broken by a gate.
+        // Solid faces up to the roof on ALL four sides — the keep is fully enclosed,
+        // no gaps. The gate is a relief set against the solid front, not a hole, so
+        // nothing is see-through; the garrison still enters there (climbing unseen
+        // inside). Faces overlap at the corners, which the round towers also cover.
         KeepFace(root, nw, ne);   // north (back)
         KeepFace(root, nw, sw);   // west
         KeepFace(root, ne, se);   // east
-        const float gw = 0.7f;
-        KeepFace(root, sw, new Vector3(-gw, 0, d));   // south, left of gate
-        KeepFace(root, new Vector3(gw, 0, d), se);    // south, right of gate
-        Gate(root, new Vector3(0, 0, d));
+        KeepFace(root, sw, se);   // south (full)
+        Gate(root, new Vector3(0, 0, d + 0.12f));   // gate relief, standing proud of the solid wall
 
         // The flat roof deck the garrison stands on.
         var deck = new MeshInstance3D
