@@ -37,7 +37,7 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
-    PackedScene _keepTowerL, _keepTowerS, _keepRoof, _keepWall;   // the keep is composed from castle pieces
+    PackedScene _keepTowerL, _keepTowerS, _keepRoof, _keepWall, _keepGate;   // the keep is composed from castle pieces
     readonly HashSet<(int, int)> _wallSet = new();
 
     // Netcode. The renderer no longer owns a bare Simulation; it drives a lockstep
@@ -375,8 +375,9 @@ public partial class World3D : Node3D
         // body to skirt them, assembled in MakeKeep into a small castle.
         _keepTowerL = Load("Castle/SM_Bld_Castle_Wall_Tower_L_01");
         _keepTowerS = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");
-        _keepRoof   = Load("Castle/SM_Bld_Castle_Roof_Cap_Round_02");
+        _keepRoof   = Load("Castle/SM_Bld_Castle_Roof_Cap_Round_02");   // domed cap; the pack's pointier caps are finials/flat lids that read worse
         _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
+        _keepGate   = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
     }
 
     static PackedScene Load(string rel) => GD.Load<PackedScene>(Prefabs + rel + ".tscn");
@@ -1366,11 +1367,16 @@ public partial class World3D : Node3D
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // Curtain walls first, so the turrets sit over their ends and hide the seams.
+        // Crenellated curtain on three sides; the front (south, toward the map) gets
+        // a gatehouse in the middle with a short wall on each side of it.
         CurtainWall(root, nw, ne);   // north
-        CurtainWall(root, sw, se);   // south
         CurtainWall(root, nw, sw);   // west
         CurtainWall(root, ne, se);   // east
+        const float gw = 0.62f;      // half-width of the gate opening
+        var gl = new Vector3(-gw, 0, d); var gr = new Vector3(gw, 0, d);
+        CurtainWall(root, sw, gl);   // left of the gate
+        CurtainWall(root, gr, se);   // right of the gate
+        Gate(root, new Vector3(0, 0, d));
 
         // Central donjon, taller and broader than the corner turrets.
         Turret(root, Vector3.Zero, s * 1.25f, _keepTowerL);
@@ -1382,18 +1388,40 @@ public partial class World3D : Node3D
         return root;
     }
 
-    // A curtain-wall segment running between two corner turrets. Wall_01 is natively
-    // 5x5x0.5 with its length along local X, so scale X to the span and turn it to
-    // run along the edge.
+    const float CurtainScaleY = 0.26f;                 // Wall_01 is native 5 tall -> ~1.3
+    static readonly float CurtainTop = 5f * CurtainScaleY;
+
+    // A curtain-wall segment between two points, crenellated on top. Wall_01 and the
+    // Battlements are native 5x5x0.5 with their length on local X, so scale X to the
+    // span and turn the piece to run along the edge.
     void CurtainWall(Node3D root, Vector3 a, Vector3 c)
     {
         var seg = c - a;
         float len = seg.Length();
-        var w = _keepWall.Instantiate<Node3D>();
-        w.Scale = new Vector3(len / 5f, 0.26f, 1.0f);        // span x low height x thin
-        w.Position = (a + c) * 0.5f;
-        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);   // local +X along the edge
-        root.AddChild(w);
+        if (len < 0.05f) return;
+        float yaw = Mathf.Atan2(-seg.Z, seg.X);   // local +X along the edge
+        var mid = (a + c) * 0.5f;
+
+        var body = _keepWall.Instantiate<Node3D>();
+        body.Scale = new Vector3(len / 5f, CurtainScaleY, 1.0f);
+        body.Position = mid;
+        body.Rotation = new Vector3(0, yaw, 0);
+        root.AddChild(body);
+
+        var parapet = _wallBat.Instantiate<Node3D>();
+        parapet.Scale = new Vector3(len / 5f, 0.3f, 0.7f);
+        parapet.Position = mid + new Vector3(0, CurtainTop, 0);
+        parapet.Rotation = new Vector3(0, yaw, 0);
+        root.AddChild(parapet);
+    }
+
+    // The gatehouse module set into the front wall, opening outward.
+    void Gate(Node3D root, Vector3 at)
+    {
+        var g = _keepGate.Instantiate<Node3D>();
+        g.Scale = new Vector3(0.26f, 0.32f, 0.5f);
+        g.Position = at;
+        root.AddChild(g);
     }
 
     // One castle tower with a conical roof set on its crown.
