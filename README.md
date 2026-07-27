@@ -63,6 +63,13 @@ stronghold-clone/
 ```
 
 ## Run the game
+**Fresh Mac?** From the cloned repo, `./setup-macos.sh` checks the toolchain,
+builds, generates this machine's Godot import cache, and prints how to play
+(`./setup-macos.sh --play` launches straight away; append game flags like
+`--ai=hard` or `--no-fog`). Install the Godot 4.7 .NET (mono) build and the
+.NET 8 SDK, and copy in the git-ignored `game/Assets/` art pack, first — the
+script says exactly how if either is missing.
+
 Open the `game/` folder in a **Godot 4.x .NET (C#) editor build** and press
 Play. Left-drag to box-select your units; right-click empty ground to move them
 (they route around the terrain — a walled gate, a lake, marsh — and the selected
