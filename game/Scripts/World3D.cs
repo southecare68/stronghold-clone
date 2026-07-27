@@ -182,7 +182,8 @@ public partial class World3D : Node3D
     // My territory as a rectangle in tile coords, so fog can be cleared inside it.
     bool _myTerrValid;
     int _myMinX, _myMinY, _myMaxX, _myMaxY;
-    const int TerrMargin = 4;   // tiles of breathing room around the buildings' bounds
+    const int TerrMargin = 4;          // tiles of breathing room around the claimed area
+    const int TerrResourceReach = 18;  // a camp claims resource nodes this near its buildings (= the sim's work range)
     static readonly Color TerrMine = new(0.35f, 0.75f, 1f);       // matches the friendly ring
     static readonly Color TerrEnemy = new(1f, 0.45f, 0.35f);      // matches the enemy ring
 
@@ -655,6 +656,26 @@ public partial class World3D : Node3D
             if (box.TryGetValue(b.Owner, out var r))
             { r[0] = Math.Min(r[0], lx); r[1] = Math.Min(r[1], ly); r[2] = Math.Max(r[2], hx); r[3] = Math.Max(r[3], hy); }
             else box[b.Owner] = new[] { lx, ly, hx, hy };
+        }
+
+        // Then swallow the home resource patches: any node a camp's building can
+        // reach (the sim's own work range) belongs to that camp, so the border ends
+        // up OUTSIDE its wood and stone — a fairly large holding, not a tight ring
+        // around the keep. The contested mid-map deposits sit far past any base's
+        // buildings, so neither camp claims them until someone builds out to them.
+        foreach (var n in _sim.NodeList)
+        {
+            if (n.Amount <= 0) continue;
+            foreach (var b in _sim.Buildings)
+            {
+                if (!b.Alive || !box.ContainsKey(b.Owner)) continue;
+                if (fog && b.Owner != MyPlayer && !_sim.HasExplored(MyPlayer, b.CenterX, b.CenterY)) continue;
+                int dx = n.X - b.CenterX, dy = n.Y - b.CenterY;
+                if (dx * dx + dy * dy > TerrResourceReach * TerrResourceReach) continue;
+                var r = box[b.Owner];
+                r[0] = Math.Min(r[0], n.X); r[1] = Math.Min(r[1], n.Y);
+                r[2] = Math.Max(r[2], n.X); r[3] = Math.Max(r[3], n.Y);
+            }
         }
 
         _myTerrValid = false;
