@@ -89,6 +89,11 @@ public partial class World3D : Node3D
     Building _selectedBuilding;
     Control _trainPanel;
     Label _trainInfo;
+    // Demolish asks first: a stray Del arms this confirm popup, and only a second
+    // Del (or the Demolish button) actually razes. 0 = nothing pending.
+    Control _confirmPanel;
+    Label _confirmLabel;
+    int _demolishId;
     readonly Dictionary<int, Vector2> _prevPos = new();
     readonly Dictionary<int, float> _yaw = new();
     readonly Dictionary<int, Skeleton3D> _skel = new();
@@ -237,6 +242,7 @@ public partial class World3D : Node3D
         SetupHud();
         SetupBuild();
         SetupTrainPanel();
+        SetupConfirmPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
         // needs no explicit listener. --audio-log prints each voice for headless
@@ -897,6 +903,9 @@ public partial class World3D : Node3D
 
     void UpdateHud()
     {
+        // Drop a demolish prompt whose target has vanished (razed by other means).
+        if (_demolishId != 0 && BuildingById(_demolishId) == null) CancelDemolish();
+
         int me = MyPlayer;
         int[] res =
         {
@@ -1895,17 +1904,25 @@ public partial class World3D : Node3D
             return;
         }
 
-        // Delete / Backspace demolishes the selected building — reclaims half its
-        // cost, hands its worker back to the labour pool, and clears the ground. Not
-        // the keep (losing that is a defeat, not a refund), and not while placing.
-        // Goes through the normal lockstep command path, so it is fair and networked.
+        // Delete / Backspace demolishes the selected building — but asks first. A
+        // first press ARMS the confirm popup; a second (or the Demolish button, or
+        // Enter) actually razes it, reclaiming half the cost and freeing its worker.
+        // The failsafe is the point: a stray Del never loses a building outright.
+        // The command itself goes down the normal lockstep path, so it stays fair
+        // and networked. Not the keep, and not while placing.
         if (e is InputEventKey del && del.Pressed && _buildType == null &&
-            (del.Keycode == Key.Delete || del.Keycode == Key.Backspace) &&
-            _selectedBuilding != null && _selectedBuilding.Alive &&
-            _selectedBuilding.Type != BuildingType.Keep)
+            (del.Keycode == Key.Delete || del.Keycode == Key.Backspace ||
+             ((del.Keycode == Key.Enter || del.Keycode == Key.KpEnter) && _demolishId != 0)))
         {
-            _me.Issue(new Command { Type = CommandType.Demolish, TargetId = _selectedBuilding.Id });
-            _selectedBuilding = null;
+            if (_demolishId != 0) ConfirmDemolish();
+            else ArmDemolish(_selectedBuilding);
+            return;
+        }
+
+        // Escape dismisses a pending demolish first, before it leaves build mode.
+        if (e is InputEventKey esc && esc.Pressed && esc.Keycode == Key.Escape && _demolishId != 0)
+        {
+            CancelDemolish();
             return;
         }
 
@@ -1965,6 +1982,7 @@ public partial class World3D : Node3D
         bool additive = Input.IsKeyPressed(Key.Shift);
         if (!additive) _selected.Clear();
         _selectedBuilding = null;   // a fresh selection closes any open building panel
+        CancelDemolish();           // ...and drops any pending demolish confirmation
 
         if ((end - _boxStart).Length() <= 6f)
         {
@@ -2123,6 +2141,89 @@ public partial class World3D : Node3D
             b.Pressed += () => TrainAt(design);
             row.AddChild(b);
         }
+    }
+
+    // ---- demolish confirmation --------------------------------------------
+
+    // A small centred popup that stands between a stray Del and losing a building.
+    // It does NOT pause the game (a modal that froze the loop would stall lockstep
+    // and risk a desync); the world keeps ticking behind it, and it simply holds
+    // the demolish order until the player confirms or cancels.
+    void SetupConfirmPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        _confirmPanel = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+            OffsetTop = -70, Visible = false,
+        };
+        ((PanelContainer)_confirmPanel).AddThemeStyleboxOverride("panel", Panel(new Color(0.13f, 0.09f, 0.10f, 0.96f)));
+        layer.AddChild(_confirmPanel);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 18);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 14);
+        _confirmPanel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 10);
+        margin.AddChild(col);
+
+        _confirmLabel = new Label { Text = "Demolish?", HorizontalAlignment = HorizontalAlignment.Center };
+        _confirmLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.92f, 0.9f));
+        _confirmLabel.AddThemeFontSizeOverride("font_size", 15);
+        col.AddChild(_confirmLabel);
+
+        var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 10);
+        col.AddChild(row);
+
+        var yes = new Button { Text = "Demolish  ⌫", CustomMinimumSize = new Vector2(120, 0), FocusMode = Control.FocusModeEnum.None };
+        yes.AddThemeColorOverride("font_color", new Color(0.98f, 0.55f, 0.5f));
+        yes.AddThemeFontSizeOverride("font_size", 13);
+        yes.Pressed += ConfirmDemolish;
+        row.AddChild(yes);
+
+        var no = new Button { Text = "Cancel  Esc", CustomMinimumSize = new Vector2(120, 0), FocusMode = Control.FocusModeEnum.None };
+        no.AddThemeFontSizeOverride("font_size", 13);
+        no.Pressed += CancelDemolish;
+        row.AddChild(no);
+    }
+
+    // Arm the confirm popup for a building (the keep is never demolishable).
+    void ArmDemolish(Building b)
+    {
+        if (b == null || !b.Alive || b.Type == BuildingType.Keep) return;
+        _demolishId = b.Id;
+        string[] tag = { "w", "s", "f", "g" };
+        var r = _sim.RefundOf(b.Type);
+        var parts = new List<string>();
+        for (int i = 0; i < r.Length; i++) if (r[i] > 0) parts.Add($"{r[i]}{tag[i]}");
+        string refund = parts.Count == 0 ? "" : $"   refund +{string.Join(" ", parts)}";
+        _confirmLabel.Text = $"Demolish {NameOf(b.Type)}?{refund}";
+        _confirmPanel.Visible = true;
+        _sound?.PlayUi(Sfx.Select);
+    }
+
+    // Confirm: issue the actual command down the normal lockstep path, then dismiss.
+    void ConfirmDemolish()
+    {
+        if (_demolishId != 0 && BuildingById(_demolishId) != null)
+        {
+            _me.Issue(new Command { Type = CommandType.Demolish, TargetId = _demolishId });
+            _selectedBuilding = null;
+            _sound?.PlayUi(Sfx.Select);
+        }
+        CancelDemolish();
+    }
+
+    void CancelDemolish()
+    {
+        _demolishId = 0;
+        if (_confirmPanel != null) _confirmPanel.Visible = false;
     }
 
     // Queue one of `design` at the selected barracks. The sim re-checks wood and a
