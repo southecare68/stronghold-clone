@@ -37,7 +37,7 @@ public partial class World3D : Node3D
     const float WallWalkY = WallTopY;                                  // men stand on the flat top
 
     PackedScene _wallBody, _wallBat;
-    PackedScene _keepWall, _keepGate, _keepTurret;   // the keep is composed from castle pieces
+    PackedScene _keepWall, _keepDoor, _keepTurret;   // the keep is composed from castle pieces
 
     // The keep is a flat-topped fighting platform (Stronghold-style): troops climb a
     // stair onto its crenellated roof and fire from it. These carry the roof height,
@@ -391,7 +391,7 @@ public partial class World3D : Node3D
         // Keep pieces — a central donjon, corner turrets, conical roofs, and a wall
         // body to skirt them, assembled in MakeKeep into a small castle.
         _keepWall   = Load("Castle/SM_Bld_Castle_Wall_01");
-        _keepGate   = Load("Castle/SM_Bld_Castle_Wall_Gate_01");
+        _keepDoor   = Load("Castle/SM_Bld_Castle_Wall_Door_01");      // wall segment with a door
         _keepTurret = Load("Castle/SM_Bld_Castle_Wall_Tower_S_01");   // round corner tower
     }
 
@@ -1420,15 +1420,26 @@ public partial class World3D : Node3D
         var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
         var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
 
-        // Solid faces up to the roof on ALL four sides — the keep is fully enclosed,
-        // no gaps. The gate is a relief set against the solid front, not a hole, so
-        // nothing is see-through; the garrison still enters there (climbing unseen
-        // inside). Faces overlap at the corners, which the round towers also cover.
+        // A SOLID stone core fills the footprint, so the keep can never be seen
+        // through or into — no openings on any side. The textured Wall_01 faces are
+        // the outer skin over it, and a single closed door marks the front entrance.
+        var core = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(2 * d - 0.15f, KeepRoofY, 2 * d - 0.15f) },
+            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.44f, 0.42f, 0.39f) },
+            Position = new Vector3(0, KeepRoofY * 0.5f, 0),
+        };
+        root.AddChild(core);
+
         KeepFace(root, nw, ne);   // north (back)
         KeepFace(root, nw, sw);   // west
         KeepFace(root, ne, se);   // east
-        KeepFace(root, sw, se);   // south (full)
-        Gate(root, new Vector3(0, 0, d + 0.12f));   // gate relief, standing proud of the solid wall
+        // South (front): solid wall either side of a door segment in the middle. The
+        // solid core sits right behind the door, so it's an entrance, not a hole.
+        const float dw = 0.65f;   // half-width of the door segment
+        KeepFace(root, sw, new Vector3(-dw, 0, d));
+        KeepFace(root, new Vector3(dw, 0, d), se);
+        DoorFace(root, new Vector3(-dw, 0, d), new Vector3(dw, 0, d));
 
         // The flat roof deck the garrison stands on.
         var deck = new MeshInstance3D
@@ -1490,13 +1501,18 @@ public partial class World3D : Node3D
         root.AddChild(p);
     }
 
-    // The gatehouse module set into the front wall, opening outward.
-    void Gate(Node3D root, Vector3 at)
+    // The door segment of the front wall — a Wall_Door piece scaled and turned like
+    // a face, so the door faces out and the solid core behind reads as the threshold.
+    void DoorFace(Node3D root, Vector3 a, Vector3 c)
     {
-        var g = _keepGate.Instantiate<Node3D>();
-        g.Scale = new Vector3(0.28f, 0.5f, 0.5f);   // tall enough to fill the keep face
-        g.Position = at;
-        root.AddChild(g);
+        var seg = c - a;
+        float len = seg.Length();
+        if (len < 0.05f) return;
+        var w = _keepDoor.Instantiate<Node3D>();
+        w.Scale = new Vector3(len / 5f, KeepRoofY / 5f, 1.0f);
+        w.Position = (a + c) * 0.5f;
+        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);
+        root.AddChild(w);
     }
 
     void SyncBuildings()
