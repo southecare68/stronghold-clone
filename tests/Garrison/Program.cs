@@ -42,7 +42,7 @@ static class Program
     {
         Console.WriteLine("a soldier climbs onto the wall:");
         var sim = new Simulation(TileMap.Open(48));
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var u = sim.SpawnUnit(1, 10, 12);          // two tiles below the wall
 
         Order(sim, Garrison(u, wall.Id));
@@ -59,7 +59,7 @@ static class Program
         Console.WriteLine("\na garrisoned archer auto-fires with no order:");
         var sim = new Simulation(TileMap.Open(48));
         int archer = sim.RegisterDesign(Archer);
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var a = sim.SpawnUnit(1, 10, 11, archer);
         Garrison(sim, a, wall);
 
@@ -77,7 +77,7 @@ static class Program
         Console.WriteLine("\nthe wall extends the archer's reach:");
         var sim = new Simulation(TileMap.Open(48));
         int archer = sim.RegisterDesign(Archer);
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var a = sim.SpawnUnit(1, 10, 11, archer);
         Garrison(sim, a, wall);
 
@@ -113,7 +113,7 @@ static class Program
     {
         var sim = new Simulation(TileMap.Open(48));
         int archer = sim.RegisterDesign(Archer);
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var target = sim.SpawnUnit(1, 10, 10);     // on the wall tile in both runs
         if (garrison) Garrison(sim, target, wall);
 
@@ -129,7 +129,7 @@ static class Program
     {
         Console.WriteLine("\nrazing the wall dismisses the garrison:");
         var sim = new Simulation(TileMap.Open(48));
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var u = sim.SpawnUnit(1, 10, 11);
         Garrison(sim, u, wall);
         Check("it is on the wall", u.GarrisonId == wall.Id && (u.X >> 16) == 10 && (u.Y >> 16) == 10);
@@ -145,7 +145,7 @@ static class Program
     {
         Console.WriteLine("\na move order pulls them off the wall:");
         var sim = new Simulation(TileMap.Open(48));
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var u = sim.SpawnUnit(1, 10, 11);
         Garrison(sim, u, wall);
         Check("it starts on the wall", u.GarrisonId == wall.Id);
@@ -162,7 +162,7 @@ static class Program
         Console.WriteLine("\npeasants cannot garrison:");
         var sim = new Simulation(TileMap.Open(48));
         sim.SetDropOff(1, 5, 5);
-        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+        var wall = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
         var p = sim.SpawnPeasant(1);
         Order(sim, Garrison(p, wall.Id));
         for (int i = 0; i < 10; i++) sim.Tick(Array.Empty<Command>());
@@ -183,7 +183,7 @@ static class Program
         foreach (var c in new[] { a, b })
         {
             int archer = c.Sim.RegisterDesign(Archer);
-            var wall = c.Sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10);
+            var wall = c.Sim.PlaceBuilding(BuildingType.Wall, 1, 10, 10); c.Sim.PlaceBuilding(BuildingType.Steps, 1, 12, 10);
             var ar = c.Sim.SpawnUnit(1, 10, 11, archer);
             c.Sim.SpawnUnit(2, 14, 10);            // an enemy in wall range
             // Garrison via a queued command so both clients apply it in lockstep.

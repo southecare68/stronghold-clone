@@ -20,7 +20,7 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -280,7 +280,24 @@ namespace Sim
         // The keep is manned like a rampart — its flat roof is a fighting platform,
         // so troops climb up and fire from it, the last strongpoint of a base.
         static bool CanGarrison(BuildingType t) =>
-            t == BuildingType.Wall || t == BuildingType.Gatehouse || t == BuildingType.Keep;
+            t == BuildingType.Wall || t == BuildingType.Gatehouse || t == BuildingType.Keep || t == BuildingType.Turret;
+
+        // A rampart you reach by climbing needs steps built nearby to get up onto it;
+        // the keep has its own inner stair. No steps = no way up, so it holds nobody.
+        static bool NeedsSteps(BuildingType t) =>
+            t == BuildingType.Wall || t == BuildingType.Gatehouse || t == BuildingType.Turret;
+        const int StepsReach = 8;   // a flight of steps serves ramparts within this many tiles
+
+        bool HasStepsNear(int owner, Building b)
+        {
+            foreach (var s in Buildings)
+                if (s.Alive && s.Owner == owner && s.Type == BuildingType.Steps)
+                {
+                    int dx = s.X - b.X, dy = s.Y - b.Y;
+                    if (dx * dx + dy * dy <= StepsReach * StepsReach) return true;
+                }
+            return false;
+        }
 
         // --- Economy tuning ---------------------------------------------------
         static readonly int GatherRange = Fixed.One * 3 / 2;    // reach to a node, 1.5 tiles
@@ -369,8 +386,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2 };  // ...Farm, Mill, Bakery, House
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1 };  // ...House, Steps, Turret
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -384,13 +401,15 @@ namespace Sim
             new[] { 20, 15, 0, 15 },  // Mill — costs GRAIN too, so you must farm before you can mill
             new[] { 25, 15, 0, 20 },  // Bakery — likewise gated behind a working grain supply
             new[] { 15, 0, 0 },       // House — cheap timber; each one shelters ten more peasants
+            new[] { 5, 5, 0 },        // Steps — the only way up onto a wall
+            new[] { 10, 20, 0 },      // Turret — a raised archer platform over the wall
         };
         // Costs are [wood, stone, food, grain]. Most buildings list only the first
         // three (grain 0); the mill and bakery add a fourth entry, and CanAfford/Pay
         // iterate each cost's own length, so the shorter rows charge no grain.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -925,6 +944,9 @@ namespace Sim
                     var rampart = Buildings.Find(x => x.Id == cmd.TargetId);
                     if (rampart == null || rampart.Owner != cmd.Owner ||
                         !rampart.Alive || !CanGarrison(rampart.Type)) break;
+                    // No steps in reach, no way up — the order is refused and the men
+                    // stay on the ground as field units.
+                    if (NeedsSteps(rampart.Type) && !HasStepsNear(cmd.Owner, rampart)) break;
                     foreach (var id in cmd.UnitIds)
                     {
                         var u = Units.Find(v => v.Id == id);

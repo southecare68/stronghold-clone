@@ -108,7 +108,9 @@ public partial class World3D : Node3D
     sealed class Climb { public Vector3[] Pts; public float Dist; }
     readonly Dictionary<int, Climb> _climb = new();
     readonly HashSet<int> _onWall = new();
-    Vector3 _stairBase, _stairTop;   // set by BuildStaircase
+    // Each Steps building's foot (ground) and top (walkway), set when its node is
+    // built — a wall/turret garrison climbs the nearest owned steps to get up.
+    readonly Dictionary<int, (Vector3 foot, Vector3 top)> _stepsAccess = new();
     const float ClimbSpeed = 2.6f;   // units per second up the path
 
     // Idle peasants drift to the fire pit in front of their keep and wait there —
@@ -164,7 +166,8 @@ public partial class World3D : Node3D
     // the palette left to right.
     static readonly BuildingType[] Buildable =
     {
-        BuildingType.Wall, BuildingType.Gatehouse, BuildingType.House, BuildingType.Barracks,
+        BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
+        BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery,
     };
@@ -270,13 +273,11 @@ public partial class World3D : Node3D
         // the two would desync — hence it lives in the same per-client setup loop.
         // In a networked match both machines must pass it, like the match seed.
         bool noFog = HasFlag("--no-fog");
-        bool demo = _mode == "LOCAL" && !ai;
         int aiOwner = MyPlayer == 2 ? 1 : 2;
         foreach (var c in Clients())
         {
             Skirmish.Setup(c.Sim, MapSize);
             if (noFog) c.Sim.FogEnabled = false;
-            if (demo) ScaffoldWall(c.Sim);
             if (ai) c.Sim.EnableAi(aiOwner, aiLevel);
         }
 
@@ -311,36 +312,11 @@ public partial class World3D : Node3D
         _camYaw = MyPlayer == 2 ? 0.6f + Mathf.Pi : 0.6f;   // face in off the enemy side
         UpdateCamera();
 
-        // The staircase serves the demo scaffold wall, so it too is LOCAL-only.
-        if (demo) BuildStaircase(Skirmish.West(MapSize) + 7, MapSize / 2);
-
         SnapshotPositions();
         SeedObservation();   // baseline so the starting world fires no sounds
         GD.Print("[3d] world ready — mode ", _mode, ", player ", MyPlayer,
                  ai ? ", vs " + aiLevel + " AI" : "", ", ",
                  _sim.Units.Count, " units, ", _sim.Buildings.Count, " buildings");
-    }
-
-    // A stretch of wall at the base with the starting soldiers already manning it,
-    // so men-on-the-walls shows the moment you launch. Sim state, so it is applied
-    // to EVERY client identically (walls get ids in the same order on each).
-    static void ScaffoldWall(Simulation sim)
-    {
-        int wy = MapSize / 2, wx = Skirmish.West(MapSize) + 6;
-        var walls = new List<Building>();
-        for (int i = 0; i < 6; i++) walls.Add(sim.PlaceBuilding(BuildingType.Wall, 1, wx + i, wy));
-
-        var keep = sim.Buildings.Find(b => b.Type == BuildingType.Keep && b.Owner == 1);
-        int k = 1;              // spread the rest along the wall, leaving the near tiles clear
-        bool lordSet = false;
-        foreach (var u in sim.Units)
-        {
-            if (u.Owner != 1 || u.IsPeasant) continue;
-            if (!lordSet && keep != null) { u.GarrisonId = keep.Id; lordSet = true; continue; }  // the lord mans the keep
-            if (k >= walls.Count) continue;
-            var w = walls[k]; k += 2;
-            if (w != null) u.GarrisonId = w.Id;   // no snap — they walk to the stair and climb up
-        }
     }
 
     // Build the lockstep client(s) and the transport under them, mirroring the 2D
@@ -1201,7 +1177,8 @@ public partial class World3D : Node3D
         BuildingType.Wall => "Wall", BuildingType.Gatehouse => "Gate", BuildingType.House => "House",
         BuildingType.Barracks => "Barracks", BuildingType.WoodcutterHut => "Woodcutter",
         BuildingType.Quarry => "Quarry", BuildingType.Storehouse => "Store", BuildingType.Farm => "Farm",
-        BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery", _ => t.ToString(),
+        BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
+        BuildingType.Steps => "Steps", BuildingType.Turret => "Turret", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial.
@@ -1606,21 +1583,40 @@ public partial class World3D : Node3D
             }
             else if (wall != null)
             {
-                // A wall garrison stands on the walkway; a keep garrison takes a spot
-                // on the roof deck and faces outward. Each uses its own stair.
-                Vector3 top, sbase, stop, outward = Vector3.Zero;
+                // A garrison climbs to its post: the keep uses its own built-in
+                // stair; a wall/gatehouse/turret garrison walks to the nearest owned
+                // Steps, up them, and along the walkway. A turret stands one flight
+                // higher still, on its open deck.
+                Vector3 top, outward = Vector3.Zero;
+                Vector3[] path;
+                var ground0 = new Vector3(draw.X, 0, draw.Y);
                 if (wall.Type == BuildingType.Keep)
                 {
                     var off = RoofOffsets[(_keepIdx.TryGetValue(u.Id, out var ki) ? ki : 0) % RoofOffsets.Length];
                     top = new Vector3(wall.X + (wall.W - 1) / 2f, KeepRoofY, wall.Y + (wall.H - 1) / 2f) + off;
                     outward = new Vector3(off.X, 0, off.Z);
                     var st = _keepStair.TryGetValue(wall.Id, out var ks) ? ks : (top, top);
-                    sbase = st.Item1; stop = st.Item2;
+                    path = new[] { ground0, st.Item1, st.Item2, top };
                 }
                 else
                 {
-                    top = new Vector3(wall.X + (wall.W - 1) / 2f, WallTopY, wall.Y + (wall.H - 1) / 2f);
-                    sbase = _stairBase; stop = _stairTop;
+                    float cx = wall.X + (wall.W - 1) / 2f, cz = wall.Y + (wall.H - 1) / 2f;
+                    var walk = new Vector3(cx, WallTopY, cz);          // this tile, at walkway height
+                    var acc = NearestStepsAccess(wall);
+                    if (wall.Type == BuildingType.Turret)
+                    {
+                        top = new Vector3(cx, TurretStandY, cz);       // up onto the deck
+                        path = acc.HasValue
+                            ? new[] { ground0, acc.Value.foot, acc.Value.top, walk, top }
+                            : new[] { ground0, walk, top };
+                    }
+                    else
+                    {
+                        top = walk;
+                        path = acc.HasValue
+                            ? new[] { ground0, acc.Value.foot, acc.Value.top, top }
+                            : new[] { ground0, top };
+                    }
                 }
 
                 if (_onWall.Contains(u.Id))
@@ -1630,9 +1626,9 @@ public partial class World3D : Node3D
                 }
                 else
                 {
-                    // March to the stair, up it, and along the top to the spot.
+                    // March to the steps, up them, and along the top to the spot.
                     if (!_climb.TryGetValue(u.Id, out var cl))
-                        cl = _climb[u.Id] = new Climb { Pts = new[] { new Vector3(draw.X, 0, draw.Y), sbase, stop, top } };
+                        cl = _climb[u.Id] = new Climb { Pts = path };
                     cl.Dist += (float)delta * ClimbSpeed;
                     pos = SamplePath(cl.Pts, cl.Dist, out face, out bool done);
                     walking = true;
@@ -1995,7 +1991,8 @@ public partial class World3D : Node3D
         // Rampart tiles, so a wall knows which way its run goes.
         _wallSet.Clear();
         foreach (var b in _sim.Buildings)
-            if ((b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse) && b.Alive)
+            if ((b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse
+                 || b.Type == BuildingType.Turret) && b.Alive)
                 _wallSet.Add((b.X, b.Y));
 
         var live = new HashSet<int>();
@@ -2004,21 +2001,15 @@ public partial class World3D : Node3D
             live.Add(b.Id);
             if (!_buildingNodes.TryGetValue(b.Id, out var node))
             {
-                if (!_bldModel.TryGetValue(b.Type, out var scene) || scene == null) continue;
-                node = scene.Instantiate<Node3D>();
-
-                if (b.Type == BuildingType.Wall)
-                {
-                    node.QueueFree();          // the generic instance isn't used for walls
-                    node = MakeWall(b);
-                }
-                else if (b.Type == BuildingType.Keep)
-                {
-                    node.QueueFree();          // composed from castle pieces, not one model
-                    node = MakeKeep(b);
-                }
+                // Composed structures (built from primitives, no single model prefab).
+                if (b.Type == BuildingType.Wall) node = MakeWall(b);
+                else if (b.Type == BuildingType.Keep) node = MakeKeep(b);
+                else if (b.Type == BuildingType.Steps) node = MakeSteps(b);
+                else if (b.Type == BuildingType.Turret) node = MakeTurret(b);
                 else
                 {
+                    if (!_bldModel.TryGetValue(b.Type, out var scene) || scene == null) continue;
+                    node = scene.Instantiate<Node3D>();
                     node.Scale = Vector3.One * BuildingScale(scene, b.W);
                     // Centre on the footprint. A tile at (x,y) is centred at (x,y),
                     // so a WxH footprint's centre is (x+(W-1)/2, y+(H-1)/2) — not W/2,
@@ -2163,30 +2154,109 @@ public partial class World3D : Node3D
         return best;
     }
 
-    // A stone staircase from the ground up to the walkway, on the inner (south)
-    // face of the wall at column `tileX`. Built from stacked steps so a unit
-    // climbing it reads as walking up.
+    // A player-built Steps tile: a stone staircase from the ground up to the wall
+    // walkway, turned so it climbs TOWARD the nearest rampart. A garrison ordered
+    // onto a wall walks to the steps, up them, and along the top — no steps, no
+    // climb (the sim refuses the garrison), matching the classic "you need stairs
+    // to man your walls". Its foot/top are recorded so units know where to climb.
     const int StairSteps = 8;
-    const float StairRun = 2.0f;   // how far south of the wall the stair reaches
-    void BuildStaircase(float tileX, float wallZ)
+    const float StepsRun = 1.5f;   // horizontal run of a steps tile (foot -> top)
+
+    Node3D MakeSteps(Building b)
     {
-        _stairBase = new Vector3(tileX, 0, wallZ + StairRun);   // foot of the stair, on the ground
-        _stairTop = new Vector3(tileX, WallTopY, wallZ);        // where it meets the walkway
-        var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f) };
+        var dir = StepsDir(b);                          // axis-aligned, toward the rampart
+        float yaw = Mathf.Atan2(dir.X, dir.Y);          // rotate local +z onto `dir`
+        var root = new Node3D
+        {
+            Position = new Vector3(b.X, 0, b.Y),
+            Rotation = new Vector3(0, yaw, 0),
+        };
+
+        var mat = new StandardMaterial3D { AlbedoColor = new Color(0.56f, 0.52f, 0.47f), Roughness = 1f };
         float stepH = WallTopY / StairSteps;
-        float stepDepth = StairRun / StairSteps;
+        float stepDepth = StepsRun / StairSteps;
         for (int i = 0; i < StairSteps; i++)
         {
             float topY = stepH * (i + 1);
-            float z = wallZ + StairRun - (i + 0.5f) * stepDepth;   // nearest step is furthest from the wall
-            var step = new MeshInstance3D
+            float z = -StepsRun / 2f + (i + 0.5f) * stepDepth;   // lowest at the foot (-z), rising toward +z
+            root.AddChild(new MeshInstance3D
             {
-                Mesh = new BoxMesh { Size = new Vector3(0.9f, topY, stepDepth + 0.02f) },
+                Mesh = new BoxMesh { Size = new Vector3(0.8f, topY, stepDepth + 0.02f) },
                 MaterialOverride = mat,
-                Position = new Vector3(tileX, topY * 0.5f, z),   // grow up from the ground
-            };
-            AddChild(step);
+                Position = new Vector3(0, topY * 0.5f, z),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            });
         }
+
+        // World-space foot (ground) and top (walkway) so a climber has its path.
+        var d3 = new Vector3(dir.X, 0, dir.Y);
+        _stepsAccess[b.Id] = (
+            new Vector3(b.X, 0, b.Y) - d3 * (StepsRun / 2f),
+            new Vector3(b.X, WallTopY, b.Y) + d3 * (StepsRun / 2f));
+        return root;
+    }
+
+    // Which way a steps tile should climb: toward the nearest rampart it serves
+    // (wall / gatehouse / turret). With none yet, it faces away from the keep, the
+    // way the walls do, so a lone steps still looks outward.
+    Vector2I StepsDir(Building b)
+    {
+        Building near = null; int bestD = int.MaxValue;
+        foreach (var r in _sim.Buildings)
+            if (r.Alive && r.Owner == b.Owner &&
+                (r.Type == BuildingType.Wall || r.Type == BuildingType.Gatehouse || r.Type == BuildingType.Turret))
+            {
+                int dx = r.X - b.X, dy = r.Y - b.Y, d = dx * dx + dy * dy;
+                if (d > 0 && d < bestD) { bestD = d; near = r; }
+            }
+
+        int tx, ty;
+        if (near != null) { tx = near.X - b.X; ty = near.Y - b.Y; }
+        else
+        {
+            var keep = _sim.Buildings.Find(k => k.Type == BuildingType.Keep && k.Owner == b.Owner && k.Alive);
+            if (keep == null) return new Vector2I(0, 1);
+            tx = b.X - keep.CenterX; ty = b.Y - keep.CenterY;   // away from the keep
+        }
+        return Mathf.Abs(tx) >= Mathf.Abs(ty)
+            ? new Vector2I(tx >= 0 ? 1 : -1, 0)
+            : new Vector2I(0, ty >= 0 ? 1 : -1);
+    }
+
+    // A player-built Turret tile: a square stone tower that rises above the wall
+    // walk, crenellated, with an open deck on top. Archers who reach the wall can
+    // climb one step higher onto it and shoot from the highest point around.
+    const float TurretStandY = WallTopY + 1.5f;   // deck height — where a garrison stands
+
+    Node3D MakeTurret(Building b)
+    {
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
+        var root = new Node3D { Position = new Vector3(b.X, 0, b.Y) };
+
+        const float w = 0.94f;
+        root.AddChild(KeepBox(stone, new Vector3(w, TurretStandY, w), new Vector3(0, TurretStandY / 2f, 0)));  // shaft
+
+        // Four corner merlons round the deck edge — a crenellated crown.
+        const float m = 0.26f, mh = 0.38f;
+        float e = w / 2f - m / 2f;
+        foreach (var c in new[] { new Vector3(e, 0, e), new Vector3(-e, 0, e), new Vector3(e, 0, -e), new Vector3(-e, 0, -e) })
+            root.AddChild(KeepBox(stone, new Vector3(m, mh, m), c + new Vector3(0, TurretStandY + mh / 2f, 0)));
+        return root;
+    }
+
+    // The foot/top of the nearest owned Steps to a rampart, so its garrison can
+    // climb up. Null if none is built (the sim won't allow the garrison then).
+    (Vector3 foot, Vector3 top)? NearestStepsAccess(Building rampart)
+    {
+        Building best = null; int bestD = int.MaxValue;
+        foreach (var s in _sim.Buildings)
+            if (s.Alive && s.Owner == rampart.Owner && s.Type == BuildingType.Steps)
+            {
+                int dx = s.X - rampart.X, dy = s.Y - rampart.Y, d = dx * dx + dy * dy;
+                if (d < bestD) { bestD = d; best = s; }
+            }
+        if (best != null && _stepsAccess.TryGetValue(best.Id, out var acc)) return acc;
+        return null;
     }
 
     // A wall tile: a solid body with a flat walkway top and a crenellated parapet
