@@ -1361,15 +1361,39 @@ public partial class World3D : Node3D
         var root = new Node3D { Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f) };
         float s = _bldScale[BuildingType.Keep];   // 0.5, the shared building scale
 
+        // Four corners of the 3x3, a tile out toward each.
+        const float d = 1.05f;
+        var nw = new Vector3(-d, 0, -d); var ne = new Vector3(d, 0, -d);
+        var sw = new Vector3(-d, 0, d);  var se = new Vector3(d, 0, d);
+
+        // Curtain walls first, so the turrets sit over their ends and hide the seams.
+        CurtainWall(root, nw, ne);   // north
+        CurtainWall(root, sw, se);   // south
+        CurtainWall(root, nw, sw);   // west
+        CurtainWall(root, ne, se);   // east
+
         // Central donjon, taller and broader than the corner turrets.
         Turret(root, Vector3.Zero, s * 1.25f, _keepTowerL);
 
-        // Four corner turrets, one tile out toward each corner of the 3x3.
-        const float d = 1.05f;
-        foreach (var c in new[] { new Vector3(-d, 0, -d), new Vector3(d, 0, -d), new Vector3(-d, 0, d), new Vector3(d, 0, d) })
+        // A turret at each corner.
+        foreach (var c in new[] { nw, ne, sw, se })
             Turret(root, c, s * 0.72f, _keepTowerS);
 
         return root;
+    }
+
+    // A curtain-wall segment running between two corner turrets. Wall_01 is natively
+    // 5x5x0.5 with its length along local X, so scale X to the span and turn it to
+    // run along the edge.
+    void CurtainWall(Node3D root, Vector3 a, Vector3 c)
+    {
+        var seg = c - a;
+        float len = seg.Length();
+        var w = _keepWall.Instantiate<Node3D>();
+        w.Scale = new Vector3(len / 5f, 0.26f, 1.0f);        // span x low height x thin
+        w.Position = (a + c) * 0.5f;
+        w.Rotation = new Vector3(0, Mathf.Atan2(-seg.Z, seg.X), 0);   // local +X along the edge
+        root.AddChild(w);
     }
 
     // One castle tower with a conical roof set on its crown.
