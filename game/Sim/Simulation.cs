@@ -698,6 +698,15 @@ namespace Sim
         public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
         public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 2;
 
+        // The effects a tax/ration STEP has, for a management UI to show before you
+        // commit to it — read straight off the same tables ResolveRealm settles by,
+        // so what the popup promises is exactly what the realm tick delivers. Gold
+        // is per head per realm tick (negative = a bribe you pay out); the pops are
+        // the approval each step wins or costs.
+        public int TaxGoldAt(int step) => TaxGold[Math.Clamp(step, 0, TaxSteps - 1)];
+        public int TaxPopAt(int step)  => TaxPop[Math.Clamp(step, 0, TaxSteps - 1)];
+        public int RationPopAt(int step) => RationPop[Math.Clamp(step, 0, RationSteps - 1)];
+
         // The food one realm tick's rations will draw at the current order and
         // head-count. If the larder holds less than this, the people go hungry
         // whatever the order says (ResolveRealm), and the HUD flags it as starving.

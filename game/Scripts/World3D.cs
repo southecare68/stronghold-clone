@@ -93,6 +93,11 @@ public partial class World3D : Node3D
     Building _selectedBuilding;
     Control _trainPanel;
     Label _trainInfo;
+
+    // Clicking your keep opens the realm panel: the same tax/ration dials as the
+    // keyboard shortcuts, but with their effects spelled out and +/- buttons.
+    Control _realmPanel;
+    Label _realmHeader, _realmSummary, _realmTaxName, _realmTaxFx, _realmRationName, _realmRationFx;
     // Demolish asks first: a stray Del arms this confirm popup, and only a second
     // Del (or the Demolish button) actually razes. 0 = nothing pending.
     Control _confirmPanel;
@@ -301,6 +306,7 @@ public partial class World3D : Node3D
         SetupHud();
         SetupBuild();
         SetupTrainPanel();
+        SetupRealmPanel();
         SetupConfirmPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
@@ -1114,6 +1120,23 @@ public partial class World3D : Node3D
         _realmToastLeft = 1.9f;
     }
 
+    // The one path for changing a realm dial, shared by the keyboard shortcuts and
+    // the keep panel's buttons: clamp to range, issue the command down lockstep,
+    // and flash the toast. delta is +1/-1 (a step up or down).
+    void AdjustTax(int delta)
+    {
+        int next = Mathf.Clamp(_sim.TaxLevel(MyPlayer) + delta, 0, Simulation.TaxSteps - 1);
+        _me.Issue(new Command { Type = CommandType.SetTax, X = next });
+        ShowRealmToast($"Tax  →  {TaxNames[next]}");
+    }
+
+    void AdjustRations(int delta)
+    {
+        int next = Mathf.Clamp(_sim.RationLevel(MyPlayer) + delta, 0, Simulation.RationSteps - 1);
+        _me.Issue(new Command { Type = CommandType.SetRations, X = next });
+        ShowRealmToast($"Rations  →  {RationNames[next]}");
+    }
+
     void UpdateRealmToast(double delta)
     {
         if (_realmToastLeft <= 0f)
@@ -1504,6 +1527,7 @@ public partial class World3D : Node3D
         UpdateMusic(delta);
         UpdateGhost();
         UpdateTrainPanel();
+        UpdateRealmPanel();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
     }
@@ -2667,20 +2691,14 @@ public partial class World3D : Node3D
             !tax.CtrlPressed && !tax.MetaPressed && !tax.AltPressed &&
             (tax.Keycode == Key.Minus || tax.Keycode == Key.Equal))
         {
-            int step = tax.Keycode == Key.Equal ? 1 : -1;
-            int next = Mathf.Clamp(_sim.TaxLevel(MyPlayer) + step, 0, Simulation.TaxSteps - 1);
-            _me.Issue(new Command { Type = CommandType.SetTax, X = next });
-            ShowRealmToast($"Tax  →  {TaxNames[next]}");
+            AdjustTax(tax.Keycode == Key.Equal ? 1 : -1);
             return;
         }
         if (e is InputEventKey rat && rat.Pressed && _buildType == null &&
             !rat.CtrlPressed && !rat.MetaPressed && !rat.AltPressed &&
             (rat.Keycode == Key.Bracketleft || rat.Keycode == Key.Bracketright))
         {
-            int step = rat.Keycode == Key.Bracketright ? 1 : -1;
-            int next = Mathf.Clamp(_sim.RationLevel(MyPlayer) + step, 0, Simulation.RationSteps - 1);
-            _me.Issue(new Command { Type = CommandType.SetRations, X = next });
-            ShowRealmToast($"Rations  →  {RationNames[next]}");
+            AdjustRations(rat.Keycode == Key.Bracketright ? 1 : -1);
             return;
         }
 
@@ -2926,6 +2944,137 @@ public partial class World3D : Node3D
             row.AddChild(b);
         }
     }
+
+    // ---- the keep's realm panel -------------------------------------------
+
+    // Click your keep and this opens: the same tax and ration dials as the -/=
+    // and [/] keys, but with every effect spelled out and +/- buttons for anyone
+    // who would rather click than memorise shortcuts (both drive AdjustTax/Rations,
+    // so they stay in lockstep). Like the train panel it does NOT pause the game —
+    // a modal that froze the loop would stall lockstep — the realm just keeps
+    // ticking behind it. Shown only for YOUR keep (UpdateRealmPanel).
+    void SetupRealmPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        // Centre-left, the same berth as the train panel: a keep and a barracks are
+        // different buildings, so at most one of the two is ever up at once.
+        _realmPanel = new PanelContainer
+        {
+            AnchorLeft = 0, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            OffsetLeft = 12, OffsetTop = -104, Visible = false,
+        };
+        ((PanelContainer)_realmPanel).AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.93f)));
+        layer.AddChild(_realmPanel);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 15);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 12);
+        _realmPanel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 7);
+        margin.AddChild(col);
+
+        _realmHeader = RealmLabel(col, "The Keep — Your Realm", 15, new Color(0.95f, 0.90f, 0.70f));
+        _realmSummary = RealmLabel(col, "", 13, new Color(0.85f, 0.88f, 0.93f));
+
+        col.AddChild(DialRow("Tax", () => AdjustTax(-1), () => AdjustTax(1), out _realmTaxName));
+        _realmTaxFx = RealmLabel(col, "", 12, new Color(0.68f, 0.72f, 0.78f));
+
+        col.AddChild(DialRow("Food", () => AdjustRations(-1), () => AdjustRations(1), out _realmRationName));
+        _realmRationFx = RealmLabel(col, "", 12, new Color(0.68f, 0.72f, 0.78f));
+
+        RealmLabel(col, "keys:  − / =  tax      [ / ]  rations", 11, new Color(0.55f, 0.58f, 0.64f));
+    }
+
+    Label RealmLabel(Node parent, string text, int size, Color color)
+    {
+        var l = new Label { Text = text };
+        l.AddThemeColorOverride("font_color", color);
+        l.AddThemeFontSizeOverride("font_size", size);
+        parent.AddChild(l);
+        return l;
+    }
+
+    // A dial line: a title, a ◀ button, the current setting's name, a ▶ button.
+    // The buttons take no keyboard focus, so the -/= and [/] shortcuts keep working
+    // with the panel open.
+    HBoxContainer DialRow(string title, Action onDown, Action onUp, out Label nameLabel)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 8);
+
+        var t = new Label { Text = title, CustomMinimumSize = new Vector2(40, 0) };
+        t.AddThemeColorOverride("font_color", new Color(0.90f, 0.92f, 0.96f));
+        t.AddThemeFontSizeOverride("font_size", 13);
+        t.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        row.AddChild(t);
+
+        row.AddChild(DialButton("◀", onDown));
+
+        nameLabel = new Label { Text = "", HorizontalAlignment = HorizontalAlignment.Center, CustomMinimumSize = new Vector2(70, 0) };
+        nameLabel.AddThemeColorOverride("font_color", new Color(0.97f, 0.95f, 0.86f));
+        nameLabel.AddThemeFontSizeOverride("font_size", 14);
+        nameLabel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+        row.AddChild(nameLabel);
+
+        row.AddChild(DialButton("▶", onUp));
+        return row;
+    }
+
+    Button DialButton(string glyph, Action onPressed)
+    {
+        var b = new Button { Text = glyph, CustomMinimumSize = new Vector2(30, 26), FocusMode = Control.FocusModeEnum.None };
+        b.AddThemeFontSizeOverride("font_size", 13);
+        b.Pressed += () => onPressed();
+        return b;
+    }
+
+    void UpdateRealmPanel()
+    {
+        bool show = _selectedBuilding != null && _selectedBuilding.Alive
+                    && _selectedBuilding.Type == BuildingType.Keep
+                    && _selectedBuilding.Owner == MyPlayer;
+        _realmPanel.Visible = show;
+        if (!show) return;
+
+        int me = MyPlayer;
+        int tax = Mathf.Clamp(_sim.TaxLevel(me), 0, Simulation.TaxSteps - 1);
+        int ration = Mathf.Clamp(_sim.RationLevel(me), 0, Simulation.RationSteps - 1);
+        int food = _sim.Stockpile(me, ResourceType.Food);
+        int demand = _sim.RationDemand(me);
+        bool starving = demand > food;
+
+        _realmSummary.Text = $"Approval {_sim.Popularity(me)}%     Gold {_sim.Gold(me)}     Larder {food}"
+                             + (starving ? "     ⚠ STARVING" : "");
+        _realmSummary.AddThemeColorOverride("font_color",
+            starving ? new Color(0.96f, 0.52f, 0.40f) : new Color(0.85f, 0.88f, 0.93f));
+
+        _realmTaxName.Text = TaxNames[tax];
+        _realmTaxFx.Text = TaxEffect(tax);
+        _realmRationName.Text = RationNames[ration];
+        _realmRationFx.Text = RationEffect(ration, demand);
+    }
+
+    // Human-readable effect lines, read from the sim's own tables so the promise
+    // matches what the next realm tick actually does.
+    string TaxEffect(int step)
+    {
+        int gold = _sim.TaxGoldAt(step), pop = _sim.TaxPopAt(step);
+        string g = gold > 0 ? $"+{gold} gold/head" : gold < 0 ? $"pays {-gold} gold/head" : "no gold";
+        return $"{g}    ·    {Signed(pop)} approval / turn";
+    }
+
+    string RationEffect(int step, int demand)
+    {
+        int pop = _sim.RationPopAt(step);
+        string f = demand > 0 ? $"eats {demand} food / turn" : "eats no food";
+        return $"{f}    ·    {Signed(pop)} approval / turn";
+    }
+
+    static string Signed(int n) => n > 0 ? $"+{n}" : n.ToString();
 
     // ---- demolish confirmation --------------------------------------------
 
