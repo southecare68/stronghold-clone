@@ -18,6 +18,7 @@ namespace Sim
     public enum CommandType
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
+        SetTax = 9, SetRations = 10,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13 }
@@ -332,17 +333,30 @@ namespace Sim
         const int BakeryInterval = 25;
         const int BakeryInput = 4, BakeryOutput = 6;            // flour -> bread, generous
 
-        // --- Population -------------------------------------------------------
-        // Peasants are the workforce, and food is what raises them. Every so often
-        // a keep that can feed a new mouth breeds a peasant; that peasant then goes
-        // and staffs whatever work building is short a worker. This closes the
-        // loop: food -> peasants -> they work the farms/mills/bakeries -> more food.
-        const int PopInterval = 30;                             // ticks between births (1.5s)
-        const int PopFoodCost = 12;                             // food eaten to raise one peasant
+        // --- The realm: taxation, popularity, and immigration -----------------
+        // Peasants come and go with POPULARITY, a 0-100 dial per camp. Above 50 they
+        // arrive (up to housing); below, they leave. Each realm tick, taxation moves
+        // gold vs popularity, and rations move food vs popularity — the two levers
+        // you set. So food still matters, but through happiness rather than breeding.
+        // Gold, popularity, the tax rate and the ration level live as extra slots on
+        // the per-owner stockpile array, so they ride the snapshot / wire / checksum
+        // for free — no new plumbing.
+        const int GoldIdx = 6, PopIdx = 7, TaxIdx = 8, RationIdx = 9;   // after Wood..Iron (0..5)
+        const int StockWidth = 10;                             // Resources.Count (6) + gold, pop, tax, ration
+        const int RealmInterval = 40;                          // ticks between realm updates (2s)
+        const int StartPopularity = 55;                        // a new camp opens content, so it grows
+
+        // Tax rate steps (index 0..6): gold taken per peasant per realm tick (negative
+        // = a bribe you PAY out), and the popularity it costs or wins.
+        static readonly int[] TaxGold = { -2, -1, 0, 1, 2, 3, 4 };
+        static readonly int[] TaxPop  = {  6,  3, 1, -2, -4, -7, -10 };
+        // Ration steps (index 0..3 = none, half, full, extra): the popularity each
+        // wins; the food each eats is a fraction of the head-count (see ResolveRealm).
+        static readonly int[] RationPop = { -8, -3, 1, 4 };
+        public const int TaxSteps = 7, RationSteps = 4;
 
         // Population is capped by HOUSING: a peasant needs a roof. The keep shelters
-        // a starting court; every house shelters ten more. At the cap, food stops
-        // being spent and simply piles up — the signal to build another house.
+        // a starting court; every house shelters ten more.
         const int HousingPerHouse = 10;
         const int KeepHousing = 8;                              // the keep's own household
 
@@ -436,6 +450,7 @@ namespace Sim
             var t = TuningFor(level);
             for (int i = 0; i < t.BonusPeasants; i++) SpawnPeasant(owner);
             if (t.BonusWood > 0) AddResource(owner, ResourceType.Wood, t.BonusWood);
+            if (t.BonusFood > 0) AddResource(owner, ResourceType.Food, t.BonusFood);
         }
         public bool IsAi(int owner) => _aiOwners.ContainsKey(owner);
 
@@ -676,11 +691,18 @@ namespace Sim
         public void AddResource(int owner, ResourceType type, int amount) =>
             StockOf(owner)[(int)type] += amount;
 
+        // The realm: gold in the treasury, popularity (0-100), and the tax/ration
+        // settings — read-only views for the HUD. Default to an un-opened realm.
+        public int Gold(int owner) => _stock.TryGetValue(owner, out var s) ? s[GoldIdx] : 0;
+        public int Popularity(int owner) => _stock.TryGetValue(owner, out var s) ? s[PopIdx] : 50;
+        public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
+        public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 2;
+
         public int NextNodeId => _nextNodeId;
 
         int[] StockOf(int owner)
         {
-            if (!_stock.TryGetValue(owner, out var s)) { s = new int[Resources.Count]; _stock[owner] = s; }
+            if (!_stock.TryGetValue(owner, out var s)) { s = new int[StockWidth]; _stock[owner] = s; }
             return s;
         }
 
@@ -734,6 +756,12 @@ namespace Sim
             {
                 var drop = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
                 SetDropOff(owner, drop.X, drop.Y);
+                // Open this camp's realm the first time its keep goes up: content
+                // (so it grows), no taxes, full rations. The array is zero-filled, so
+                // these must be set explicitly.
+                var s = StockOf(owner);
+                if (s[PopIdx] == 0 && s[TaxIdx] == 0 && s[RationIdx] == 0)
+                { s[PopIdx] = StartPopularity; s[TaxIdx] = 2; s[RationIdx] = 2; }
             }
 
             // A work building does NOT come with a worker any more: peasants are
@@ -984,6 +1012,14 @@ namespace Sim
                     TearDownBuilding(razing);
                     Buildings.Remove(razing);
                     break;
+
+                case CommandType.SetTax:       // X carries the tax step (0..TaxSteps-1)
+                    StockOf(cmd.Owner)[TaxIdx] = Math.Clamp(cmd.X, 0, TaxSteps - 1);
+                    break;
+
+                case CommandType.SetRations:   // X carries the ration step (0..RationSteps-1)
+                    StockOf(cmd.Owner)[RationIdx] = Math.Clamp(cmd.X, 0, RationSteps - 1);
+                    break;
             }
         }
 
@@ -1233,7 +1269,8 @@ namespace Sim
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
-            ResolvePopulation();    // and food, in turn, raises the next peasant
+            ResolveRealm();         // taxes, rations, popularity — and who comes or goes by it
+            RemoveDead();           // sweep out any peasant that just emigrated
             ResolveUpkeep();        // while the standing army eats away at the larder
             TickNumber++;
         }
@@ -1480,20 +1517,59 @@ namespace Sim
             return u;
         }
 
-        // Food raises peasants. On a slow tick, every keep that can spare the food
-        // for another mouth breeds one. Iterated in building-id order (no RNG, pure
-        // integer state); a side with no keep or no food breeds nobody.
-        void ResolvePopulation()
+        // The realm tick: for each camp that holds a keep, collect taxes into gold,
+        // feed the people their rations from the larder, settle the new popularity,
+        // and let peasants come or go by it. Pure integer state in owner order, no
+        // RNG — and a scenario with no keep runs no realm at all, so the frozen
+        // units-only parity constant never sees it.
+        void ResolveRealm()
         {
-            if (TickNumber % PopInterval != 0) return;
-            foreach (var b in Buildings)              // id order
+            if (TickNumber == 0 || TickNumber % RealmInterval != 0) return;
+            var realms = new SortedSet<int>();
+            foreach (var b in Buildings) if (b.Alive && b.Type == BuildingType.Keep) realms.Add(b.Owner);
+            foreach (int owner in realms)             // owner order
             {
-                if (b.Type != BuildingType.Keep || !b.Alive) continue;
-                if (Stockpile(b.Owner, ResourceType.Food) < PopFoodCost) continue;
-                if (PeasantCount(b.Owner) >= PopulationCap(b.Owner)) continue;   // no room at the inn
-                StockOf(b.Owner)[(int)ResourceType.Food] -= PopFoodCost;
-                SpawnPeasant(b.Owner);
+                var s = StockOf(owner);
+                int peasants = PeasantCount(owner), cap = PopulationCap(owner);
+                int tax = Math.Clamp(s[TaxIdx], 0, TaxSteps - 1);
+                int ration = Math.Clamp(s[RationIdx], 0, RationSteps - 1);
+
+                // Taxation moves the treasury; a bribe (negative) is paid, never below zero.
+                int gold = s[GoldIdx] + TaxGold[tax] * peasants;
+                s[GoldIdx] = gold < 0 ? 0 : gold;
+
+                // Rations eat food; if the larder cannot cover them the people go
+                // hungry (the harshest popularity hit), whatever the setting says.
+                // Cost is a FRACTION of the head-count so one bakery (~9.6 loaves a
+                // realm tick) can feed a populace that outgrows the handful of hands
+                // actually working the economy — that surplus is what fills the
+                // barracks. Full = half a loaf each; extra piles on three-quarters.
+                int cost = ration == 0 ? 0 : ration == 1 ? peasants / 4 : ration == 2 ? peasants / 2 : (peasants * 3) / 4;
+                int food = s[(int)ResourceType.Food];
+                int rationPop;
+                if (food >= cost) { s[(int)ResourceType.Food] = food - cost; rationPop = RationPop[ration]; }
+                else { s[(int)ResourceType.Food] = 0; rationPop = RationPop[0]; }
+
+                // Settle popularity, then let it draw people in or drive them out.
+                int pop = Math.Clamp(s[PopIdx] + TaxPop[tax] + rationPop, 0, 100);
+                s[PopIdx] = pop;
+                int net = pop >= 80 ? 2 : pop > 50 ? 1 : pop == 50 ? 0 : pop < 20 ? -2 : -1;
+                if (net > 0) for (int i = 0; i < net && PeasantCount(owner) < cap; i++) SpawnPeasant(owner);
+                else if (net < 0) for (int i = 0; i < -net; i++) EmigrateOnePeasant(owner);
             }
+        }
+
+        // An unhappy camp loses a peasant — but only ever an IDLE one, who simply
+        // wanders off. A peasant working a building or manning a wall is your core
+        // labour and stays put: discontent stops NEW arrivals and thins the loiterers
+        // long before it ever touches the people actually keeping the castle running.
+        // (It also keeps the economy honest under test — a lone mine-worker with no
+        // larder should still mine, not evaporate the instant popularity dips.)
+        void EmigrateOnePeasant(int owner)
+        {
+            foreach (var u in Units)
+                if (u.IsPeasant && u.Owner == owner && u.Alive && u.Job == Job.None && u.GarrisonId == 0)
+                { u.Hp = 0; return; }   // removed by the normal dead-unit sweep
         }
 
         // How many peasants an owner can house: the keep's household plus ten per

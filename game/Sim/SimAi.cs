@@ -37,20 +37,25 @@ namespace Sim
         // play (it still obeys fog, cost, and placement like anyone else).
         readonly struct AiTuning
         {
-            public readonly int Interval, FoodChains, Woodcutters, MaxHouses, ArmyCap, AttackAt, BonusPeasants, BonusWood;
-            public AiTuning(int interval, int foodChains, int woodcutters, int maxHouses, int armyCap, int attackAt, int bonusPeasants, int bonusWood)
+            public readonly int Interval, FoodChains, Woodcutters, MaxHouses, ArmyCap, AttackAt, BonusPeasants, BonusWood, BonusFood;
+            public AiTuning(int interval, int foodChains, int woodcutters, int maxHouses, int armyCap, int attackAt, int bonusPeasants, int bonusWood, int bonusFood)
             {
                 Interval = interval; FoodChains = foodChains; Woodcutters = woodcutters; MaxHouses = maxHouses;
-                ArmyCap = armyCap; AttackAt = attackAt; BonusPeasants = bonusPeasants; BonusWood = bonusWood;
+                ArmyCap = armyCap; AttackAt = attackAt; BonusPeasants = bonusPeasants; BonusWood = bonusWood; BonusFood = bonusFood;
             }
         }
 
+        // BonusFood is a starting larder sized to the level's opening mouths: a tougher
+        // bot begins with more hands (BonusPeasants), and rations draw the larder down
+        // every realm tick, so without a matching stock those extra mouths would starve
+        // through the food-chain ramp — popularity would crash and the bigger economy
+        // would never actually grow. It feeds the head start until the bakeries bake.
         static AiTuning TuningFor(AiLevel level) => level switch
         {
-            //                          interval chains wood houses armyCap attackAt +peas +wood
-            AiLevel.Easy   => new AiTuning(30,     1,    1,    1,      4,      4,      0,     0),
-            AiLevel.Hard   => new AiTuning(8,      2,    2,    6,     30,      6,     10,   400),
-            _  /* Normal*/ => new AiTuning(12,     1,    2,    3,     12,      5,      4,   150),
+            //                          interval chains wood houses armyCap attackAt +peas +wood +food
+            AiLevel.Easy   => new AiTuning(30,     1,    1,    1,      4,      4,      0,     0,     0),
+            AiLevel.Hard   => new AiTuning(8,      2,    2,    6,     30,      6,     10,   400,   200),
+            _  /* Normal*/ => new AiTuning(12,     1,    2,    3,     12,      5,      4,   150,    60),
         };
 
         const int AiWorkerReserve = 1;  // idle peasants to keep spare (buildings hire the rest)

@@ -194,15 +194,17 @@ static class Program
               farmer.Job == Job.None && farmer.IsPeasant);
     }
 
-    // Population cannot outgrow its housing: with food to spare, it climbs to the
-    // keep's cap and stops, a house lifts the cap by ten, and at the cap food is
-    // no longer spent — it just piles up, the signal to build another house.
+    // Population cannot outgrow its housing: a well-fed, fairly-taxed realm draws
+    // newcomers until every bed is full, then stops; a house lifts the cap by ten
+    // and the immigrants keep coming to fill it. Rations feed that popularity, so
+    // the larder is kept brimming here — this test isolates HOUSING as the limit,
+    // not food. (That rations draw food continuously is proven separately below.)
     static void PopulationIsCappedByHousing()
     {
         Console.WriteLine("\npopulation is capped by housing:");
         var sim = new Simulation(TileMap.Open(48));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
-        sim.AddResource(1, ResourceType.Food, 1000);   // food to spare, so ONLY housing limits growth
+        sim.AddResource(1, ResourceType.Food, 100000);   // larder never runs dry, so ONLY housing limits growth
         Seed(sim, 1, 1);
 
         int keepCap = sim.PopulationCap(1);
@@ -221,11 +223,13 @@ static class Program
         Check($"population grew to the new cap ({sim.PeasantCount(1)}/{withHouse})",
               sim.PeasantCount(1) == withHouse);
 
-        // Full again: food stops being consumed and accumulates.
+        // Rations are a standing cost: even at the cap, a fed populace keeps eating,
+        // so the larder is still being drawn down (the opposite of the old model,
+        // where food was spent only at birth and idled once the court was full).
         int foodAtCap = sim.Stockpile(1, ResourceType.Food);
         for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
-        Check($"at the cap, food is no longer spent ({foodAtCap} -> {sim.Stockpile(1, ResourceType.Food)})",
-              sim.Stockpile(1, ResourceType.Food) == foodAtCap);
+        Check($"rations still draw the larder at the cap ({foodAtCap} -> {sim.Stockpile(1, ResourceType.Food)})",
+              sim.Stockpile(1, ResourceType.Food) < foodAtCap);
     }
 
     // A standing army eats: each soldier draws food from the larder every meal,

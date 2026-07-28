@@ -118,6 +118,13 @@ namespace Sim
             {
                 sim.AddResource(owner, ResourceType.Wood, 200);
                 sim.AddResource(owner, ResourceType.Stone, 100);
+                // A larder to open on. Rations draw down food every realm tick, and
+                // the food chain (farm -> mill -> bakery) takes a good while to lay
+                // and start baking. Without an opening stock the people would go
+                // hungry, popularity would slide, and the idle hands you need to man
+                // that very chain would drift off before it produced a loaf. Sixty
+                // covers the ramp-up for a starting six at full rations.
+                sim.AddResource(owner, ResourceType.Food, 60);
                 // A starting workforce to bootstrap the economy: peasants staff
                 // your work buildings, and the bread they help make breeds more.
                 // Placed AFTER the keep so they spawn at its drop-off.

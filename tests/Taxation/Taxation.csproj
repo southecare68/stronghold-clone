@@ -1,0 +1,28 @@
+<!-- Taxation — the realm: tax → gold, rations → food, both → popularity → migration.
+
+     Every realm tick a keep-holder collects tax as gold and feeds its people from
+     the larder; the two settings trade against a single popularity number, and
+     popularity is what draws newcomers in or drives idlers out. These tests hold
+     down that the treasury fills and never goes negative, that a starving realm is
+     punished however generous its ration order, that popularity moves the
+     population the right way, that the SetTax/SetRations commands take, and — the
+     one that matters for a match — that the whole realm is deterministic across
+     two clients.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>TaxationTests</RootNamespace>
+    <AssemblyName>TaxationTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

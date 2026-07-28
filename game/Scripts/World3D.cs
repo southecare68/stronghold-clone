@@ -179,7 +179,7 @@ public partial class World3D : Node3D
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
     Label _netInfo;
-    const int StatCount = 8;   // wood, stone, food, grain, flour, iron, pop, army
+    const int StatCount = 10;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval
 
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
@@ -994,7 +994,15 @@ public partial class World3D : Node3D
         ("Iron",  new Color(0.44f, 0.45f, 0.50f)),
         ("Pop",   new Color(0.42f, 0.78f, 0.44f)),
         ("Army",  new Color(0.86f, 0.40f, 0.36f)),
+        ("Gold",  new Color(0.92f, 0.80f, 0.30f)),
+        ("Approval", new Color(0.52f, 0.74f, 0.95f)),
     };
+
+    // Readable names for the realm dials, indexed by level. Tax runs from a bribe
+    // you pay the people up to a ruinous squeeze (Simulation.TaxSteps of them);
+    // rations from an empty table up to a feast (Simulation.RationSteps).
+    static readonly string[] TaxNames = { "Bribe", "Gift", "None", "Low", "Fair", "High", "Cruel" };
+    static readonly string[] RationNames = { "None", "Half", "Full", "Extra" };
 
     void SetupHud()
     {
@@ -1094,6 +1102,13 @@ public partial class World3D : Node3D
         int idle = _sim.IdlePeasantCount(me);
         _stat[6].Text = $"Pop {_sim.PeasantCount(me)}/{_sim.PopulationCap(me)}" + (idle > 0 ? $" ({idle} idle)" : "");
         _stat[7].Text = $"Army {_sim.ArmySize(me)}";
+
+        // The realm: treasury, and approval with the two dials that steer it, so the
+        // -/= (tax) and [/] (rations) keys have a live readout of what they change.
+        _stat[8].Text = $"Gold {_sim.Gold(me)}";
+        _stat[9].Text = $"Approval {_sim.Popularity(me)}%  " +
+                        $"[Tax {TaxNames[Mathf.Clamp(_sim.TaxLevel(me), 0, TaxNames.Length - 1)]} " +
+                        $"· Food {RationNames[Mathf.Clamp(_sim.RationLevel(me), 0, RationNames.Length - 1)]}]";
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
@@ -2578,6 +2593,31 @@ public partial class World3D : Node3D
             !rot.CtrlPressed && !rot.MetaPressed && !rot.AltPressed && _buildType != null)
         {
             _ghostRot = (_ghostRot + 1) & 3;
+            return;
+        }
+
+        // The realm dials. Tax trades gold for goodwill: - lowers it (toward the
+        // bribe that PAYS the people) and = raises it (toward a purse-filling
+        // squeeze the populace resents). Rations trade food for goodwill: [ serves
+        // less (saving the larder) and ] serves more (winning approval). Both go
+        // down the normal lockstep path, so the opponent's realm never sees them,
+        // and both clamp to their legal range. Not while placing a building.
+        if (e is InputEventKey tax && tax.Pressed && _buildType == null &&
+            !tax.CtrlPressed && !tax.MetaPressed && !tax.AltPressed &&
+            (tax.Keycode == Key.Minus || tax.Keycode == Key.Equal))
+        {
+            int step = tax.Keycode == Key.Equal ? 1 : -1;
+            int next = Mathf.Clamp(_sim.TaxLevel(MyPlayer) + step, 0, Simulation.TaxSteps - 1);
+            _me.Issue(new Command { Type = CommandType.SetTax, X = next });
+            return;
+        }
+        if (e is InputEventKey rat && rat.Pressed && _buildType == null &&
+            !rat.CtrlPressed && !rat.MetaPressed && !rat.AltPressed &&
+            (rat.Keycode == Key.Bracketleft || rat.Keycode == Key.Bracketright))
+        {
+            int step = rat.Keycode == Key.Bracketright ? 1 : -1;
+            int next = Mathf.Clamp(_sim.RationLevel(MyPlayer) + step, 0, Simulation.RationSteps - 1);
+            _me.Issue(new Command { Type = CommandType.SetRations, X = next });
             return;
         }
 
