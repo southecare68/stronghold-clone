@@ -2918,9 +2918,16 @@ public partial class World3D : Node3D
         foreach (var id in stale) { _rings[id].QueueFree(); _rings.Remove(id); if (!_unitNodes.ContainsKey(id)) _selected.Remove(id); }
     }
 
+    // Zoom sets the tilt too: at the default distance the angle is unchanged;
+    // zooming IN drops toward a near ground-level view, zooming OUT rises toward a
+    // top-down overview. So "get down to the ground" is simply "zoom all the way in".
+    const float CamMinDist = 6f, CamDefDist = 16f, CamMaxDist = 90f;
     void UpdateCamera()
     {
         if (_cam == null) return;
+        _camPitch = _camDist <= CamDefDist
+            ? Mathf.Lerp(0.28f, 0.85f, (_camDist - CamMinDist) / (CamDefDist - CamMinDist))
+            : Mathf.Lerp(0.85f, 1.2f, (_camDist - CamDefDist) / (CamMaxDist - CamDefDist));
         var offset = new Vector3(
             Mathf.Sin(_camYaw) * Mathf.Cos(_camPitch),
             Mathf.Sin(_camPitch),
