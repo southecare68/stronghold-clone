@@ -22,6 +22,7 @@ static class Program
         NoHutMeansNoWoodcutting();
         AHutBreedsAWoodcutterAndCutsWood();
         ItMovesToTheNextTreeOnItsOwn();
+        InexhaustibleDepositsNeverRunDry();
         StorehouseIsACloserDropOff();
         AHutRebreedsAKilledWoodcutter();
         RazingTheHutStopsItsWorker();
@@ -89,6 +90,30 @@ static class Program
         Check($"it cut more than one tree's worth ({sim.Stockpile(1, ResourceType.Wood)})",
               sim.Stockpile(1, ResourceType.Wood) >= treeStock * 2);
         Check("and it is still on the job", worker.Job == Job.Working);
+    }
+
+    // With InfiniteResources on, a deposit gives without drawing down: a tiny stand
+    // that would normally be gone in three logs is still standing at full after the
+    // cutter has hauled home far more than its size. (Off by default — proven by the
+    // depletion test above, which still moves the worker along as stands run out.)
+    static void InexhaustibleDepositsNeverRunDry()
+    {
+        Console.WriteLine("\nwith infinite resources on, a deposit never runs dry:");
+        var sim = new Simulation(TileMap.Open(48)) { InfiniteResources = true };
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 1);
+        var node = sim.SpawnNode(ResourceType.Wood, 20, 20, 3);   // three logs' worth, normally
+        int amount0 = node.Amount;
+        sim.PlaceBuilding(BuildingType.WoodcutterHut, 1, 18, 18);
+
+        for (int i = 0; i < 1500; i++) sim.Tick(Array.Empty<Command>());
+
+        Check($"the deposit still stands at full ({node.Amount}/{amount0})", node.Amount == amount0);
+        bool present = false;
+        foreach (var n in sim.NodeList) if (n.Id == node.Id) { present = true; break; }
+        Check("and is still in the world", present);
+        Check($"yet far more than its size was cut ({sim.Stockpile(1, ResourceType.Wood)} > {amount0})",
+              sim.Stockpile(1, ResourceType.Wood) > amount0);
     }
 
     static void StorehouseIsACloserDropOff()

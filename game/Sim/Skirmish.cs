@@ -103,6 +103,10 @@ namespace Sim
             // so both machines agree from tick 0.
             sim.FogEnabled = true;
 
+            // Inexhaustible forests, quarries and iron seams — for now the natural
+            // deposits never run dry, so a match is never starved of raw materials.
+            sim.InfiniteResources = true;
+
             // Mirrored starting parties, either side of the ridge.
             sim.SpawnUnit(1, w + 4, m - 2);
             sim.SpawnUnit(1, w + 4, m);

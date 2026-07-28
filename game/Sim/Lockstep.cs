@@ -76,6 +76,7 @@ namespace Sim
         // cannot be derived from anything: it is the whole history of the match,
         // and without it a returning player would find their own map blank.
         public bool FogEnabled;
+        public bool InfiniteResources;                     // natural deposits never run dry
         public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
 
         // Turns the sender has ALREADY published for ticks at or after Tick.

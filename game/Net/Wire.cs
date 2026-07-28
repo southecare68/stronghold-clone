@@ -223,6 +223,7 @@ namespace Netcode
             // of a snapshot, and unavoidable: what a player has seen cannot be
             // recomputed from anything else. Only sent on rejoin, never per turn.
             PutInt(buf, snap.FogEnabled ? 1 : 0);
+            PutInt(buf, snap.InfiniteResources ? 1 : 0);
             PutInt(buf, snap.Explored.Count);
             foreach (var kv in snap.Explored)
             {
@@ -397,6 +398,7 @@ namespace Netcode
                 snap.DropOffs = drops;
 
                 snap.FogEnabled = GetInt(data, ref p) != 0;
+                snap.InfiniteResources = GetInt(data, ref p) != 0;
                 int fogCount = GetInt(data, ref p);
                 if (fogCount < 0 || fogCount > MaxUnits) return null;
                 var explored = new Dictionary<int, uint[]>();

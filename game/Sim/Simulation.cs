@@ -494,6 +494,14 @@ namespace Sim
         public Vision Fog;
         public bool FogEnabled;
 
+        // When on, natural deposits (wood, stone, iron) never run dry — the gather
+        // draws no amount from them, so a forest or seam is worked forever. A farm's
+        // grain field is exempt: it still draws down and replants on its own cycle,
+        // so the food chain is unchanged. Opt-in like FogEnabled and carried in the
+        // snapshot, so a rejoiner keeps the same inexhaustible world; off by default,
+        // so every finite-deposit test (and 0xB1A7A676) behaves exactly as before.
+        public bool InfiniteResources;
+
         // Can this player act on that spot at all? With fog off, everything is
         // both seen and known — which is what keeps every pre-fog scenario intact.
         public bool CanSee(int owner, int x, int y) => !FogEnabled || Fog.IsVisible(owner, x, y);
@@ -553,7 +561,8 @@ namespace Sim
                             IReadOnlyDictionary<int, int[]> stock, IReadOnlyDictionary<int, Tile> dropOff,
                             int nextBuildingId, IReadOnlyList<Building> buildings,
                             IReadOnlyList<UnitDesign> designs,
-                            bool fogEnabled = false, IReadOnlyDictionary<int, uint[]> explored = null)
+                            bool fogEnabled = false, IReadOnlyDictionary<int, uint[]> explored = null,
+                            bool infiniteResources = false)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
@@ -598,6 +607,7 @@ namespace Sim
             // footprint blocking — carrying over derived state that the local
             // world should be deriving for itself.
             FogEnabled = fogEnabled;
+            InfiniteResources = infiniteResources;
             Fog.RestoreExplored(explored);
             if (FogEnabled) Fog.RecomputeVisible(Units, Buildings);
         }
@@ -607,7 +617,7 @@ namespace Sim
         public void Restore(MatchSnapshot s) =>
             Restore(s.Tick, s.NextUnitId, s.RngState, s.Units, s.NextNodeId, s.Nodes,
                     s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs,
-                    s.FogEnabled, s.Explored);
+                    s.FogEnabled, s.Explored, s.InfiniteResources);
 
         // A complete, standalone snapshot of the simulation's state right now — no
         // network bookkeeping (no pending turns). This is what a rejoin adopts and
@@ -642,6 +652,7 @@ namespace Sim
                 Stock = stock,
                 DropOffs = drops,
                 FogEnabled = FogEnabled,
+                InfiniteResources = InfiniteResources,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -1411,7 +1422,9 @@ namespace Sim
                             u.GatherTimer = 0;
                             u.CarryType = node.Type;
                             u.CarryAmount++;
-                            node.Amount--;
+                            // Inexhaustible deposits give without drawing down; a grain
+                            // field always spends, so the farm keeps reaping and replanting.
+                            if (!InfiniteResources || node.Type == ResourceType.Grain) node.Amount--;
                         }
                     }
                     else ChaseTo(u, node.X, node.Y);
