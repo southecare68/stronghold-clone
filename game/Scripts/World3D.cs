@@ -708,6 +708,11 @@ public partial class World3D : Node3D
             var r = kv.Value;
             int minX = Math.Max(0, r[0] - TerrMargin), minY = Math.Max(0, r[1] - TerrMargin);
             int maxX = Math.Min(MapSize - 1, r[2] + TerrMargin), maxY = Math.Min(MapSize - 1, r[3] + TerrMargin);
+            // Double the claimed rectangle about its own centre — twice as wide and
+            // twice as deep, so each camp holds a much larger domain.
+            int cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, hw = maxX - minX, hh = maxY - minY;
+            minX = Math.Max(0, cx - hw); maxX = Math.Min(MapSize - 1, cx + hw);
+            minY = Math.Max(0, cy - hh); maxY = Math.Min(MapSize - 1, cy + hh);
             // Tile (x,y) is centred at world (x,y), so the rectangle's outer edge is
             // half a tile beyond the extreme tile centres.
             float x0 = minX - 0.5f, x1 = maxX + 0.5f, z0 = minY - 0.5f, z1 = maxY + 0.5f;
