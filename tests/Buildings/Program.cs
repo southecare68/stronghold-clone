@@ -350,6 +350,14 @@ static class Program
         Check("the tile stays blocked (now the turret)", !sim.Map.Passable(10, 10));
         Check("the old wall's garrison was turned out", soldier.GarrisonId == 0);
 
+        // A GATEHOUSE drops into a finished wall the same way — a gateway sits in
+        // the line too, so it replaces the segment it is aimed at.
+        var wall2 = sim.PlaceBuilding(BuildingType.Wall, 1, 10, 14);
+        Order(sim, Build(1, BuildingType.Gatehouse, 10, 14));
+        Check("a gatehouse replaces your own wall too",
+              sim.Buildings.Find(b => b.Id == wall2.Id) == null &&
+              sim.Buildings.Find(b => b.Type == BuildingType.Gatehouse && b.X == 10 && b.Y == 14) != null);
+
         // But an ENEMY wall is not yours to build over.
         Give(sim, 2, wood: 100, stone: 100);
         var foeWall = sim.PlaceBuilding(BuildingType.Wall, 2, 20, 20);

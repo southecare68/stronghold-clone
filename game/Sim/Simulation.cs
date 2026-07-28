@@ -898,9 +898,11 @@ namespace Sim
                     // a refused build simply spends nothing and places nothing.
                     var type = (BuildingType)cmd.TargetId;
                     if ((int)type < 0 || (int)type >= BuildCost.Length) break;
-                    // A turret raised on one of your own walls replaces that
-                    // segment (a tower in the line) rather than being refused.
-                    var swap = type == BuildingType.Turret ? OwnWallAt(cmd.Owner, cmd.X, cmd.Y) : null;
+                    // A turret or gatehouse raised on one of your own walls replaces
+                    // that segment — a tower or gateway sits IN the line, so it drops
+                    // straight into a finished wall rather than being refused.
+                    var swap = type == BuildingType.Turret || type == BuildingType.Gatehouse
+                        ? OwnWallAt(cmd.Owner, cmd.X, cmd.Y) : null;
                     if (swap == null && !CanPlace(type, cmd.X, cmd.Y)) break;
                     if (!CanAfford(cmd.Owner, BuildCost[(int)type])) break;
                     // No building on ground you have never laid eyes on. Checked
@@ -983,16 +985,17 @@ namespace Sim
             }
         }
 
-        // Ramparts should form an unbroken line, and a tower belongs in that line.
-        // When a wall, gatehouse or turret is raised one open tile from a friendly
-        // rampart — and EITHER end is a turret — that single gap is filled with a
-        // wall, so a tower always joins the line no matter which piece went down
-        // first (place the tower then wall up to it, or the reverse; both close).
-        // Two plain walls are left un-joined, so a deliberate one-tile opening
-        // between wall runs — the makings of a gateway — still survives. A courtesy
-        // connector: one open tile only, and free (you already paid for the pieces).
+        // Ramparts should form an unbroken line, and a tower or gateway belongs in
+        // that line. When a wall, gatehouse or turret is raised one open tile from a
+        // friendly rampart — and EITHER end is a turret or gatehouse — that single
+        // gap is filled with a wall, so the anchor always joins the line no matter
+        // which piece went down first (place it then wall up to it, or the reverse;
+        // both close). Two plain walls are left un-joined, so a deliberate one-tile
+        // opening between wall runs still survives. A courtesy connector: one open
+        // tile only, and free (you already paid for the pieces).
         void BridgeRamparts(int owner, int x, int y, BuildingType placed)
         {
+            static bool Anchor(BuildingType t) => t == BuildingType.Turret || t == BuildingType.Gatehouse;
             foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
             {
                 int gx = x + dx, gy = y + dy;              // the open tile beside it
@@ -1001,7 +1004,7 @@ namespace Sim
                 var beyond = Buildings.Find(b => b.Alive && b.Owner == owner && b.X == bx && b.Y == by &&
                     (b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse || b.Type == BuildingType.Turret));
                 if (beyond == null) continue;
-                if (placed == BuildingType.Turret || beyond.Type == BuildingType.Turret)
+                if (Anchor(placed) || Anchor(beyond.Type))
                     PlaceBuilding(BuildingType.Wall, owner, gx, gy);
             }
         }

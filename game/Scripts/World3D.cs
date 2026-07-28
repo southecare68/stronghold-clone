@@ -1274,8 +1274,10 @@ public partial class World3D : Node3D
     // — the same three gates the Build command applies, so the ghost tells the truth.
     bool Placeable(BuildingType t, int ox, int oy)
     {
-        // A turret may replace your own wall segment, so that tile counts as free.
-        bool swapWall = t == BuildingType.Turret && _sim.OwnWallAt(MyPlayer, ox, oy) != null;
+        // A turret or gatehouse may replace your own wall segment — that tile counts
+        // as free, so it drops straight into a finished wall.
+        bool swapWall = (t == BuildingType.Turret || t == BuildingType.Gatehouse)
+            && _sim.OwnWallAt(MyPlayer, ox, oy) != null;
         if (!swapWall && !_sim.CanPlace(t, ox, oy)) return false;
         var (w, h) = _sim.FootprintOf(t);
         for (int y = oy; y < oy + h; y++)
@@ -2002,10 +2004,11 @@ public partial class World3D : Node3D
         foreach (var b in _sim.Buildings)
         {
             live.Add(b.Id);
-            // A turret's connecting spurs depend on which neighbours are ramparts;
-            // if that changed since it was built (a wall raised against it after the
-            // fact), rebuild it so the join stays flush.
-            if (b.Type == BuildingType.Turret && _buildingNodes.TryGetValue(b.Id, out var tn))
+            // A turret or gatehouse's connecting spurs depend on which neighbours
+            // are ramparts; if that changed since it was built (a wall raised against
+            // it after the fact), rebuild it so the join stays flush.
+            if ((b.Type == BuildingType.Turret || b.Type == BuildingType.Gatehouse)
+                && _buildingNodes.TryGetValue(b.Id, out var tn))
             {
                 int mask = TurretMask(b);
                 if (!_turretMask.TryGetValue(b.Id, out var old) || old != mask)
@@ -2018,6 +2021,7 @@ public partial class World3D : Node3D
                 else if (b.Type == BuildingType.Keep) node = MakeKeep(b);
                 else if (b.Type == BuildingType.Steps) node = MakeSteps(b);
                 else if (b.Type == BuildingType.Turret) { node = MakeTurret(b); _turretMask[b.Id] = TurretMask(b); }
+                else if (b.Type == BuildingType.Gatehouse) { node = MakeGate(b); _turretMask[b.Id] = TurretMask(b); }
                 else
                 {
                     if (!_bldModel.TryGetValue(b.Type, out var scene) || scene == null) continue;
@@ -2240,8 +2244,9 @@ public partial class World3D : Node3D
     // climb one step higher onto it and shoot from the highest point around.
     const float TurretStandY = WallTopY + 1.5f;   // deck height — where a garrison stands
 
-    // Which of a turret's four cardinal neighbours are ramparts — the spurs it
-    // grows toward. Changes here mean the turret node must be rebuilt.
+    // Which of a turret/gatehouse's four cardinal neighbours are ramparts — the
+    // spurs it grows toward — plus a gate's open/closed bit. Any change here means
+    // the node must be rebuilt (new spurs, or the door raised/dropped).
     int TurretMask(Building b)
     {
         int mask = 0, bit = 1;
@@ -2250,6 +2255,7 @@ public partial class World3D : Node3D
             if (_wallSet.Contains((b.X + dx, b.Y + dy))) mask |= bit;
             bit <<= 1;
         }
+        if (b.Type == BuildingType.Gatehouse && b.Open) mask |= 16;
         return mask;
     }
 
@@ -2270,14 +2276,56 @@ public partial class World3D : Node3D
         foreach (var c in new[] { new Vector3(e, 0, e), new Vector3(-e, 0, e), new Vector3(e, 0, -e), new Vector3(-e, 0, -e) })
             root.AddChild(KeepBox(stone, new Vector3(m, mh, m), c + new Vector3(0, TurretStandY + mh / 2f, 0)));
 
-        // A wall-height spur toward each adjacent rampart, so the tower always joins
-        // the line with no grass at the junction — this also covers a bridged wall
-        // segment, whose own model can render short next to the tower.
+        RampartSpurs(root, b, stone);
+        return root;
+    }
+
+    // A wall-height spur toward each adjacent rampart, so a tower or gatehouse always
+    // joins the line with no grass at the junction — this also covers a bridged wall
+    // segment, whose own model can render short next to it.
+    void RampartSpurs(Node3D root, Building b, Material stone)
+    {
         foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
             if (_wallSet.Contains((b.X + dx, b.Y + dy)))
                 root.AddChild(KeepBox(stone,
                     new Vector3(dx != 0 ? 1.15f : 0.72f, WallTopY, dy != 0 ? 1.15f : 0.72f),
                     new Vector3(dx, WallTopY / 2f, dy)));
+    }
+
+    // A player-built Gatehouse: a stone gateway that rises ABOVE the wall walk, with
+    // two jamb piers, a lintel, a crenellated crown, and a timber door across the
+    // passage that shows when the gate is shut. Oriented to run with the wall line,
+    // and spurred into its neighbours so it sits IN the wall, not beside it.
+    const float GateH = WallTopY + 1.1f;   // taller than the wall — a proper gatehouse
+
+    Node3D MakeGate(Building b)
+    {
+        bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
+        bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
+        float rot = (vert && !horiz) ? Mathf.Pi / 2f : 0f;   // run along local X unless the line is vertical
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
+        var root = new Node3D { Position = new Vector3(b.X, 0, b.Y), Rotation = new Vector3(0, rot, 0) };
+
+        const float depth = 0.8f, pierW = 0.26f, px = 0.4f, lintelH = 0.55f;
+        // Two jamb piers flanking the passage, at the wall-run edges.
+        foreach (float sx in new[] { px, -px })
+            root.AddChild(KeepBox(stone, new Vector3(pierW, GateH, depth), new Vector3(sx, GateH / 2f, 0)));
+        // Lintel across the top, spanning the archway.
+        root.AddChild(KeepBox(stone, new Vector3(2 * px + pierW, lintelH, depth),
+            new Vector3(0, GateH - lintelH / 2f, 0)));
+        // Crenellated crown — three merlons across the top.
+        const float m = 0.2f, mh = 0.34f;
+        foreach (float mx in new[] { -px, 0f, px })
+            root.AddChild(KeepBox(stone, new Vector3(m, mh, depth * 0.9f), new Vector3(mx, GateH + mh / 2f, 0)));
+        // The gate itself: a timber door filling the passage when the gate is shut.
+        if (!b.Open)
+        {
+            var wood = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.24f, 0.14f), Roughness = 1f };
+            float openW = 2 * px - pierW, openH = GateH - lintelH;
+            root.AddChild(KeepBox(wood, new Vector3(openW, openH, 0.14f), new Vector3(0, openH / 2f, 0)));
+        }
+
+        RampartSpurs(root, b, stone);
         return root;
     }
 
