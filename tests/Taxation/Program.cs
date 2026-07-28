@@ -32,6 +32,7 @@ static class Program
         ABribeNeverOverdrawsTheTreasury();
         RationsDrawDownTheLarder();
         HungerOverridesAGenerousOrder();
+        RationDemandScalesWithTheOrder();
         AFedRealmDrawsNewcomers();
         UnhappinessDrivesIdlersOff();
         YourWorkingHandsOutlastTheIdlers();
@@ -113,6 +114,21 @@ static class Program
         Ticks(sim, 120);
         Check($"popularity fell despite the lavish order ({sim.Popularity(1)} < 55)",
               sim.Popularity(1) < 55);
+    }
+
+    // RationDemand is the food one realm tick will draw at the current order — the
+    // number the sim spends AND the HUD reads to warn "STARVING". One formula, so
+    // the two can never disagree: None nothing, Half a quarter-loaf a head, Full a
+    // half, Extra three-quarters. Eight heads make the fractions land clean.
+    static void RationDemandScalesWithTheOrder()
+    {
+        Console.WriteLine("\nration demand scales with the order:");
+        var sim = Realm(out _);
+        Seed(sim, 1, 8);
+        Order(sim, SetRations(1, 0)); Check($"None asks for nothing ({sim.RationDemand(1)})", sim.RationDemand(1) == 0);
+        Order(sim, SetRations(1, 1)); Check($"Half asks a quarter each ({sim.RationDemand(1)})", sim.RationDemand(1) == 2);
+        Order(sim, SetRations(1, 2)); Check($"Full asks a half each ({sim.RationDemand(1)})", sim.RationDemand(1) == 4);
+        Order(sim, SetRations(1, 3)); Check($"Extra asks three-quarters ({sim.RationDemand(1)})", sim.RationDemand(1) == 6);
     }
 
     // The point of the whole loop: keep people fed and fairly taxed and popularity

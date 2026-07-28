@@ -698,6 +698,18 @@ namespace Sim
         public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
         public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 2;
 
+        // The food one realm tick's rations will draw at the current order and
+        // head-count. If the larder holds less than this, the people go hungry
+        // whatever the order says (ResolveRealm), and the HUD flags it as starving.
+        // The fractions: None 0, Half a quarter-loaf each, Full a half, Extra
+        // three-quarters — so a fuller table wins approval but eats far more food.
+        public int RationDemand(int owner)
+        {
+            int peasants = PeasantCount(owner);
+            int ration = Math.Clamp(RationLevel(owner), 0, RationSteps - 1);
+            return ration == 0 ? 0 : ration == 1 ? peasants / 4 : ration == 2 ? peasants / 2 : (peasants * 3) / 4;
+        }
+
         public int NextNodeId => _nextNodeId;
 
         int[] StockOf(int owner)
@@ -1543,8 +1555,8 @@ namespace Sim
                 // Cost is a FRACTION of the head-count so one bakery (~9.6 loaves a
                 // realm tick) can feed a populace that outgrows the handful of hands
                 // actually working the economy — that surplus is what fills the
-                // barracks. Full = half a loaf each; extra piles on three-quarters.
-                int cost = ration == 0 ? 0 : ration == 1 ? peasants / 4 : ration == 2 ? peasants / 2 : (peasants * 3) / 4;
+                // barracks. See RationDemand for the per-step fraction.
+                int cost = RationDemand(owner);
                 int food = s[(int)ResourceType.Food];
                 int rationPop;
                 if (food >= cost) { s[(int)ResourceType.Food] = food - cost; rationPop = RationPop[ration]; }

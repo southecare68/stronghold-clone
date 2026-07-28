@@ -1158,9 +1158,17 @@ public partial class World3D : Node3D
         // The realm: treasury, and approval with the two dials that steer it, so the
         // -/= (tax) and [/] (rations) keys have a live readout of what they change.
         _stat[8].Text = $"Gold {_sim.Gold(me)}";
-        _stat[9].Text = $"Approval {_sim.Popularity(me)}%  " +
+
+        // A larder that cannot cover the ordered ration means the people go hungry
+        // whatever the order — the harshest approval hit there is, and the usual
+        // reason a lavish table still sees approval fall. Flag it loudly (a generous
+        // order you cannot feed is the trap), and tint the readout when it bites.
+        bool starving = _sim.RationDemand(me) > _sim.Stockpile(me, ResourceType.Food);
+        _stat[9].Text = $"Approval {_sim.Popularity(me)}%" + (starving ? "  ⚠ STARVING" : "") + "  " +
                         $"[Tax {TaxNames[Mathf.Clamp(_sim.TaxLevel(me), 0, TaxNames.Length - 1)]} " +
                         $"· Food {RationNames[Mathf.Clamp(_sim.RationLevel(me), 0, RationNames.Length - 1)]}]";
+        _stat[9].AddThemeColorOverride("font_color",
+            starving ? new Color(0.96f, 0.52f, 0.40f) : new Color(0.92f, 0.94f, 0.97f));
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
