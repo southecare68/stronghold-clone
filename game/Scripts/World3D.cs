@@ -80,6 +80,7 @@ public partial class World3D : Node3D
     float _alpha;
 
     readonly Dictionary<int, Node3D> _unitNodes = new();
+    readonly Dictionary<int, MeshInstance3D> _carryProp = new();   // the load a peasant hauls, shown in front of it
     readonly Dictionary<int, Node3D> _buildingNodes = new();
     readonly Dictionary<int, int> _turretMask = new();   // a turret's rampart-neighbour bits, to rebuild its spurs
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
@@ -1684,9 +1685,12 @@ public partial class World3D : Node3D
             }
 
             UpdateBar(u, pos, node.Visible);
+            UpdateCarry(u, pos, node.Visible);
             _lastSeen[u.Id] = (pos, u.IsPeasant);
         }
         Prune(_unitNodes, live);
+        foreach (var id in new List<int>(_carryProp.Keys))
+            if (!live.Contains(id)) { _carryProp[id].QueueFree(); _carryProp.Remove(id); }
         foreach (var id in new List<int>(_skel.Keys))
             if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); _loiterPos.Remove(id); }
 
@@ -1701,6 +1705,49 @@ public partial class World3D : Node3D
             if (!peasant) { Spark(at + Vector3.Up * 0.5f, new Color(0.7f, 0.16f, 0.13f), 16, 3.2f); _sound.Play(Sfx.UnitDeath, at); }
         }
     }
+
+    // The load a peasant is hauling, shown as a small prop held in front of it —
+    // a log of wood, a chunk of stone, a sheaf of grain — so you can see the goods
+    // move from the deposit to the drop-off, as in the 2D game. Hidden when its
+    // hands are empty or it is out of sight.
+    void UpdateCarry(Unit u, Vector3 pos, bool visible)
+    {
+        bool carrying = u.IsPeasant && u.CarryAmount > 0 && visible;
+        if (!carrying)
+        {
+            if (_carryProp.TryGetValue(u.Id, out var hidden)) hidden.Visible = false;
+            return;
+        }
+        if (!_carryProp.TryGetValue(u.Id, out var prop) || prop == null)
+        {
+            prop = new MeshInstance3D
+            {
+                Mesh = new BoxMesh(),
+                MaterialOverride = new StandardMaterial3D { Roughness = 1f },
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+            AddChild(prop);
+            _carryProp[u.Id] = prop;
+        }
+        var (col, size) = CarryLook(u.CarryType);
+        ((BoxMesh)prop.Mesh).Size = size;
+        ((StandardMaterial3D)prop.MaterialOverride).AlbedoColor = col;
+        float yaw = _yaw.TryGetValue(u.Id, out var yy) ? yy : 0f;
+        var fwd = new Vector3(Mathf.Sin(yaw), 0, Mathf.Cos(yaw));
+        prop.Position = pos + new Vector3(0, 0.7f, 0) + fwd * 0.26f;   // held at the chest, out front
+        prop.Rotation = new Vector3(0, yaw, 0);
+        prop.Visible = true;
+    }
+
+    // Colour and shape of a hauled load by kind.
+    static (Color, Vector3) CarryLook(ResourceType t) => t switch
+    {
+        ResourceType.Wood  => (new Color(0.42f, 0.28f, 0.14f), new Vector3(0.5f, 0.16f, 0.16f)),   // a log, borne across
+        ResourceType.Stone => (new Color(0.52f, 0.52f, 0.55f), new Vector3(0.28f, 0.24f, 0.28f)),   // a rough chunk
+        ResourceType.Grain => (new Color(0.82f, 0.68f, 0.28f), new Vector3(0.30f, 0.30f, 0.24f)),   // a sheaf
+        ResourceType.Flour => (new Color(0.86f, 0.83f, 0.76f), new Vector3(0.26f, 0.30f, 0.22f)),   // a sack
+        _                  => (new Color(0.60f, 0.42f, 0.22f), new Vector3(0.28f, 0.20f, 0.24f)),   // a basket of bread
+    };
 
     // Point at distance `dist` along a polyline, with the segment direction and
     // whether the end has been reached.
