@@ -2296,33 +2296,54 @@ public partial class World3D : Node3D
     // two jamb piers, a lintel, a crenellated crown, and a timber door across the
     // passage that shows when the gate is shut. Oriented to run with the wall line,
     // and spurred into its neighbours so it sits IN the wall, not beside it.
-    const float GateH = WallTopY + 1.1f;   // taller than the wall — a proper gatehouse
+    const float GateH = WallTopY + 0.55f;   // a solid block, a little over the wall — chunky, not a tower
 
     Node3D MakeGate(Building b)
     {
         bool horiz = _wallSet.Contains((b.X + 1, b.Y)) || _wallSet.Contains((b.X - 1, b.Y));
         bool vert = _wallSet.Contains((b.X, b.Y + 1)) || _wallSet.Contains((b.X, b.Y - 1));
-        float rot = (vert && !horiz) ? Mathf.Pi / 2f : 0f;   // run along local X unless the line is vertical
-        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
+        float rot = (vert && !horiz) ? Mathf.Pi / 2f : 0f;   // passage runs across local X
+        var stone = new StandardMaterial3D { AlbedoColor = new Color(0.6f, 0.58f, 0.53f), Roughness = 1f };
         var root = new Node3D { Position = new Vector3(b.X, 0, b.Y), Rotation = new Vector3(0, rot, 0) };
 
-        const float depth = 0.8f, pierW = 0.26f, px = 0.4f, lintelH = 0.55f;
-        // Two jamb piers flanking the passage, at the wall-run edges.
-        foreach (float sx in new[] { px, -px })
-            root.AddChild(KeepBox(stone, new Vector3(pierW, GateH, depth), new Vector3(sx, GateH / 2f, 0)));
-        // Lintel across the top, spanning the archway.
-        root.AddChild(KeepBox(stone, new Vector3(2 * px + pierW, lintelH, depth),
-            new Vector3(0, GateH - lintelH / 2f, 0)));
-        // Crenellated crown — three merlons across the top.
-        const float m = 0.2f, mh = 0.34f;
-        foreach (float mx in new[] { -px, 0f, px })
-            root.AddChild(KeepBox(stone, new Vector3(m, mh, depth * 0.9f), new Vector3(mx, GateH + mh / 2f, 0)));
-        // The gate itself: a timber door filling the passage when the gate is shut.
+        // A solid stone block filling the tile, with an archway tunnelled through it
+        // (the passage runs in Z). Built as two jambs + the wall over the arch, so
+        // the tunnel stays open; a deck and battlements crown it.
+        const float W = 1.12f, D = 0.98f, openW = 0.6f, jambW = (W - openW) / 2f;
+        float openH = GateH * 0.66f;
+        foreach (float s in new[] { 1f, -1f })                       // the two jamb side-walls
+            root.AddChild(KeepBox(stone, new Vector3(jambW, GateH, D), new Vector3(s * (openW + jambW) / 2f, GateH / 2f, 0)));
+        root.AddChild(KeepBox(stone, new Vector3(openW + 0.02f, GateH - openH, D),   // wall over the arch
+            new Vector3(0, (GateH + openH) / 2f, 0)));
+        // A stepped (corbelled) arch rounding the top of the opening.
+        for (int s = 0; s < 3; s++)
+        {
+            float inset = 0.06f + s * 0.07f;             // narrows toward the top
+            float y = openH - 0.06f - s * 0.08f;
+            foreach (float side in new[] { 1f, -1f })
+                root.AddChild(KeepBox(stone, new Vector3(inset, 0.1f, D),
+                    new Vector3(side * (openW / 2f - inset / 2f), y, 0)));
+        }
+
+        // A timber deck on top, recessed within the battlements.
+        var plank = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.32f, 0.19f), Roughness = 1f };
+        root.AddChild(KeepBox(plank, new Vector3(W - 0.3f, 0.08f, D - 0.3f), new Vector3(0, GateH + 0.04f, 0)));
+
+        // Battlements around all four top edges — merlons at the corners and mid-edges.
+        const float mw = 0.19f, mh = 0.34f;
+        float ex = W / 2f - mw / 2f, ez = D / 2f - mw / 2f;
+        var merlons = new List<Vector3>();
+        foreach (float mz in new[] { ez, -ez })
+            for (float mx = -ex; mx <= ex + 0.01f; mx += ex) merlons.Add(new Vector3(mx, 0, mz));
+        foreach (float mx in new[] { ex, -ex }) merlons.Add(new Vector3(mx, 0, 0));   // side mid-edges
+        foreach (var mp in merlons)
+            root.AddChild(KeepBox(stone, new Vector3(mw, mh, mw), mp + new Vector3(0, GateH + mh / 2f, 0)));
+
+        // The gate leaf: a studded timber door across the passage when the gate is shut.
         if (!b.Open)
         {
-            var wood = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.24f, 0.14f), Roughness = 1f };
-            float openW = 2 * px - pierW, openH = GateH - lintelH;
-            root.AddChild(KeepBox(wood, new Vector3(openW, openH, 0.14f), new Vector3(0, openH / 2f, 0)));
+            var door = new StandardMaterial3D { AlbedoColor = new Color(0.34f, 0.22f, 0.12f), Roughness = 1f };
+            root.AddChild(KeepBox(door, new Vector3(openW - 0.04f, openH - 0.06f, 0.14f), new Vector3(0, (openH - 0.06f) / 2f, 0)));
         }
 
         RampartSpurs(root, b, stone);
