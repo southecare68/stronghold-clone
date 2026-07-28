@@ -81,6 +81,7 @@ public partial class World3D : Node3D
 
     readonly Dictionary<int, Node3D> _unitNodes = new();
     readonly Dictionary<int, Node3D> _buildingNodes = new();
+    readonly Dictionary<int, int> _turretMask = new();   // a turret's rampart-neighbour bits, to rebuild its spurs
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
     PackedScene _mTree, _mRock, _mWheat;
     // A grain field's wheat bunches, so they can thin out as the field is reaped.
@@ -2001,13 +2002,22 @@ public partial class World3D : Node3D
         foreach (var b in _sim.Buildings)
         {
             live.Add(b.Id);
+            // A turret's connecting spurs depend on which neighbours are ramparts;
+            // if that changed since it was built (a wall raised against it after the
+            // fact), rebuild it so the join stays flush.
+            if (b.Type == BuildingType.Turret && _buildingNodes.TryGetValue(b.Id, out var tn))
+            {
+                int mask = TurretMask(b);
+                if (!_turretMask.TryGetValue(b.Id, out var old) || old != mask)
+                { tn.QueueFree(); _buildingNodes.Remove(b.Id); }
+            }
             if (!_buildingNodes.TryGetValue(b.Id, out var node))
             {
                 // Composed structures (built from primitives, no single model prefab).
                 if (b.Type == BuildingType.Wall) node = MakeWall(b);
                 else if (b.Type == BuildingType.Keep) node = MakeKeep(b);
                 else if (b.Type == BuildingType.Steps) node = MakeSteps(b);
-                else if (b.Type == BuildingType.Turret) node = MakeTurret(b);
+                else if (b.Type == BuildingType.Turret) { node = MakeTurret(b); _turretMask[b.Id] = TurretMask(b); }
                 else
                 {
                     if (!_bldModel.TryGetValue(b.Type, out var scene) || scene == null) continue;
@@ -2230,6 +2240,19 @@ public partial class World3D : Node3D
     // climb one step higher onto it and shoot from the highest point around.
     const float TurretStandY = WallTopY + 1.5f;   // deck height — where a garrison stands
 
+    // Which of a turret's four cardinal neighbours are ramparts — the spurs it
+    // grows toward. Changes here mean the turret node must be rebuilt.
+    int TurretMask(Building b)
+    {
+        int mask = 0, bit = 1;
+        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+        {
+            if (_wallSet.Contains((b.X + dx, b.Y + dy))) mask |= bit;
+            bit <<= 1;
+        }
+        return mask;
+    }
+
     Node3D MakeTurret(Building b)
     {
         var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
@@ -2246,6 +2269,15 @@ public partial class World3D : Node3D
         float e = w / 2f - m / 2f;
         foreach (var c in new[] { new Vector3(e, 0, e), new Vector3(-e, 0, e), new Vector3(e, 0, -e), new Vector3(-e, 0, -e) })
             root.AddChild(KeepBox(stone, new Vector3(m, mh, m), c + new Vector3(0, TurretStandY + mh / 2f, 0)));
+
+        // A wall-height spur toward each adjacent rampart, so the tower always joins
+        // the line with no grass at the junction — this also covers a bridged wall
+        // segment, whose own model can render short next to the tower.
+        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            if (_wallSet.Contains((b.X + dx, b.Y + dy)))
+                root.AddChild(KeepBox(stone,
+                    new Vector3(dx != 0 ? 1.15f : 0.72f, WallTopY, dy != 0 ? 1.15f : 0.72f),
+                    new Vector3(dx, WallTopY / 2f, dy)));
         return root;
     }
 
