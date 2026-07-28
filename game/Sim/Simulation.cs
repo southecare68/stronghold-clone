@@ -20,14 +20,14 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
     // grows grain, a mill turns it to flour, a bakery bakes it into bread (Food).
     // Nothing but the food buildings ever touches Grain/Flour, so a match without
     // them leaves those two columns of every stockpile at zero.
-    public enum ResourceType { Wood = 0, Stone = 1, Food = 2, Grain = 3, Flour = 4 }
+    public enum ResourceType { Wood = 0, Stone = 1, Food = 2, Grain = 3, Flour = 4, Iron = 5 }
 
     // What a unit is currently doing beyond just moving/fighting.
     // Gathering = a worker sent to a node BY HAND. Working = a peasant bound to a
@@ -58,7 +58,7 @@ namespace Sim
     // Number of resource kinds, so a stockpile is a fixed-width int[].
     public static class Resources
     {
-        public const int Count = 5;   // Wood, Stone, Food, Grain, Flour
+        public const int Count = 6;   // Wood, Stone, Food, Grain, Flour, Iron
     }
 
     // A unit blueprint: the stats every unit built from it inherits. This is the
@@ -369,6 +369,7 @@ namespace Sim
         {
             BuildingType.WoodcutterHut => ResourceType.Wood,
             BuildingType.Quarry => ResourceType.Stone,
+            BuildingType.IronMine => ResourceType.Iron,   // digs ore from an iron deposit, hauls it home
             // A farm is a work building like any other — its farmer harvests the
             // wheat field the farm plants for itself (see PlantField) and hauls
             // the grain home, reusing the whole gather/haul cycle. The mill and
@@ -386,8 +387,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1 };  // ...House, Steps, Turret
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2 };  // ...Steps, Turret, IronMine
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -403,13 +404,14 @@ namespace Sim
             new[] { 15, 0, 0 },       // House — cheap timber; each one shelters ten more peasants
             new[] { 5, 5, 0 },        // Steps — the only way up onto a wall
             new[] { 10, 20, 0 },      // Turret — a raised archer platform over the wall
+            new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
         };
         // Costs are [wood, stone, food, grain]. Most buildings list only the first
         // three (grain 0); the mill and bakery add a fourth entry, and CanAfford/Pay
         // iterate each cost's own length, so the shorter rows charge no grain.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start

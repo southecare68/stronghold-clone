@@ -18,6 +18,7 @@ static class Program
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
         DemolishRefundsFreesWorkerAndClearsGround();
+        AnIronMineWorksAnIronSeam();
         YouCanBuildAnywhereInYourTerritory();
         ATurretReplacesYourOwnWall();
         ATurretBridgesAOneTileGapToTheWall();
@@ -439,6 +440,27 @@ static class Program
         Order(sim, Build(1, BuildingType.Barracks, ox, oy));
         Check("a build on unseen ground outside the territory is refused",
               sim.Buildings.Find(b => b.Type == BuildingType.Barracks && b.X == ox) == null);
+    }
+
+    // An iron mine is a harvester like the quarry — it hires an idle peasant who
+    // digs ore from the nearest iron seam and hauls it to the drop-off, so the iron
+    // stockpile grows on its own.
+    static void AnIronMineWorksAnIronSeam()
+    {
+        Console.WriteLine("\nan iron mine works an iron seam:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 4, 4);          // sets the drop-off
+        sim.SpawnNode(ResourceType.Iron, 12, 12, 100);
+        var mine = sim.PlaceBuilding(BuildingType.IronMine, 1, 9, 9);   // beside the ore
+        sim.SpawnPeasant(1);                                     // an idle hand to hire
+
+        for (int i = 0; i < 6; i++) sim.Tick(Array.Empty<Command>());
+        Check("the mine took on a worker", mine.WorkerId != 0);
+
+        int iron0 = sim.Stockpile(1, ResourceType.Iron);
+        for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
+        Check($"iron was mined and banked ({iron0} -> {sim.Stockpile(1, ResourceType.Iron)})",
+              sim.Stockpile(1, ResourceType.Iron) > iron0);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

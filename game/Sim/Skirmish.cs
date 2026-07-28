@@ -72,6 +72,12 @@ namespace Sim
             foreach (var t in Cluster(ResourceType.Stone, w + 6, m + 9, 160)) yield return t;
             foreach (var t in Cluster(ResourceType.Wood, e - 5, m - 9, 120)) yield return t;
             foreach (var t in Cluster(ResourceType.Stone, e - 4, m + 9, 160)) yield return t;
+
+            // An iron seam out toward the open flank of each base — a little further
+            // to reach than the wood and stone, for an iron mine to work. Scarcer
+            // than stone, so iron stays the premium good.
+            foreach (var t in Cluster(ResourceType.Iron, w + 14, m, 100)) yield return t;
+            foreach (var t in Cluster(ResourceType.Iron, e - 12, m, 100)) yield return t;
         }
 
         // A 3x3 block of a resource around (cx, cy), each a node. A cluster is

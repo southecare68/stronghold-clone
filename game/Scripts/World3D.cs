@@ -170,7 +170,7 @@ public partial class World3D : Node3D
     {
         BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
         BuildingType.House, BuildingType.Barracks,
-        BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.Storehouse,
+        BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery,
     };
 
@@ -179,7 +179,7 @@ public partial class World3D : Node3D
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
     Label _netInfo;
-    const int StatCount = 7;   // wood, stone, food, grain, flour, pop, army
+    const int StatCount = 8;   // wood, stone, food, grain, flour, iron, pop, army
 
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
@@ -463,6 +463,7 @@ public partial class World3D : Node3D
         B(BuildingType.Farm,          "Buildings/Preset_Houses/SM_Bld_Preset_Stables_01_Optimized", 0.5f);
         B(BuildingType.Mill,          "Buildings/Preset_Houses/SM_Bld_Preset_House_Windmill_01_Optimized", 0.5f);
         B(BuildingType.Bakery,        "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.5f);
+        B(BuildingType.IronMine,      "Buildings/Preset_Houses/SM_Bld_Preset_Tower_01_Optimized", 0.5f);   // a mine headframe
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
@@ -990,6 +991,7 @@ public partial class World3D : Node3D
         ("Food",  new Color(0.86f, 0.66f, 0.24f)),
         ("Grain", new Color(0.80f, 0.72f, 0.34f)),
         ("Flour", new Color(0.88f, 0.86f, 0.80f)),
+        ("Iron",  new Color(0.44f, 0.45f, 0.50f)),
         ("Pop",   new Color(0.42f, 0.78f, 0.44f)),
         ("Army",  new Color(0.86f, 0.40f, 0.36f)),
     };
@@ -1085,12 +1087,13 @@ public partial class World3D : Node3D
             _sim.Stockpile(me, ResourceType.Food),
             _sim.Stockpile(me, ResourceType.Grain),
             _sim.Stockpile(me, ResourceType.Flour),
+            _sim.Stockpile(me, ResourceType.Iron),
         };
         for (int i = 0; i < res.Length; i++) _stat[i].Text = $"{StatDefs[i].Name} {res[i]}";
 
         int idle = _sim.IdlePeasantCount(me);
-        _stat[5].Text = $"Pop {_sim.PeasantCount(me)}/{_sim.PopulationCap(me)}" + (idle > 0 ? $" ({idle} idle)" : "");
-        _stat[6].Text = $"Army {_sim.ArmySize(me)}";
+        _stat[6].Text = $"Pop {_sim.PeasantCount(me)}/{_sim.PopulationCap(me)}" + (idle > 0 ? $" ({idle} idle)" : "");
+        _stat[7].Text = $"Army {_sim.ArmySize(me)}";
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
@@ -1196,7 +1199,8 @@ public partial class World3D : Node3D
         BuildingType.Barracks => "Barracks", BuildingType.WoodcutterHut => "Woodcutter",
         BuildingType.Quarry => "Quarry", BuildingType.Storehouse => "Store", BuildingType.Farm => "Farm",
         BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
-        BuildingType.Steps => "Steps", BuildingType.Turret => "Turret", _ => t.ToString(),
+        BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
+        BuildingType.IronMine => "Iron Mine", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial.
@@ -1762,6 +1766,7 @@ public partial class World3D : Node3D
     {
         ResourceType.Wood  => (new Color(0.42f, 0.28f, 0.14f), new Vector3(0.5f, 0.16f, 0.16f)),   // a log, borne across
         ResourceType.Stone => (new Color(0.52f, 0.52f, 0.55f), new Vector3(0.28f, 0.24f, 0.28f)),   // a rough chunk
+        ResourceType.Iron  => (new Color(0.34f, 0.28f, 0.22f), new Vector3(0.26f, 0.22f, 0.26f)),   // ore, dark and heavy
         ResourceType.Grain => (new Color(0.82f, 0.68f, 0.28f), new Vector3(0.30f, 0.30f, 0.24f)),   // a sheaf
         ResourceType.Flour => (new Color(0.86f, 0.83f, 0.76f), new Vector3(0.26f, 0.30f, 0.22f)),   // a sack
         _                  => (new Color(0.60f, 0.42f, 0.22f), new Vector3(0.28f, 0.20f, 0.24f)),   // a basket of bread
@@ -2136,13 +2141,20 @@ public partial class World3D : Node3D
                 }
                 else
                 {
-                    var scene = n.Type == ResourceType.Stone ? _mRock : _mTree;
+                    bool rocky = n.Type == ResourceType.Stone || n.Type == ResourceType.Iron;
+                    var scene = rocky ? _mRock : _mTree;
                     node = scene.Instantiate<Node3D>();
                     float jitter = 1f + ((n.X * 13 + n.Y * 7) % 5) * 0.06f;
-                    float baseS = n.Type == ResourceType.Stone ? 0.5f : 0.42f;
+                    float baseS = rocky ? 0.5f : 0.42f;
                     node.Scale = Vector3.One * baseS * jitter;
                     node.Rotation = new Vector3(0, ((n.X * 31 + n.Y * 17) % 360) * Mathf.Pi / 180f, 0);
                     node.Position = new Vector3(n.X, 0, n.Y);
+                    if (n.Type == ResourceType.Iron)   // dark rusty ore, to tell it from grey stone
+                    {
+                        var ore = new StandardMaterial3D { AlbedoColor = new Color(0.40f, 0.23f, 0.15f), Metallic = 0.45f, Roughness = 0.55f };
+                        if (node is MeshInstance3D rmi) rmi.MaterialOverride = ore;   // the rock prefab's ROOT is the mesh
+                        foreach (var mi in Descendants<MeshInstance3D>(node)) mi.MaterialOverride = ore;
+                    }
                 }
                 AddChild(node);
                 _nodeNodes[n.Id] = node;
