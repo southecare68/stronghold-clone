@@ -2235,11 +2235,14 @@ public partial class World3D : Node3D
         var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
         var root = new Node3D { Position = new Vector3(b.X, 0, b.Y) };
 
-        const float w = 0.94f;
+        // Slightly OVER a tile wide, so the shaft butts flush against the walls on
+        // either side with no grass showing between — a tower that sits IN the line,
+        // not a thin post beside it. (The wall body is ~1.0 wide; 1.12 overlaps it.)
+        const float w = 1.12f;
         root.AddChild(KeepBox(stone, new Vector3(w, TurretStandY, w), new Vector3(0, TurretStandY / 2f, 0)));  // shaft
 
         // Four corner merlons round the deck edge — a crenellated crown.
-        const float m = 0.26f, mh = 0.38f;
+        const float m = 0.28f, mh = 0.38f;
         float e = w / 2f - m / 2f;
         foreach (var c in new[] { new Vector3(e, 0, e), new Vector3(-e, 0, e), new Vector3(e, 0, -e), new Vector3(-e, 0, -e) })
             root.AddChild(KeepBox(stone, new Vector3(m, mh, m), c + new Vector3(0, TurretStandY + mh / 2f, 0)));
