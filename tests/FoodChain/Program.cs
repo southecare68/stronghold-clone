@@ -311,6 +311,7 @@ static class Program
         {
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
             Seed(c.Sim, 1, 5);                                           // workforce for two farms + mill + bakery, plus growth
+            c.Sim.AddResource(1, ResourceType.Food, 120);                // an opening larder, like a real start, so the ramp doesn't starve
             c.Sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);
             var f1 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
             var f2 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 26, 26);   // two farms, well clear of each other
@@ -320,13 +321,13 @@ static class Program
         }
 
         int desyncs = 0, first = -1;
-        for (int t = 0; t < 1500; t++)
+        for (int t = 0; t < 2200; t++)
         {
             a.SendInput(); b.SendInput();
             a.TryStep();   b.TryStep();
             if (a.Sim.StateChecksum() != b.Sim.StateChecksum()) { if (first < 0) first = t; desyncs++; }
         }
-        Check($"StateChecksum identical on all 1500 ticks" +
+        Check($"StateChecksum identical on all 2200 ticks" +
               (desyncs > 0 ? $" (diverged {desyncs}x, first at {first})" : ""), desyncs == 0);
         // The chain ran end to end: bread bred peasants past the 5 each started
         // with. (Both agree by the checksum above, so checking one is enough.)

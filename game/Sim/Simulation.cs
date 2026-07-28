@@ -343,7 +343,8 @@ namespace Sim
         // for free — no new plumbing.
         const int GoldIdx = 6, PopIdx = 7, TaxIdx = 8, RationIdx = 9;   // after Wood..Iron (0..5)
         const int StockWidth = 10;                             // Resources.Count (6) + gold, pop, tax, ration
-        const int RealmInterval = 40;                          // ticks between realm updates (2s)
+        const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
+        const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
 
         // Tax rate steps (index 0..6): gold taken per peasant per realm tick (negative
@@ -1589,7 +1590,12 @@ namespace Sim
                 if (food >= cost) { s[(int)ResourceType.Food] = food - cost; rationPop = RationPop[ration]; }
                 else { s[(int)ResourceType.Food] = 0; rationPop = RationPop[0]; }
 
-                // Settle popularity, then let it draw people in or drive them out.
+                // Popularity and migration settle on a SLOWER cadence than gold and
+                // food, so approval drifts in deliberate steps instead of lurching
+                // every couple of seconds. Only once every PopInterval do the tax and
+                // ration moods (the ration one read from the outcome above) move the
+                // number, and only then do people come or go by it.
+                if (TickNumber % PopInterval != 0) continue;
                 int pop = Math.Clamp(s[PopIdx] + TaxPop[tax] + rationPop, 0, 100);
                 s[PopIdx] = pop;
                 int net = pop >= 80 ? 2 : pop > 50 ? 1 : pop == 50 ? 0 : pop < 20 ? -2 : -1;
