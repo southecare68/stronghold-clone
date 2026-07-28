@@ -611,10 +611,10 @@ public partial class World3D : Node3D
             for (int x = 0; x < MapSize; x++)
             {
                 int o = (y * MapSize + x) * 4;
-                // Your own territory is never veiled — you have standing awareness of
-                // the land you hold, so it reads as fully in the clear.
+                // Your own home zone is never veiled — you have standing awareness of
+                // the land you hold and a band around it, so it reads as in the clear.
                 (byte R, byte G, byte B, byte A) c =
-                    InMyTerritory(x, y) || _sim.CanSee(MyPlayer, x, y) ? default :
+                    InMyReveal(x, y) || _sim.CanSee(MyPlayer, x, y) ? default :
                     _sim.HasExplored(MyPlayer, x, y) ? FogExplored : FogUnexplored;
                 _fogBytes[o] = c.R; _fogBytes[o + 1] = c.G; _fogBytes[o + 2] = c.B; _fogBytes[o + 3] = c.A;
             }
@@ -732,9 +732,14 @@ public partial class World3D : Node3D
         foreach (var v in quad) { _territoryMesh.SurfaceSetColor(col); _territoryMesh.SurfaceAddVertex(v); }
     }
 
-    // Is this tile inside my territory rectangle? Used to keep fog off my own land.
-    bool InMyTerritory(int x, int y) =>
-        _myTerrValid && x >= _myMinX && x <= _myMaxX && y >= _myMinY && y <= _myMaxY;
+    // Is this tile within my fog-free home zone? That is the territory rectangle
+    // plus a margin, so the fog begins WELL OUTSIDE the border — a band of open
+    // ground around the holding, not fog right up against the line. (The border
+    // itself is drawn from the un-expanded rectangle, so it stays put.)
+    const int FogRevealMargin = 6;   // tiles of cleared ground beyond the territory border
+    bool InMyReveal(int x, int y) =>
+        _myTerrValid && x >= _myMinX - FogRevealMargin && x <= _myMaxX + FogRevealMargin
+                     && y >= _myMinY - FogRevealMargin && y <= _myMaxY + FogRevealMargin;
 
     // ---- combat feedback ---------------------------------------------------
 
@@ -2108,7 +2113,7 @@ public partial class World3D : Node3D
         foreach (var n in _sim.NodeList)
         {
             live.Add(n.Id);
-            bool seen = !_sim.FogEnabled || _sim.HasExplored(MyPlayer, n.X, n.Y) || InMyTerritory(n.X, n.Y);
+            bool seen = !_sim.FogEnabled || _sim.HasExplored(MyPlayer, n.X, n.Y) || InMyReveal(n.X, n.Y);
             if (!_nodeNodes.TryGetValue(n.Id, out var node))
             {
                 if (!seen) continue;
