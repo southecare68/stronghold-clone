@@ -2264,10 +2264,9 @@ public partial class World3D : Node3D
         var stone = new StandardMaterial3D { AlbedoColor = new Color(0.5f, 0.48f, 0.44f), Roughness = 1f };
         var root = new Node3D { Position = new Vector3(b.X, 0, b.Y) };
 
-        // Slightly OVER a tile wide, so the shaft butts flush against the walls on
-        // either side with no grass showing between — a tower that sits IN the line,
-        // not a thin post beside it. (The wall body is ~1.0 wide; 1.12 overlaps it.)
-        const float w = 1.12f;
+        // Over a tile wide, so the shaft butts flush against the (now centred) walls
+        // on either side with no grass showing between — a tower IN the line.
+        const float w = 1.2f;
         root.AddChild(KeepBox(stone, new Vector3(w, TurretStandY, w), new Vector3(0, TurretStandY / 2f, 0)));  // shaft
 
         // Four corner merlons round the deck edge — a crenellated crown.
@@ -2275,21 +2274,7 @@ public partial class World3D : Node3D
         float e = w / 2f - m / 2f;
         foreach (var c in new[] { new Vector3(e, 0, e), new Vector3(-e, 0, e), new Vector3(e, 0, -e), new Vector3(-e, 0, -e) })
             root.AddChild(KeepBox(stone, new Vector3(m, mh, m), c + new Vector3(0, TurretStandY + mh / 2f, 0)));
-
-        RampartSpurs(root, b, stone);
         return root;
-    }
-
-    // A wall-height spur toward each adjacent rampart, so a tower or gatehouse always
-    // joins the line with no grass at the junction — this also covers a bridged wall
-    // segment, whose own model can render short next to it.
-    void RampartSpurs(Node3D root, Building b, Material stone)
-    {
-        foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
-            if (_wallSet.Contains((b.X + dx, b.Y + dy)))
-                root.AddChild(KeepBox(stone,
-                    new Vector3(dx != 0 ? 1.15f : 0.72f, WallTopY, dy != 0 ? 1.15f : 0.72f),
-                    new Vector3(dx, WallTopY / 2f, dy)));
     }
 
     // A player-built Gatehouse: a stone gateway that rises ABOVE the wall walk, with
@@ -2360,15 +2345,6 @@ public partial class World3D : Node3D
             grille.AddChild(KeepBox(iron, new Vector3(gW, 0.05f, 0.06f), new Vector3(0, hy * gH, 0.02f)));
         root.AddChild(grille);
 
-        // Symmetric wall-height flanks reaching into BOTH neighbour tiles, so the
-        // gatehouse meets the wall on either side with no grass gap — the walls
-        // render a touch off-centre, so a flush block alone catches one side and
-        // misses the other. Gate-coloured, so they read as the gatehouse's own base,
-        // and they cap the neighbouring wall ends (nothing pokes into the archway).
-        // They start beyond the jambs, so the passage stays clear.
-        foreach (float s in new[] { 1f, -1f })
-            root.AddChild(KeepBox(stone, new Vector3(0.72f, WallTopY, D * 0.9f),
-                new Vector3(s * 0.95f, WallTopY / 2f, 0)));
         return root;
     }
 
@@ -2409,13 +2385,19 @@ public partial class World3D : Node3D
             Rotation = new Vector3(0, rot, 0),
         };
 
+        // The wall prefab's pivot sits at one END, so a placed wall renders half a
+        // tile off-centre along its run. Shift it back so the wall is centred on its
+        // tile — then wall-to-wall still tiles, and it meets a (centred) gate or
+        // turret flush instead of one side poking in and the other gapping.
+        const float WallXFix = -0.505f;
         var body = _wallBody.Instantiate<Node3D>();
         body.Scale = WallBodyScale;
+        body.Position = new Vector3(WallXFix, 0, 0);
         root.AddChild(body);
 
         var parapet = _wallBat.Instantiate<Node3D>();
         parapet.Scale = WallBatScale;
-        parapet.Position = new Vector3(0, WallTopY, WallBatZ);   // on top, along the outer edge
+        parapet.Position = new Vector3(WallXFix, WallTopY, WallBatZ);   // on top, along the outer edge
         root.AddChild(parapet);
 
         return root;
