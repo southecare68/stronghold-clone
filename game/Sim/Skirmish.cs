@@ -122,9 +122,9 @@ namespace Sim
                 // the food chain (farm -> mill -> bakery) takes a good while to lay
                 // and start baking. Without an opening stock the people would go
                 // hungry, popularity would slide, and the idle hands you need to man
-                // that very chain would drift off before it produced a loaf. Sixty
-                // covers the ramp-up for a starting six at full rations.
-                sim.AddResource(owner, ResourceType.Food, 60);
+                // that very chain would drift off before it produced a loaf. Two
+                // hundred gives a comfortable ramp-up for a starting six.
+                sim.AddResource(owner, ResourceType.Food, 200);
                 // A starting workforce to bootstrap the economy: peasants staff
                 // your work buildings, and the bread they help make breeds more.
                 // Placed AFTER the keep so they spawn at its drop-off.
