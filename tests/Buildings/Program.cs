@@ -375,6 +375,16 @@ static class Program
               sim.Buildings.Find(b => b.Type == BuildingType.Wall && b.X == 16 && b.Y == 10) != null);
         Check("so the line is solid — the gap tile is now blocked", !sim.Map.Passable(16, 10));
 
+        // Order does not matter: place the TURRET first, then wall up to one tile
+        // short of it, and the last gap still closes when that wall goes down.
+        var s1 = new Simulation(TileMap.Open(48));
+        Give(s1, 1, wood: 200, stone: 200);
+        Order(s1, Build(1, BuildingType.Turret, 17, 10));       // tower first
+        for (int x = 10; x <= 15; x++) Order(s1, Build(1, BuildingType.Wall, x, 10));  // wall ends at 15, gap at 16
+        Check("the turret-then-wall gap was bridged too",
+              !s1.Map.Passable(16, 10) &&
+              s1.Buildings.Find(b => b.Type == BuildingType.Wall && b.X == 16 && b.Y == 10) != null);
+
         // Only a SINGLE open tile is a connector — a two-tile gap is left for the
         // player to wall deliberately, so a turret never sprouts a long free wall.
         var s2 = new Simulation(TileMap.Open(48));
@@ -383,6 +393,14 @@ static class Program
         Order(s2, Build(1, BuildingType.Turret, 18, 10));       // two empty tiles (16, 17)
         Check("a two-tile gap is not auto-bridged",
               s2.Map.Passable(16, 10) && s2.Map.Passable(17, 10));
+
+        // Two plain WALLS a tile apart are NOT joined — a one-tile opening between
+        // wall runs (a gateway to come) must survive, since no turret is involved.
+        var s3 = new Simulation(TileMap.Open(48));
+        Give(s3, 1, wood: 200, stone: 200);
+        for (int x = 10; x <= 13; x++) s3.PlaceBuilding(BuildingType.Wall, 1, x, 10);
+        Order(s3, Build(1, BuildingType.Wall, 15, 10));         // one empty tile (14) between two wall runs
+        Check("a gap between two plain walls is preserved", s3.Map.Passable(14, 10));
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

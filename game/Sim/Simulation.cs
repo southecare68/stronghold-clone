@@ -910,7 +910,8 @@ namespace Sim
                     Pay(cmd.Owner, BuildCost[(int)type]);
                     if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
-                    if (type == BuildingType.Turret) BridgeTurretToWalls(cmd.Owner, cmd.X, cmd.Y);
+                    if (type == BuildingType.Wall || type == BuildingType.Gatehouse || type == BuildingType.Turret)
+                        BridgeRamparts(cmd.Owner, cmd.X, cmd.Y, type);
                     break;
 
                 case CommandType.Train:
@@ -982,21 +983,26 @@ namespace Sim
             }
         }
 
-        // A turret belongs IN a continuous wall line. If it lands one empty tile
-        // away from a friendly rampart on a cardinal side, raise a wall in that gap
-        // so the line stays solid — the fix for "the turret at the end of the wall
-        // leaves a gap invaders can walk through." A courtesy connector: it spans a
-        // single open tile only, and is free (you already paid for the tower).
-        void BridgeTurretToWalls(int owner, int x, int y)
+        // Ramparts should form an unbroken line, and a tower belongs in that line.
+        // When a wall, gatehouse or turret is raised one open tile from a friendly
+        // rampart — and EITHER end is a turret — that single gap is filled with a
+        // wall, so a tower always joins the line no matter which piece went down
+        // first (place the tower then wall up to it, or the reverse; both close).
+        // Two plain walls are left un-joined, so a deliberate one-tile opening
+        // between wall runs — the makings of a gateway — still survives. A courtesy
+        // connector: one open tile only, and free (you already paid for the pieces).
+        void BridgeRamparts(int owner, int x, int y, BuildingType placed)
         {
             foreach (var (dx, dy) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
             {
-                int gx = x + dx, gy = y + dy;              // the tile beside the turret
-                int bx = x + 2 * dx, by = y + 2 * dy;      // one further along
+                int gx = x + dx, gy = y + dy;              // the open tile beside it
+                int bx = x + 2 * dx, by = y + 2 * dy;      // the rampart one further along
                 if (!Map.Passable(gx, gy)) continue;       // the gap must be open ground
                 var beyond = Buildings.Find(b => b.Alive && b.Owner == owner && b.X == bx && b.Y == by &&
                     (b.Type == BuildingType.Wall || b.Type == BuildingType.Gatehouse || b.Type == BuildingType.Turret));
-                if (beyond != null) PlaceBuilding(BuildingType.Wall, owner, gx, gy);
+                if (beyond == null) continue;
+                if (placed == BuildingType.Turret || beyond.Type == BuildingType.Turret)
+                    PlaceBuilding(BuildingType.Wall, owner, gx, gy);
             }
         }
 
