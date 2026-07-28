@@ -177,7 +177,7 @@ namespace Sim
                         if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r) continue;   // ring perimeter only
                         int x = cx + dx, y = cy + dy;
                         if (!CanPlace(type, x, y)) continue;
-                        if (!ExploredFootprint(owner, type, x, y)) continue;
+                        if (!BuildableFootprint(owner, type, x, y)) continue;
                         if (AiFootprintHasNode(type, x, y)) continue;   // don't bulldoze deposits
                         Apply(new Command { Owner = owner, Type = CommandType.Build, TargetId = (int)type, X = x, Y = y });
                         return true;

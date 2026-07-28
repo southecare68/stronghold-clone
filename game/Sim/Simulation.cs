@@ -966,7 +966,7 @@ namespace Sim
                     // No building on ground you have never laid eyes on. Checked
                     // over the whole footprint, so a keep cannot be half-planted
                     // in the dark.
-                    if (!ExploredFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
+                    if (!BuildableFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
                     Pay(cmd.Owner, BuildCost[(int)type]);
                     if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
@@ -1087,16 +1087,19 @@ namespace Sim
             return null;
         }
 
-        // You may build on ground you have explored — OR anywhere inside your own
-        // territory, seen or not, since it is land you hold. Checked over the whole
-        // footprint, so a keep cannot be half-planted in the dark.
-        bool ExploredFootprint(int owner, BuildingType type, int x, int y)
+        // You build only inside your own territory — the land you hold, the "field
+        // of play" the border draws. Scouting far afield lets you SEE ground, but
+        // not raise a building on it; that keeps every structure within your domain
+        // and stops a footprint from spilling past the border. Checked over the WHOLE
+        // footprint, so a house at the frontier cannot hang half its tiles outside.
+        // (Fog off is the test/older-suite mode: unrestricted, bounded only by fit.)
+        bool BuildableFootprint(int owner, BuildingType type, int x, int y)
         {
             if (!FogEnabled) return true;
             var home = HomeRect(owner);
             for (int ty = y; ty < y + FootH[(int)type]; ty++)
                 for (int tx = x; tx < x + FootW[(int)type]; tx++)
-                    if (!Fog.IsExplored(owner, tx, ty) && !InRect(home, tx, ty)) return false;
+                    if (!InRect(home, tx, ty)) return false;
             return true;
         }
 

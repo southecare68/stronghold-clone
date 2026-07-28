@@ -1402,12 +1402,15 @@ public partial class World3D : Node3D
         bool swapWall = (t == BuildingType.Turret || t == BuildingType.Gatehouse)
             && _sim.OwnWallAt(MyPlayer, ox, oy) != null;
         if (!swapWall && !_sim.CanPlace(t, ox, oy)) return false;
-        // Explored ground, or your own territory (buildable seen or not) — the same
-        // rule the Build command applies, so the ghost tells the truth.
+        // Inside your own territory — the whole footprint, so a building can't spill
+        // its far tiles past the border. Mirrors the Build command's BuildableFootprint
+        // (territory-only under fog), so the ghost tells the truth. Fog off is the
+        // unrestricted test/solo mode: bounded only by fit.
         var (w, h) = _sim.FootprintOf(t);
-        for (int y = oy; y < oy + h; y++)
-            for (int x = ox; x < ox + w; x++)
-                if (!_sim.HasExplored(MyPlayer, x, y) && !InMyTerritoryRect(x, y)) return false;
+        if (_sim.FogEnabled)
+            for (int y = oy; y < oy + h; y++)
+                for (int x = ox; x < ox + w; x++)
+                    if (!InMyTerritoryRect(x, y)) return false;
         var cost = _sim.CostOf(t);
         for (int i = 0; i < cost.Count; i++)
             if (_sim.Stockpile(MyPlayer, (ResourceType)i) < cost[i]) return false;
