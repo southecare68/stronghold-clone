@@ -746,6 +746,12 @@ public partial class World3D : Node3D
         _myTerrValid && x >= _myMinX - FogRevealMargin && x <= _myMaxX + FogRevealMargin
                      && y >= _myMinY - FogRevealMargin && y <= _myMaxY + FogRevealMargin;
 
+    // Inside my territory rectangle itself (the border) — where I may build even on
+    // ground my units have not scouted. Matches the sim's HomeRect, so the build
+    // ghost and the actual Build command agree.
+    bool InMyTerritoryRect(int x, int y) =>
+        _myTerrValid && x >= _myMinX && x <= _myMaxX && y >= _myMinY && y <= _myMaxY;
+
     // ---- combat feedback ---------------------------------------------------
 
     void SetupCombatFx()
@@ -1290,10 +1296,12 @@ public partial class World3D : Node3D
         bool swapWall = (t == BuildingType.Turret || t == BuildingType.Gatehouse)
             && _sim.OwnWallAt(MyPlayer, ox, oy) != null;
         if (!swapWall && !_sim.CanPlace(t, ox, oy)) return false;
+        // Explored ground, or your own territory (buildable seen or not) — the same
+        // rule the Build command applies, so the ghost tells the truth.
         var (w, h) = _sim.FootprintOf(t);
         for (int y = oy; y < oy + h; y++)
             for (int x = ox; x < ox + w; x++)
-                if (!_sim.HasExplored(MyPlayer, x, y)) return false;
+                if (!_sim.HasExplored(MyPlayer, x, y) && !InMyTerritoryRect(x, y)) return false;
         var cost = _sim.CostOf(t);
         for (int i = 0; i < cost.Count; i++)
             if (_sim.Stockpile(MyPlayer, (ResourceType)i) < cost[i]) return false;

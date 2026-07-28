@@ -18,6 +18,7 @@ static class Program
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
         DemolishRefundsFreesWorkerAndClearsGround();
+        YouCanBuildAnywhereInYourTerritory();
         ATurretReplacesYourOwnWall();
         ATurretBridgesAOneTileGapToTheWall();
         MoveOnlyBuildsNothing();
@@ -409,6 +410,35 @@ static class Program
         for (int x = 10; x <= 13; x++) s3.PlaceBuilding(BuildingType.Wall, 1, x, 10);
         Order(s3, Build(1, BuildingType.Wall, 15, 10));         // one empty tile (14) between two wall runs
         Check("a gap between two plain walls is preserved", s3.Map.Passable(14, 10));
+    }
+
+    // Your territory is land you hold, so you may build across all of it — even the
+    // parts your units have not scouted — while unseen ground OUTSIDE it stays off
+    // limits. The fix for "I can't build to the edge of my territory."
+    static void YouCanBuildAnywhereInYourTerritory()
+    {
+        Console.WriteLine("\nyou can build anywhere in your own territory, scouted or not:");
+        var sim = new Simulation(TileMap.Open(64)) { FogEnabled = true };
+        Give(sim, 1, wood: 200, stone: 200);
+        sim.PlaceBuilding(BuildingType.Keep, 1, 10, 10);
+        sim.SpawnNode(ResourceType.Wood, 10, 25, 100);   // a home patch, so the territory reaches out
+        for (int i = 0; i < 3; i++) sim.Tick(Array.Empty<Command>());
+
+        var home = sim.HomeRect(1);
+        bool InHome(int x, int y) => home.HasValue &&
+            x >= home.Value.minX && x <= home.Value.maxX && y >= home.Value.minY && y <= home.Value.maxY;
+
+        int fx = 10, fy = 34;   // deep in the territory, far beyond the keep's sight
+        Check("the spot is genuinely unexplored", !sim.Fog.IsExplored(1, fx, fy));
+        Check("but it is inside my territory", InHome(fx, fy) && InHome(fx + 1, fy + 1));
+        Order(sim, Build(1, BuildingType.Barracks, fx, fy));
+        Check("so the barracks goes up there", sim.Buildings.Find(b => b.Type == BuildingType.Barracks && b.X == fx) != null);
+
+        int ox = 55, oy = 55;   // unseen ground well outside the territory
+        Check("that far tile is unexplored and off my land", !sim.Fog.IsExplored(1, ox, oy) && !InHome(ox, oy));
+        Order(sim, Build(1, BuildingType.Barracks, ox, oy));
+        Check("a build on unseen ground outside the territory is refused",
+              sim.Buildings.Find(b => b.Type == BuildingType.Barracks && b.X == ox) == null);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

@@ -1021,14 +1021,54 @@ namespace Sim
             return null;
         }
 
+        // You may build on ground you have explored — OR anywhere inside your own
+        // territory, seen or not, since it is land you hold. Checked over the whole
+        // footprint, so a keep cannot be half-planted in the dark.
         bool ExploredFootprint(int owner, BuildingType type, int x, int y)
         {
             if (!FogEnabled) return true;
+            var home = HomeRect(owner);
             for (int ty = y; ty < y + FootH[(int)type]; ty++)
                 for (int tx = x; tx < x + FootW[(int)type]; tx++)
-                    if (!Fog.IsExplored(owner, tx, ty)) return false;
+                    if (!Fog.IsExplored(owner, tx, ty) && !InRect(home, tx, ty)) return false;
             return true;
         }
+
+        // The rectangle a camp holds — the SAME land the territory border is drawn
+        // around (World3D.RebuildTerritory), recomputed here so the sim can let you
+        // build to that border. Bounding box of the owner's buildings, widened to
+        // swallow the resource patches they can reach, plus a margin, then DOUBLED
+        // about its centre. Kept in lockstep with the renderer's version by using
+        // the same constants and the same steps.
+        public const int TerrMargin = 4, TerrResourceReach = 18;
+        public (int minX, int minY, int maxX, int maxY)? HomeRect(int owner)
+        {
+            int lx = int.MaxValue, ly = int.MaxValue, hx = int.MinValue, hy = int.MinValue;
+            foreach (var b in Buildings)
+                if (b.Alive && b.Owner == owner)
+                { lx = Math.Min(lx, b.X); ly = Math.Min(ly, b.Y); hx = Math.Max(hx, b.X + b.W - 1); hy = Math.Max(hy, b.Y + b.H - 1); }
+            if (lx == int.MaxValue) return null;
+            foreach (var n in Nodes)
+            {
+                if (n.Amount <= 0) continue;
+                foreach (var b in Buildings)
+                {
+                    if (!b.Alive || b.Owner != owner) continue;
+                    int dx = n.X - b.CenterX, dy = n.Y - b.CenterY;
+                    if (dx * dx + dy * dy > TerrResourceReach * TerrResourceReach) continue;
+                    lx = Math.Min(lx, n.X); ly = Math.Min(ly, n.Y); hx = Math.Max(hx, n.X); hy = Math.Max(hy, n.Y);
+                    break;
+                }
+            }
+            int minX = Math.Max(0, lx - TerrMargin), minY = Math.Max(0, ly - TerrMargin);
+            int maxX = Math.Min(Map.Width - 1, hx + TerrMargin), maxY = Math.Min(Map.Height - 1, hy + TerrMargin);
+            int cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, w = maxX - minX, h = maxY - minY;
+            return (Math.Max(0, cx - w), Math.Max(0, cy - h),
+                    Math.Min(Map.Width - 1, cx + w), Math.Min(Map.Height - 1, cy + h));
+        }
+
+        static bool InRect((int minX, int minY, int maxX, int maxY)? r, int x, int y) =>
+            r.HasValue && x >= r.Value.minX && x <= r.Value.maxX && y >= r.Value.minY && y <= r.Value.maxY;
 
         // A cost lists only the resources it charges (wood/stone/food); it never
         // mentions the food-chain intermediates, so iterate the COST's length, not
