@@ -20,9 +20,12 @@ namespace Sim
     {
         public const int DefaultSize = 128;
 
-        // Peasants each side starts with — enough to staff a first building or
-        // two while the food economy gets going and begins breeding more.
-        public const int StartPeasants = 4;
+        // Peasants each side starts with. Enough spare hands to man the whole
+        // food chain (farm + mill + bakery = three workers) AND a woodcutter or
+        // quarry at the same time — with only four you ran dry before the bakery,
+        // so grain and flour piled up and no bread was ever baked, which stalled
+        // population growth in turn. Six clears that cold-start deadlock.
+        public const int StartPeasants = 6;
 
         // The two bases face each other across the ridge that TileMap.Skirmish
         // runs down the middle.
