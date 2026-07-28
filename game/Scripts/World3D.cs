@@ -2309,7 +2309,7 @@ public partial class World3D : Node3D
         // A solid stone block filling the tile, with an archway tunnelled through it
         // (the passage runs in Z). Built as two jambs + the wall over the arch, so
         // the tunnel stays open; a deck and battlements crown it.
-        const float W = 1.12f, D = 0.98f, openW = 0.6f, jambW = (W - openW) / 2f;
+        const float W = 1.3f, D = 0.98f, openW = 0.6f, jambW = (W - openW) / 2f;
         float openH = GateH * 0.66f;
         foreach (float s in new[] { 1f, -1f })                       // the two jamb side-walls
             root.AddChild(KeepBox(stone, new Vector3(jambW, GateH, D), new Vector3(s * (openW + jambW) / 2f, GateH / 2f, 0)));
@@ -2346,7 +2346,15 @@ public partial class World3D : Node3D
             root.AddChild(KeepBox(door, new Vector3(openW - 0.04f, openH - 0.06f, 0.14f), new Vector3(0, (openH - 0.06f) / 2f, 0)));
         }
 
-        RampartSpurs(root, b, stone);
+        // Symmetric wall-height flanks reaching into BOTH neighbour tiles, so the
+        // gatehouse meets the wall on either side with no grass gap — the walls
+        // render a touch off-centre, so a flush block alone catches one side and
+        // misses the other. Gate-coloured, so they read as the gatehouse's own base,
+        // and they cap the neighbouring wall ends (nothing pokes into the archway).
+        // They start beyond the jambs, so the passage stays clear.
+        foreach (float s in new[] { 1f, -1f })
+            root.AddChild(KeepBox(stone, new Vector3(0.72f, WallTopY, D * 0.9f),
+                new Vector3(s * 0.95f, WallTopY / 2f, 0)));
         return root;
     }
 
