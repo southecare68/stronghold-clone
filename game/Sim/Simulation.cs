@@ -21,7 +21,7 @@ namespace Sim
         SetTax = 9, SetRations = 10,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -407,8 +407,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2 };  // ...Steps, Turret, IronMine
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2 };  // ...Turret, IronMine, Granary
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -425,13 +425,14 @@ namespace Sim
             new[] { 5, 5, 0 },        // Steps — the only way up onto a wall
             new[] { 10, 20, 0 },      // Turret — a raised archer platform over the wall
             new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
+            new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
         };
         // Costs are [wood, stone, food, grain]. Most buildings list only the first
         // three (grain 0); the mill and bakery add a fourth entry, and CanAfford/Pay
         // iterate each cost's own length, so the shorter rows charge no grain.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1434,9 +1435,10 @@ namespace Sim
         }
 
         // The nearest place owner can deposit goods: their keep's drop-off tile,
-        // or a tile beside any storehouse they own — whichever is closest to
-        // (fx,fy). Iterated in id order with a strict compare, so every machine
-        // picks the same one.
+        // or a tile beside any storehouse OR granary they own — whichever is closest
+        // to (fx,fy). Both are drop-offs (a granary is just the storehouse's twin,
+        // meant for the food chain); iterated in id order with a strict compare, so
+        // every machine picks the same one.
         bool NearestDropOff(int owner, int fx, int fy, out Tile best)
         {
             best = default;
@@ -1449,7 +1451,7 @@ namespace Sim
             }
             foreach (var b in Buildings)               // id order
             {
-                if (b.Type != BuildingType.Storehouse || b.Owner != owner || !b.Alive) continue;
+                if ((b.Type != BuildingType.Storehouse && b.Type != BuildingType.Granary) || b.Owner != owner || !b.Alive) continue;
                 var t = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
                 long d = DropDist(t.X, t.Y, fx, fy);
                 if (d < bestD) { bestD = d; best = t; found = true; }

@@ -31,6 +31,7 @@ static class Program
         ABakeryBakesFlourIntoBread();
         TheWholeChainTurnsAnEmptyLarderIntoFood();
         RazingTheFarmStopsItsFarmer();
+        AGranaryIsACloserDropOffForTheHarvest();
         PopulationIsCappedByHousing();
         AStandingArmyEatsFood();
         NoArmyMeansNoUpkeep();
@@ -192,6 +193,32 @@ static class Program
         Check("the razed farm is gone", sim.BuildingList.Count == 1);   // just the keep
         Check("its farmer rejoined the idle pool (Job.None, still a peasant)",
               farmer.Job == Job.None && farmer.IsPeasant);
+    }
+
+    // A granary is the storehouse's twin for the food chain: drop one beside a farm
+    // far from the keep and its grain banks FASTER, the round trip cut short — the
+    // same closer-drop-off logic the storehouse gives the woodcutter.
+    static void AGranaryIsACloserDropOffForTheHarvest()
+    {
+        Console.WriteLine("\na granary is the closer drop-off for the harvest:");
+        var near = new Simulation(TileMap.Open(64));
+        near.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(near, 1, 1);
+        var g = near.PlaceBuilding(BuildingType.Granary, 1, 34, 30);   // beside the field
+        near.PlaceBuilding(BuildingType.Farm, 1, 30, 30);
+        Check("the granary fits by the field", g != null);
+
+        var far = new Simulation(TileMap.Open(64));
+        far.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(far, 1, 1);
+        far.PlaceBuilding(BuildingType.Farm, 1, 30, 30);              // keep only, a long haul home
+
+        for (int i = 0; i < 900; i++) { near.Tick(Array.Empty<Command>()); far.Tick(Array.Empty<Command>()); }
+
+        int withGranary = near.Stockpile(1, ResourceType.Grain);
+        int keepOnly = far.Stockpile(1, ResourceType.Grain);
+        Check($"a nearby granary banks grain faster ({withGranary} vs {keepOnly})",
+              withGranary > keepOnly);
     }
 
     // Population cannot outgrow its housing: a well-fed, fairly-taxed realm draws

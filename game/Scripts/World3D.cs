@@ -177,7 +177,7 @@ public partial class World3D : Node3D
         BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
-        BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery,
+        BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Granary,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -479,6 +479,7 @@ public partial class World3D : Node3D
         B(BuildingType.Mill,          "Buildings/Preset_Houses/SM_Bld_Preset_House_Windmill_01_Optimized", 0.5f);
         B(BuildingType.Bakery,        "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.5f);
         B(BuildingType.IronMine,      "Buildings/Preset_Houses/SM_Bld_Preset_Tower_01_Optimized", 0.5f);   // a mine headframe
+        B(BuildingType.Granary,       "Buildings/Preset_Houses/SM_Bld_Preset_Shelter_01_Optimized", 0.5f);  // an open barn for the harvest
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
@@ -1302,7 +1303,7 @@ public partial class World3D : Node3D
         BuildingType.Quarry => "Quarry", BuildingType.Storehouse => "Store", BuildingType.Farm => "Farm",
         BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
-        BuildingType.IronMine => "Iron Mine", _ => t.ToString(),
+        BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial.
