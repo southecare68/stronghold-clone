@@ -181,6 +181,14 @@ public partial class World3D : Node3D
     Label _netInfo;
     const int StatCount = 10;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval
 
+    // A brief, prominent confirmation flashed when you turn a realm dial (tax or
+    // rations). The setting's live reading sits in the top bar, but it is small and
+    // Gold/Approval only move at the next realm tick a second later — so a change
+    // otherwise looks like nothing happened. This makes it unmistakable.
+    Control _realmToastPanel;
+    Label _realmToast;
+    float _realmToastLeft;   // seconds the toast stays up (fades over the last stretch)
+
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
     // we've seen but can't see now, clear where a unit or building has eyes right
@@ -1073,6 +1081,50 @@ public partial class World3D : Node3D
         _netInfo = new Label { HorizontalAlignment = HorizontalAlignment.Right };
         _netInfo.AddThemeFontSizeOverride("font_size", 14);
         netMargin.AddChild(_netInfo);
+
+        // Realm-dial toast: centred near the top, big, hidden until a change flashes
+        // it. Anchored to the horizontal centre and grown both ways so it sizes to
+        // its own text and stays centred whatever the message.
+        var toast = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0,
+            OffsetTop = 72,
+            GrowHorizontal = Control.GrowDirection.Both,
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        toast.AddThemeStyleboxOverride("panel", Panel(new Color(0.10f, 0.12f, 0.16f, 0.92f)));
+        layer.AddChild(toast);
+        var toastMargin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) toastMargin.AddThemeConstantOverride("margin_" + s, 22);
+        foreach (var s in new[] { "top", "bottom" }) toastMargin.AddThemeConstantOverride("margin_" + s, 12);
+        toast.AddChild(toastMargin);
+        _realmToast = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _realmToast.AddThemeColorOverride("font_color", new Color(0.97f, 0.95f, 0.86f));
+        _realmToast.AddThemeFontSizeOverride("font_size", 26);
+        toastMargin.AddChild(_realmToast);
+        _realmToastPanel = toast;
+    }
+
+    // Flash the realm toast with a message for a moment. Called when tax or rations
+    // change; UpdateRealmToast fades and hides it.
+    void ShowRealmToast(string msg)
+    {
+        _realmToast.Text = msg;
+        _realmToastLeft = 1.9f;
+    }
+
+    void UpdateRealmToast(double delta)
+    {
+        if (_realmToastLeft <= 0f)
+        {
+            if (_realmToastPanel.Visible) _realmToastPanel.Visible = false;
+            return;
+        }
+        _realmToastLeft -= (float)delta;
+        _realmToastPanel.Visible = true;
+        float a = Mathf.Clamp(_realmToastLeft / 0.6f, 0f, 1f);   // fade over the last 0.6s
+        _realmToastPanel.Modulate = new Color(1f, 1f, 1f, a);
     }
 
     static StyleBoxFlat Panel(Color bg) => new()
@@ -1438,6 +1490,7 @@ public partial class World3D : Node3D
         UpdateFog();
         UpdateRings();
         UpdateHud();
+        UpdateRealmToast(delta);
         UpdateFx(delta);
         UpdateFires(delta);
         UpdateMusic(delta);
@@ -2609,6 +2662,7 @@ public partial class World3D : Node3D
             int step = tax.Keycode == Key.Equal ? 1 : -1;
             int next = Mathf.Clamp(_sim.TaxLevel(MyPlayer) + step, 0, Simulation.TaxSteps - 1);
             _me.Issue(new Command { Type = CommandType.SetTax, X = next });
+            ShowRealmToast($"Tax  →  {TaxNames[next]}");
             return;
         }
         if (e is InputEventKey rat && rat.Pressed && _buildType == null &&
@@ -2618,6 +2672,7 @@ public partial class World3D : Node3D
             int step = rat.Keycode == Key.Bracketright ? 1 : -1;
             int next = Mathf.Clamp(_sim.RationLevel(MyPlayer) + step, 0, Simulation.RationSteps - 1);
             _me.Issue(new Command { Type = CommandType.SetRations, X = next });
+            ShowRealmToast($"Rations  →  {RationNames[next]}");
             return;
         }
 
