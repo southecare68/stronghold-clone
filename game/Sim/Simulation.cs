@@ -349,11 +349,16 @@ namespace Sim
 
         // Tax rate steps (index 0..6): gold taken per peasant per realm tick (negative
         // = a bribe you PAY out), and the popularity it costs or wins.
+        //
+        // Tax and rations trade on the SAME popularity scale — a uniform step of 3,
+        // symmetric about a neutral middle — so the two dials offset one another
+        // exactly: every step you raise tax (-3) is bought back by one step of richer
+        // rations (+3). Tax is neutral at "Low" (index 3); rations at "Full" (index 2).
         static readonly int[] TaxGold = { -2, -1, 0, 1, 2, 3, 4 };
-        static readonly int[] TaxPop  = {  6,  3, 1, -2, -4, -7, -10 };
+        static readonly int[] TaxPop  = {  9,  6, 3,  0, -3, -6, -9 };
         // Ration steps (index 0..3 = none, half, full, extra): the popularity each
         // wins; the food each eats is a fraction of the head-count (see ResolveRealm).
-        static readonly int[] RationPop = { -8, -3, 1, 4 };
+        static readonly int[] RationPop = { -6, -3, 0, 3 };
         public const int TaxSteps = 7, RationSteps = 4;
 
         // Population is capped by HOUSING: a peasant needs a roof. The keep shelters
