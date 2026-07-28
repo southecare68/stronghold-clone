@@ -2309,8 +2309,8 @@ public partial class World3D : Node3D
         // A solid stone block filling the tile, with an archway tunnelled through it
         // (the passage runs in Z). Built as two jambs + the wall over the arch, so
         // the tunnel stays open; a deck and battlements crown it.
-        const float W = 1.3f, D = 0.98f, openW = 0.6f, jambW = (W - openW) / 2f;
-        float openH = GateH * 0.66f;
+        const float W = 1.3f, D = 0.98f, openW = 0.64f, jambW = (W - openW) / 2f;
+        float openH = GateH * 0.74f;
         foreach (float s in new[] { 1f, -1f })                       // the two jamb side-walls
             root.AddChild(KeepBox(stone, new Vector3(jambW, GateH, D), new Vector3(s * (openW + jambW) / 2f, GateH / 2f, 0)));
         root.AddChild(KeepBox(stone, new Vector3(openW + 0.02f, GateH - openH, D),   // wall over the arch
@@ -2339,12 +2339,22 @@ public partial class World3D : Node3D
         foreach (var mp in merlons)
             root.AddChild(KeepBox(stone, new Vector3(mw, mh, mw), mp + new Vector3(0, GateH + mh / 2f, 0)));
 
-        // The gate leaf: a studded timber door across the passage when the gate is shut.
-        if (!b.Open)
-        {
-            var door = new StandardMaterial3D { AlbedoColor = new Color(0.34f, 0.22f, 0.12f), Roughness = 1f };
-            root.AddChild(KeepBox(door, new Vector3(openW - 0.04f, openH - 0.06f, 0.14f), new Vector3(0, (openH - 0.06f) / 2f, 0)));
-        }
+        // The gate itself: an iron portcullis in the passage. Shut, it drops down
+        // and bars the way; open, it is hauled UP into the gatehouse so the archway
+        // is clear to walk straight through. The lift is the whole tell between the
+        // two states, so it is deliberately large.
+        var iron = new StandardMaterial3D { AlbedoColor = new Color(0.17f, 0.17f, 0.2f), Metallic = 0.35f, Roughness = 0.5f };
+        var oak = new StandardMaterial3D { AlbedoColor = new Color(0.34f, 0.22f, 0.12f), Roughness = 1f };
+        float gW = openW - 0.06f, gH = openH - 0.12f;
+        float lift = b.Open ? gH * 0.9f : 0f;                       // hauled up out of the way when open
+        var grille = new Node3D { Position = new Vector3(0, lift, 0) };
+        // A timber backing behind the bars, so a SHUT gate reads solid, not see-through.
+        grille.AddChild(KeepBox(oak, new Vector3(gW, gH, 0.06f), new Vector3(0, gH / 2f, -0.04f)));
+        for (int i = 0; i <= 4; i++)                                // vertical iron bars
+            grille.AddChild(KeepBox(iron, new Vector3(0.05f, gH, 0.06f), new Vector3(-gW / 2f + i * gW / 4f, gH / 2f, 0.02f)));
+        foreach (float hy in new[] { 0.14f, 0.52f, 0.9f })          // horizontal rails
+            grille.AddChild(KeepBox(iron, new Vector3(gW, 0.05f, 0.06f), new Vector3(0, hy * gH, 0.02f)));
+        root.AddChild(grille);
 
         // Symmetric wall-height flanks reaching into BOTH neighbour tiles, so the
         // gatehouse meets the wall on either side with no grass gap — the walls
