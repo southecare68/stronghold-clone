@@ -167,6 +167,7 @@ public partial class World3D : Node3D
     int _ghostRot;
     Node3D _ghostModel;
     BuildingType? _ghostModelType;
+    Vector2I _ghostGateTile = new(int.MinValue, int.MinValue);   // gate ghost rebuilt when the cursor tile changes
     readonly Dictionary<Vector2I, int> _pendingRot = new();
 
     // What the player can put down (not the Keep — you start with one). Order sets
@@ -1452,6 +1453,29 @@ public partial class World3D : Node3D
     // facing R will give it. Walls orient themselves to their run, so they skip it.
     void UpdateGhostModel(BuildingType t, int cx, int cy, int w, int h)
     {
+        int gx = cx - (w - 1) / 2, gy = cy - (h - 1) / 2;
+
+        // The gate is a composed mesh, not one of the stand-in prefabs, and the
+        // prefab preview came out far smaller than the gate you actually get.
+        // Preview it with the very mesh MakeGate builds — exact size, shape, and
+        // the wall-orientation it will snap to. MakeGate positions its own root at
+        // (X,Y), so rebuild when the cursor tile changes rather than repositioning.
+        if (t == BuildingType.Gatehouse && !_wallDragging)
+        {
+            var tile = new Vector2I(gx, gy);
+            if (_ghostModelType != t || _ghostGateTile != tile)
+            {
+                _ghostModel?.QueueFree();
+                _ghostModel = MakeGate(new Building { Type = BuildingType.Gatehouse, X = gx, Y = gy, W = w, H = h });
+                foreach (var mi in Descendants<MeshInstance3D>(_ghostModel)) mi.Transparency = 0.5f;
+                AddChild(_ghostModel);
+                _ghostModelType = t;
+                _ghostGateTile = tile;
+            }
+            _ghostModel.Visible = true;
+            return;
+        }
+
         bool showModel = t != BuildingType.Wall && !_wallDragging
                          && _bldModel.TryGetValue(t, out var scene) && scene != null;
         if (!showModel) { if (_ghostModel != null) _ghostModel.Visible = false; return; }
