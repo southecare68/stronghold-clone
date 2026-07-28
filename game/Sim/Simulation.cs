@@ -691,6 +691,13 @@ namespace Sim
         public void AddResource(int owner, ResourceType type, int amount) =>
             StockOf(owner)[(int)type] += amount;
 
+        // Grant starting gold, and set the opening popularity. Match-setup only, like
+        // AddResource — call identically on every machine before tick 0. Kept out of
+        // the keep's default init (which stays a neutral 55 / 0 gold) so a scenario
+        // can open with whatever loadout it wants without changing that baseline.
+        public void AddGold(int owner, int amount) => StockOf(owner)[GoldIdx] = Math.Max(0, StockOf(owner)[GoldIdx] + amount);
+        public void SetPopularity(int owner, int value) => StockOf(owner)[PopIdx] = Math.Clamp(value, 0, 100);
+
         // The realm: gold in the treasury, popularity (0-100), and the tax/ration
         // settings — read-only views for the HUD. Default to an un-opened realm.
         public int Gold(int owner) => _stock.TryGetValue(owner, out var s) ? s[GoldIdx] : 0;

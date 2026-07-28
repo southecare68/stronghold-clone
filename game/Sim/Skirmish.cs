@@ -125,6 +125,10 @@ namespace Sim
                 // that very chain would drift off before it produced a loaf. Two
                 // hundred gives a comfortable ramp-up for a starting six.
                 sim.AddResource(owner, ResourceType.Food, 200);
+                // Open with a treasury and a content, fully-approving populace, so
+                // there is room to spend and slack before taxes or hunger bite.
+                sim.AddGold(owner, 500);
+                sim.SetPopularity(owner, 100);
                 // A starting workforce to bootstrap the economy: peasants staff
                 // your work buildings, and the bread they help make breeds more.
                 // Placed AFTER the keep so they spawn at its drop-off.
