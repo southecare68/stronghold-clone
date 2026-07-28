@@ -26,6 +26,7 @@ static class Program
         NoFarmMeansNoGrain();
         AFarmPlantsAFieldAndGrainFlows();
         AFarmReplantsItsFieldSoItNeverRunsDry();
+        AnInexhaustibleFieldStaysPutAndNeverEmpties();
         AMillGrindsGrainIntoFlour();
         AMillWithNoGrainStaysIdle();
         ABakeryBakesFlourIntoBread();
@@ -99,6 +100,41 @@ static class Program
         Check($"reaped more than a single field's worth ({banked} > 240)", banked > 240);
         Check("and a field is still standing to be cut",
               NodesOfType(sim, ResourceType.Grain) >= 1);
+    }
+
+    // With InfiniteResources on, a farm reaps its ONE field IN PLACE — it never
+    // draws down and never replants onto fresh ground, so the field stays a single
+    // tile and farms can pack tight, freeing land for other buildings. (Off, the
+    // farm replants across tiles as fields run out — proven directly above.)
+    static void AnInexhaustibleFieldStaysPutAndNeverEmpties()
+    {
+        Console.WriteLine("\nwith infinite resources on, a field stays put and never empties:");
+        var sim = new Simulation(TileMap.Open(48)) { InfiniteResources = true };
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, 1);
+        var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
+        Check("the farm fits", farm != null);
+
+        Settle(sim, 80);                       // hire the farmer, sow the field
+        var field = GrainField(sim);
+        Check("a wheat field was sown", field != null);
+        int full = field?.Amount ?? 0;
+
+        for (int i = 0; i < 3000; i++) sim.Tick(Array.Empty<Command>());
+        Check($"the field is still full, never drawn down ({field?.Amount}/{full})",
+              field != null && field.Amount == full);
+        Check($"and it is still the only field, no replant onto fresh ground ({NodesOfType(sim, ResourceType.Grain)})",
+              NodesOfType(sim, ResourceType.Grain) == 1);
+        // Grain banked while the field held at full: a finite field would have been
+        // drawn down by exactly this haul, so the two together prove it gave freely.
+        Check($"yet grain kept flowing off that full field ({sim.Stockpile(1, ResourceType.Grain)} banked)",
+              sim.Stockpile(1, ResourceType.Grain) > 0);
+    }
+
+    static ResourceNode GrainField(Simulation sim)
+    {
+        foreach (var n in sim.NodeList) if (n.Type == ResourceType.Grain) return n;
+        return null;
     }
 
     // A mill grinds banked grain into flour, one batch at a time, and takes only

@@ -494,12 +494,13 @@ namespace Sim
         public Vision Fog;
         public bool FogEnabled;
 
-        // When on, natural deposits (wood, stone, iron) never run dry — the gather
-        // draws no amount from them, so a forest or seam is worked forever. A farm's
-        // grain field is exempt: it still draws down and replants on its own cycle,
-        // so the food chain is unchanged. Opt-in like FogEnabled and carried in the
-        // snapshot, so a rejoiner keeps the same inexhaustible world; off by default,
-        // so every finite-deposit test (and 0xB1A7A676) behaves exactly as before.
+        // When on, deposits never run dry — the gather draws no amount from wood,
+        // stone, iron, OR a farm's grain field, so a forest or seam is worked forever
+        // and a farm reaps its one field in place rather than replanting onto fresh
+        // ground (so farms pack tight, freeing land for other buildings). Opt-in like
+        // FogEnabled and carried in the snapshot, so a rejoiner keeps the same
+        // inexhaustible world; off by default, so every finite-deposit test (and
+        // 0xB1A7A676) behaves exactly as before.
         public bool InfiniteResources;
 
         // Can this player act on that spot at all? With fog off, everything is
@@ -1422,9 +1423,11 @@ namespace Sim
                             u.GatherTimer = 0;
                             u.CarryType = node.Type;
                             u.CarryAmount++;
-                            // Inexhaustible deposits give without drawing down; a grain
-                            // field always spends, so the farm keeps reaping and replanting.
-                            if (!InfiniteResources || node.Type == ResourceType.Grain) node.Amount--;
+                            // Inexhaustible deposits give without ever drawing down — a
+                            // wheat field included, so a farm keeps reaping the SAME field
+                            // forever (no replant onto fresh ground), letting farms pack
+                            // tight and leave room for other buildings.
+                            if (!InfiniteResources) node.Amount--;
                         }
                     }
                     else ChaseTo(u, node.X, node.Y);
