@@ -20,6 +20,7 @@ static class Program
         DemolishRefundsFreesWorkerAndClearsGround();
         AnIronMineWorksAnIronSeam();
         YouCanBuildAnywhereInYourTerritory();
+        TheTerritoryBorderStaysPutAsYouBuild();
         ATurretReplacesYourOwnWall();
         ATurretBridgesAOneTileGapToTheWall();
         MoveOnlyBuildsNothing();
@@ -441,6 +442,43 @@ static class Program
         Check("a build on unseen ground outside the territory is refused",
               sim.Buildings.Find(b => b.Type == BuildingType.Barracks && b.X == ox) == null);
     }
+
+    // The home border is pinned to the KEEP, not the live spread of your buildings,
+    // so raising a wall along the frontier must NOT push the border out. Before this
+    // was fixed the border was drawn from the bounding box of ALL your buildings, so
+    // each edge building widened it and the line crept outward one wall at a time.
+    static void TheTerritoryBorderStaysPutAsYouBuild()
+    {
+        Console.WriteLine("\nthe territory border stays put as you build along it:");
+        var sim = new Simulation(TileMap.Open(64)) { FogEnabled = true };
+        Give(sim, 1, wood: 500, stone: 500);
+        sim.PlaceBuilding(BuildingType.Keep, 1, 24, 24);
+        for (int i = 0; i < 3; i++) sim.Tick(Array.Empty<Command>());
+
+        var before = sim.HomeRect(1);
+        Check("the keep alone stakes out a territory", before.HasValue);
+
+        // A wall on the far frontier — the extreme corner of the home rectangle.
+        int ex = before.Value.maxX, ey = before.Value.maxY;
+        Order(sim, Build(1, BuildingType.Wall, ex, ey));
+        Check($"the wall goes up on the frontier ({ex},{ey})",
+              sim.Buildings.Find(b => b.Type == BuildingType.Wall && b.X == ex && b.Y == ey) != null);
+        Check($"and the border did not move ({Fmt(before)} -> {Fmt(sim.HomeRect(1))})",
+              SameRect(before, sim.HomeRect(1)));
+
+        // A second wall on the opposite frontier — still no shift.
+        int wx = before.Value.minX, wy = before.Value.maxY;
+        Order(sim, Build(1, BuildingType.Wall, wx, wy));
+        Check($"a second frontier wall ({wx},{wy}) still leaves the border where it was",
+              SameRect(before, sim.HomeRect(1)));
+    }
+
+    static bool SameRect((int minX, int minY, int maxX, int maxY)? a, (int minX, int minY, int maxX, int maxY)? b) =>
+        a.HasValue && b.HasValue && a.Value.minX == b.Value.minX && a.Value.minY == b.Value.minY
+        && a.Value.maxX == b.Value.maxX && a.Value.maxY == b.Value.maxY;
+
+    static string Fmt((int minX, int minY, int maxX, int maxY)? r) =>
+        r.HasValue ? $"[{r.Value.minX},{r.Value.minY}..{r.Value.maxX},{r.Value.maxY}]" : "none";
 
     // An iron mine is a harvester like the quarry — it hires an idle peasant who
     // digs ore from the nearest iron seam and hauls it to the drop-off, so the iron

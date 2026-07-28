@@ -1100,19 +1100,27 @@ namespace Sim
         // about its centre. Kept in lockstep with the renderer's version by using
         // the same constants and the same steps.
         public const int TerrMargin = 4, TerrResourceReach = 18;
+        // A camp's home territory, anchored on its KEEP — not the live spread of its
+        // buildings. Anchoring on the keep (which never moves) is what keeps the
+        // border FIXED: raising a wall or a house along the edge must not shift the
+        // line, or you could nudge your own frontier outward one building at a time.
+        // At match start the keep is the only building, so this is exactly the
+        // opening territory; it simply stops growing as you build inside it.
         public (int minX, int minY, int maxX, int maxY)? HomeRect(int owner)
         {
             int lx = int.MaxValue, ly = int.MaxValue, hx = int.MinValue, hy = int.MinValue;
             foreach (var b in Buildings)
-                if (b.Alive && b.Owner == owner)
+                if (b.Alive && b.Owner == owner && b.Type == BuildingType.Keep)
                 { lx = Math.Min(lx, b.X); ly = Math.Min(ly, b.Y); hx = Math.Max(hx, b.X + b.W - 1); hy = Math.Max(hy, b.Y + b.H - 1); }
             if (lx == int.MaxValue) return null;
+            // Swallow the home resource patches the keep sits among, so the border
+            // ends up OUTSIDE your wood and stone — reach measured from the keep only.
             foreach (var n in Nodes)
             {
                 if (n.Amount <= 0) continue;
                 foreach (var b in Buildings)
                 {
-                    if (!b.Alive || b.Owner != owner) continue;
+                    if (!b.Alive || b.Owner != owner || b.Type != BuildingType.Keep) continue;
                     int dx = n.X - b.CenterX, dy = n.Y - b.CenterY;
                     if (dx * dx + dy * dy > TerrResourceReach * TerrResourceReach) continue;
                     lx = Math.Min(lx, n.X); ly = Math.Min(ly, n.Y); hx = Math.Max(hx, n.X); hy = Math.Max(hy, n.Y);

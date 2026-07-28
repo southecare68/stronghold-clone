@@ -677,13 +677,16 @@ public partial class World3D : Node3D
     void RebuildTerritory()
     {
         bool fog = _sim.FogEnabled;
-        // Bounding box of each owner's known buildings (footprint corners).
+        // The territory is anchored on each owner's KEEP, not the live spread of its
+        // buildings — so the border stays FIXED when you raise a wall or house along
+        // it (matching the sim's HomeRect). At start the keep is the only building,
+        // so this is the opening territory; it just stops growing as you build in it.
         var box = new SortedDictionary<int, int[]>();   // owner -> {minX,minY,maxX,maxY}, owner order
         foreach (var b in _sim.Buildings)
         {
-            if (!b.Alive) continue;
-            // An enemy box may only be drawn from buildings you have scouted, or it
-            // would betray unseen ones — the maphack the fog exists to prevent.
+            if (!b.Alive || b.Type != BuildingType.Keep) continue;
+            // An enemy box may only be drawn from a keep you have scouted, or it
+            // would betray an unseen one — the maphack the fog exists to prevent.
             if (fog && b.Owner != MyPlayer && !_sim.HasExplored(MyPlayer, b.CenterX, b.CenterY)) continue;
             int lx = b.X, ly = b.Y, hx = b.X + b.W - 1, hy = b.Y + b.H - 1;
             if (box.TryGetValue(b.Owner, out var r))
@@ -701,7 +704,7 @@ public partial class World3D : Node3D
             if (n.Amount <= 0) continue;
             foreach (var b in _sim.Buildings)
             {
-                if (!b.Alive || !box.ContainsKey(b.Owner)) continue;
+                if (!b.Alive || b.Type != BuildingType.Keep || !box.ContainsKey(b.Owner)) continue;
                 if (fog && b.Owner != MyPlayer && !_sim.HasExplored(MyPlayer, b.CenterX, b.CenterY)) continue;
                 int dx = n.X - b.CenterX, dy = n.Y - b.CenterY;
                 if (dx * dx + dy * dy > TerrResourceReach * TerrResourceReach) continue;
