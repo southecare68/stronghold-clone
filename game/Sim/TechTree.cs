@@ -51,7 +51,7 @@ namespace Sim
         // Node Ids — stable, never renumber (they are bit positions in the researched
         // mask). Grouped by branch with room to grow between groups.
         // Trunk 0..9
-        public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3, Farmstead = 4;   // + Muster when the war layer lands
+        public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3, Farmstead = 4, Muster = 5;   // Muster → war & spies
         // Religious 10..19
         public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14;
         // Economic 20..29
@@ -60,6 +60,8 @@ namespace Sim
         public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34;
         // Domain 40..49
         public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44;
+        // War & espionage 50..59 — the shared tool layer, not a scored path
+        public const int SpyGuild = 50, Embezzler = 51, Inquisitor = 52, Saboteur = 53, Agitator = 54, Assassin = 55, Bodyguard = 56;
 
         // Fork groups.
         const int ForkHolyOrder = 1;    // Missionaries | Zealotry
@@ -82,6 +84,7 @@ namespace Sim
                 new TechNode(Market,      "Market",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Economic
                 new TechNode(ScholarsHut, "Scholar's Hut", TechBranch.Trunk, 0, 10, new[] { Roads }),  // → Science
                 new TechNode(Farmstead,   "Farmstead",    TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Domain
+                new TechNode(Muster,      "Muster",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → war & espionage
 
                 // --- Religious branch: Chapel → Shrine → (fork) → Cathedral → ★ ------
                 new TechNode(Shrine,       "Shrine",       TechBranch.Religious, 1, 15, new[] { Chapel }),
@@ -110,6 +113,21 @@ namespace Sim
                 new TechNode(Colonists,      "Colonists",       TechBranch.Domain, 2, 24, new[] { Husbandry }, forkGroup: ForkSettlement),   // settle faster
                 new TechNode(ProvincialKeeps,"Provincial Keeps",TechBranch.Domain, 3, 36, new[] { Husbandry }, requiresFork: ForkSettlement),   // lets you found new keeps
                 new TechNode(SovereignsCourt,"Sovereign's Court",TechBranch.Domain, 4, 58, new[] { ProvincialKeeps }, capstone: true),
+
+                // --- War & espionage: the shared tool layer (any path, no capstone) --
+                // A spy is never generic harassment — each is the dedicated answer to
+                // one crown; the Bodyguard is the answer to the Assassin. The COUNTERS
+                // to these spies are the branches' own Tier-III nodes (Cathedral, Banking
+                // House, Printing Press, Provincial Keeps), so being targeted is
+                // survivable if you paid that opportunity cost. (Muster is the trunk
+                // unlock, defined above with the other trunk gates.)
+                new TechNode(SpyGuild,   "Spy Guild",  TechBranch.War, 1, 15, new[] { Muster }),
+                new TechNode(Embezzler,  "Embezzler",  TechBranch.War, 2, 18, new[] { SpyGuild }),   // → Economic
+                new TechNode(Inquisitor, "Inquisitor", TechBranch.War, 2, 18, new[] { SpyGuild }),   // → Religious
+                new TechNode(Saboteur,   "Saboteur",   TechBranch.War, 2, 18, new[] { SpyGuild }),   // → Science
+                new TechNode(Agitator,   "Agitator",   TechBranch.War, 2, 18, new[] { SpyGuild }),   // → Domain
+                new TechNode(Assassin,   "Assassin",   TechBranch.War, 2, 18, new[] { SpyGuild }),   // → the war tool
+                new TechNode(Bodyguard,  "Bodyguard",  TechBranch.War, 2, 20, new[] { Muster }),     // 🛡 counters the Assassin
             };
 
             int max = 0;

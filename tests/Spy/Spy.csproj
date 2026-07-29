@@ -1,0 +1,24 @@
+<!-- Spy — the counter-web (spy.pdf). Each spy is the dedicated answer to one crown
+     (plus the Assassin against force): trained by research, costs gold, sits on a
+     cooldown, and its bite is blunted by the target's own Tier-III counter. These
+     tests hold down each of the five effects and its softening counter, the training
+     and cooldown gates, and — the one that matters for a match — that two clients
+     raise the same daggers bit-for-bit.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>SpyTests</RootNamespace>
+    <AssemblyName>SpyTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

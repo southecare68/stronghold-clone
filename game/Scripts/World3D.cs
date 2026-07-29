@@ -215,6 +215,13 @@ public partial class World3D : Node3D
     Label _techHeader;
     readonly Dictionary<int, Button> _techButtons = new();
 
+    // The spy ring: a panel of the five daggers, each fired at your rival.
+    Control _spyPanel;
+    Button _spyButton;
+    bool _showSpies;
+    Label _spyHeader;
+    readonly Dictionary<int, Button> _spyButtons = new();
+
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
     // we've seen but can't see now, clear where a unit or building has eyes right
@@ -394,6 +401,7 @@ public partial class World3D : Node3D
         SetupRealmPanel();
         SetupGoalsPanel();
         SetupTechPanel();
+        SetupSpyPanel();
         SetupConfirmPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
@@ -1848,6 +1856,7 @@ public partial class World3D : Node3D
         UpdateRealmPanel();
         UpdateGoalsPanel();
         UpdateTechPanel();
+        UpdateSpyPanel();
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -3018,6 +3027,14 @@ public partial class World3D : Node3D
             return;
         }
 
+        // X shows or hides the spy ring — local only.
+        if (e is InputEventKey spy && spy.Pressed && spy.Keycode == Key.X &&
+            !spy.CtrlPressed && !spy.MetaPressed && !spy.AltPressed)
+        {
+            ToggleSpies();
+            return;
+        }
+
         // R rotates the building being placed a quarter-turn, so you can face it
         // whichever way looks best before committing.
         if (e is InputEventKey rot && rot.Pressed && rot.Keycode == Key.R &&
@@ -3751,6 +3768,109 @@ public partial class World3D : Node3D
         TechState.Unaffordable => new Color(0.80f, 0.76f, 0.62f),
         TechState.Closed => new Color(0.70f, 0.52f, 0.50f),
         _ => new Color(0.56f, 0.58f, 0.62f),   // locked
+    };
+
+    // ---- the spy ring ------------------------------------------------------
+
+    // The five daggers (spy.pdf), each fired at your rival. A spy you've researched
+    // and can afford lights up; otherwise it shows why not (locked / cooldown / no
+    // gold / no rival). Clicking a live one issues a Spy command against the rival —
+    // the sim validates and lands it, the same path the tests drive. Read-only
+    // otherwise; toggled like the tech tree.
+    void SetupSpyPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        var panel = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+            Visible = false,
+        };
+        panel.AddThemeStyleboxOverride("panel", Panel(new Color(0.11f, 0.08f, 0.10f, 0.96f)));
+        layer.AddChild(panel);
+        _spyPanel = panel;
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 18);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 14);
+        panel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 6);
+        margin.AddChild(col);
+
+        _spyHeader = new Label();
+        _spyHeader.AddThemeColorOverride("font_color", new Color(0.94f, 0.72f, 0.64f));
+        _spyHeader.AddThemeFontSizeOverride("font_size", 16);
+        col.AddChild(_spyHeader);
+
+        var hint = new Label { Text = "Each dagger is the one answer to a crown — the only way to push a rival's metric back. A cost and a cooldown apiece." };
+        hint.AddThemeColorOverride("font_color", new Color(0.60f, 0.63f, 0.69f));
+        hint.AddThemeFontSizeOverride("font_size", 11);
+        col.AddChild(hint);
+
+        foreach (int id in Simulation.SpyNodes)
+        {
+            var b = new Button { Text = "", FocusMode = Control.FocusModeEnum.None, CustomMinimumSize = new Vector2(360, 40) };
+            b.AddThemeFontSizeOverride("font_size", 12);
+            int spy = id;
+            b.Pressed += () =>
+            {
+                int me = MyPlayer, rival = _sim.FirstRival(me);
+                if (rival >= 0) _me.Issue(new Command { Type = CommandType.Spy, TargetId = spy, X = rival });
+            };
+            col.AddChild(b);
+            _spyButtons[id] = b;
+        }
+
+        _spyButton = new Button
+        {
+            Text = "Spies  (X)", FocusMode = Control.FocusModeEnum.None,
+            AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = -486, OffsetRight = -338, OffsetTop = -148, OffsetBottom = -116,
+        };
+        _spyButton.AddThemeFontSizeOverride("font_size", 14);
+        _spyButton.Pressed += ToggleSpies;
+        layer.AddChild(_spyButton);
+    }
+
+    void ToggleSpies() => _showSpies = !_showSpies;
+
+    void UpdateSpyPanel()
+    {
+        _spyPanel.Visible = _showSpies;
+        if (_spyButton != null) _spyButton.Modulate = _showSpies ? Colors.White : new Color(0.7f, 0.7f, 0.7f);
+        if (!_showSpies) return;
+
+        int me = MyPlayer, rival = _sim.FirstRival(me);
+        _spyHeader.Text = rival >= 0 ? $"Spy Ring        target: Player {rival}" : "Spy Ring        (no rival in reach)";
+        foreach (var kv in _spyButtons)
+        {
+            int id = kv.Key;
+            var b = kv.Value;
+            bool ready = false;
+            string status;
+            if (!_sim.IsTechResearched(me, id)) status = "locked — research in the Spy Guild";
+            else if (rival < 0) status = "no rival";
+            else if (_sim.SpyReadyIn(me, id) > 0) status = $"cooldown {FmtClock(_sim.SpyReadyIn(me, id))}";
+            else if (!_sim.CanSpy(me, id, rival)) status = "need 80 gold";
+            else { status = "▶ run  ·  80 gold"; ready = true; }
+
+            b.Text = $"{TechTree.Node(id).Name}  →  {SpyTargetName(id)}\n{status}";
+            b.Disabled = !ready;
+            b.Modulate = ready ? new Color(1f, 0.85f, 0.60f) : new Color(0.70f, 0.70f, 0.72f);
+        }
+    }
+
+    static string SpyTargetName(int spyNode) => spyNode switch
+    {
+        TechTree.Embezzler => "Economic",
+        TechTree.Inquisitor => "Religious",
+        TechTree.Saboteur => "Science",
+        TechTree.Agitator => "Domain",
+        _ => "the war tool",
     };
 
     // ---- demolish confirmation --------------------------------------------

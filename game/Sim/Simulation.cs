@@ -18,7 +18,7 @@ namespace Sim
     public enum CommandType
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
-        SetTax = 9, SetRations = 10, Research = 11,
+        SetTax = 9, SetRations = 10, Research = 11, Spy = 12,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16 }
@@ -356,7 +356,8 @@ namespace Sim
         // so they snapshot / wire / checksum for free like everything else here.
         const int ResearchIdx = 23;
         const int TechBase = 24, TechWords = 4;                // 24..27 — up to 128 node Ids
-        const int StockWidth = 28;                             // 6 resources + gold/pop/tax/ration + faith + 12 victory + research + 4 tech words
+        const int SpyReadyBase = 28, SpyCount = 5;             // 28..32 — the tick each spy is next usable (per owner)
+        const int StockWidth = 33;                             // ... + research + 4 tech words + 5 spy cooldowns
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
@@ -1178,6 +1179,10 @@ namespace Sim
 
                 case CommandType.Research:     // X carries the tech node Id
                     TryResearch(cmd.Owner, cmd.X);   // validates prereqs/fork/limit/cost (Tech.cs)
+                    break;
+
+                case CommandType.Spy:          // TargetId = spy node Id, X = target owner
+                    TrySpy(cmd.Owner, cmd.TargetId, cmd.X);   // validates tech/cooldown/cost (Spy.cs)
                     break;
             }
         }

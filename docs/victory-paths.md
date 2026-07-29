@@ -84,7 +84,7 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   clock (`MatchClockTicks`, 0 = off). All four paths are wired; the metrics that
   exist today are gold (Economic), faith (Religious), and population (Domain).
 
-### The tech tree — the victory structure (shipped: spine + all four branches + HUD)
+### The tech tree — the victory structure (shipped: spine + all four branches + the spy web + HUD)
 
 Per `tech.pdf`, **the tree *is* the victory structure**: the four paths are branches
 of one research web, and a branch's **capstone is what unlocks its HIGH goal**. The
@@ -132,6 +132,16 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   realm grows. The Domain HIGH is **population + 5 territories** (capstone-gated).
   *Peaceful expansion only for now — conquest/annexation (taking a territory by
   force) lands with the war layer.*
+- **The spy counter-web** (`Spy.cs`, War branch): Muster → Spy Guild → the five
+  spies + Bodyguard. A spy is trained by research, costs gold, sits on a cooldown,
+  and is fired at your rival through a `Spy` command (`FirstRival` auto-targets the
+  lone enemy). Each is the ONE thing that pushes a rival's metric backward —
+  **Embezzler** skims the hoard, **Inquisitor** knocks faith down, **Saboteur**
+  wrecks a wonder, **Agitator** incites emigration, **Assassin** cuts down a
+  soldier — and each is blunted by the target's own **Tier-III counter** (Banking
+  House / Cathedral / Printing Press / Provincial Keeps), the Bodyguard blocking the
+  Assassin outright. The War branch is a shared tool (no capstone, no cross-branch
+  penalty). A **Spies HUD** (X key) fires them; cooldowns and gates show on each.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -188,7 +198,8 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the 1M HIGH | ✅ shipped |
 | **4** | **Science branch** — Scholar's Hut → Library → University fork → Academy → **Wonders** (the new buildable); HIGH = 2 wonders, MED = 1, capstone-gated | ✅ shipped |
 | **3** | **Domain branch + multi-territory** — Farmstead → Husbandry → Settlement fork → Provincial Keeps → **★ Sovereign's Court**; **found new keeps** (each a territory), Homesteads multiplies housing, Husbandry/Colonists speed growth; HIGH = pop + 5 territories | ✅ shipped (peaceful expansion) |
-| **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, the five spies, **and conquest/annexation** (take a territory by force) | next — spies need live metrics to bite; conquest completes Domain |
+| **5** | **The spy counter-web** — Muster → Spy Guild → the five spies + Bodyguard; each dagger pushes one rival metric back, blunted by that branch's Tier-III counter | ✅ shipped |
+| **6** | **War-tool payoffs** — Field Army mechanics + conquest/annexation (take a keep by force → its territory & population), and the branches' ⚔ nodes (Privateers/Crusade/War Loot/Conquest) | remaining |
 
 The tech HUD comes next so a human can actually spend research (the AI already
 does). Spies land last on purpose: an Embezzler with no announced hoard, or an
@@ -221,3 +232,6 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   (`Simulation.cs`); `DomHighPop`/`DomMedPop`/`DomHighTerr`/`DomMedTerr`
   (`Victory.cs`) — the pop targets are scaled to the prototype (see the census
   note), the territory counts follow the design.
+- Spies: `SpyCost`, `SpyCooldown`, and the per-effect sizes `EmbezzleCap` /
+  `InquisitHit`+`InquisitSoft` / `SabotageHit`+`SabotageSoft` / `AgitateHit`+
+  `AgitateSoft` (`Spy.cs`); the counters are the branches' own Tier-III nodes.
