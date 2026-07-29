@@ -385,13 +385,15 @@ namespace Sim
             map.Fill(size * 18 / 100, size * 60 / 100, size * 24 / 100, size * 64 / 100, Terrain.Rock);
             map.Fill(size * 76 / 100, size * 36 / 100, size * 82 / 100, size * 40 / 100, Terrain.Rock);
 
-            // Fertile soil — the only ground a farm's field grows on. One patch by
-            // each keep, on its drop-off side so the harvest hauls home on a clear
-            // path. Each patch is GRADED across its rows — thin soil, then ordinary,
-            // then prime — so even within a patch WHERE you sow decides how much you
-            // reap. Limited and clear of the home wood, stone and iron.
-            map.FillFertile(size * 8 / 100,  size * 46 / 100, size * 13 / 100, size * 56 / 100);
-            map.FillFertile(size * 87 / 100, size * 46 / 100, size * 92 / 100, size * 56 / 100);
+            // Richer soil (yields 2 and 3) in patches spread out ACROSS the map, well
+            // away from the keeps — a reason to farm out on your land, and to fight
+            // over the ground between the bases, rather than ring the castle in fields.
+            // (All the plain ground still grows a one-food field; these are the good
+            // spots.) Two patches a side, north and south of the mid-territory, mirrored.
+            map.FillFertile(size * 20 / 100, size * 27 / 100, size * 27 / 100, size * 34 / 100);
+            map.FillFertile(size * 19 / 100, size * 65 / 100, size * 26 / 100, size * 70 / 100);
+            map.FillFertile(size * 73 / 100, size * 27 / 100, size * 80 / 100, size * 34 / 100);
+            map.FillFertile(size * 74 / 100, size * 65 / 100, size * 81 / 100, size * 70 / 100);
 
             map.SealTerrain();
             return map;

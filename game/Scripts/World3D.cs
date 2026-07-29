@@ -592,11 +592,9 @@ public partial class World3D : Node3D
     static readonly Color TerrMarsh  = new(0.33f, 0.34f, 0.21f);   // boggy, browner
     static readonly Color TerrWater  = new(0.17f, 0.30f, 0.45f);   // deep water
     static readonly Color TerrRock   = new(0.44f, 0.42f, 0.39f);   // stone
-    // Fertile soil, by grade: thin/pale, ordinary, and prime/dark — richer soil
-    // reads darker and greener, so the good ground is visible even before you build.
-    static readonly Color TerrFertilePoor = new(0.40f, 0.44f, 0.24f);
-    static readonly Color TerrFertile     = new(0.31f, 0.40f, 0.17f);
-    static readonly Color TerrFertileRich = new(0.23f, 0.35f, 0.11f);
+    // Fertile soil is NOT coloured differently — it looks like ordinary grass. Where
+    // the good soil lies is read from the food-value overlay (V, or placing a farm),
+    // not from the ground itself.
 
     void SetupGround()
     {
@@ -782,10 +780,7 @@ public partial class World3D : Node3D
         Sim.Terrain.Water => TerrWater,
         Sim.Terrain.Rock  => TerrRock,
         Sim.Terrain.Marsh => TerrMarsh,
-        Sim.Terrain.FertilePoor => TerrFertilePoor,
-        Sim.Terrain.Fertile => TerrFertile,
-        Sim.Terrain.FertileRich => TerrFertileRich,
-        _                     => TerrGround,
+        _                     => TerrGround,   // fertile grades render as plain grass
     };
 
     void SetupFog()
