@@ -138,24 +138,22 @@ namespace Sim
             InBounds(x, y) && At(x, y) != Terrain.Water && At(x, y) != Terrain.Rock
             && !_blocked[Index(x, y)];
 
-        // Soil a farm's field will grow on (any grade). Ordinary to walk — it only
-        // matters to the farm, which sows its wheat here and nowhere else.
-        public bool IsFertile(int x, int y)
-        {
-            if (!InBounds(x, y)) return false;
-            var t = _tiles[Index(x, y)];
-            return t == Terrain.Fertile || t == Terrain.FertilePoor || t == Terrain.FertileRich;
-        }
+        // Can a field grow here at all? Any passable land can — only open water and
+        // bare rock cannot. (A tile also loses its food to a deposit sitting on it,
+        // but that lives in the sim, which knows where the deposits are.)
+        public bool IsFertile(int x, int y) => FieldYield(x, y) > 0;
 
-        // Grain a field reaps per gather on this tile: richer soil, more per reap.
-        // Zero off fertile ground — nothing grows there. This is the "resource value"
-        // a tile carries, shown while placing a farm.
+        // Grain a field reaps per gather on this tile — the tile's "food value".
+        // EVERY passable tile grows at least a basic field, so you are never boxed
+        // out of food; the graded fertile soils just grow a richer one. Water and
+        // rock grow nothing.
         public int FieldYield(int x, int y) => !InBounds(x, y) ? 0 : _tiles[Index(x, y)] switch
         {
-            Terrain.FertilePoor => 1,
+            Terrain.Water => 0,
+            Terrain.Rock => 0,
             Terrain.Fertile => 2,
             Terrain.FertileRich => 3,
-            _ => 0,
+            _ => 1,   // ground, marsh, thin fertile — a plain one-food field
         };
 
         // Cost of ENTERING this tile, before the diagonal surcharge.
@@ -258,7 +256,15 @@ namespace Sim
                 else if (stepX) { err -= dy; x += sx; }
                 else { err += dx; y += sy; }
 
-                if (groundOnly) { if (At(x, y) != Terrain.Ground && !IsFertile(x, y)) return false; }
+                if (groundOnly)
+                {
+                    // Ground and the fertile grades collapse to a straight run; marsh
+                    // (costly) and water/rock (blocking) do not, so a detour A* found
+                    // around the bog is never straightened back through it.
+                    var g = At(x, y);
+                    if (g != Terrain.Ground && g != Terrain.Fertile
+                        && g != Terrain.FertileRich && g != Terrain.FertilePoor) return false;
+                }
                 else if (!Passable(x, y)) return false;
             }
             return true;
@@ -399,18 +405,18 @@ namespace Sim
                     _tiles[Index(x, y)] = t;
         }
 
-        // Paint a fertile patch graded across its rows: thin soil along the top, then
-        // ordinary, then prime along the bottom (the drop-off/keep side). Three plain
-        // bands rather than a scatter, so a player can read the good rows at a glance
-        // and aim a field at them — and so both mirrored patches grade identically.
+        // Paint a rich-soil patch, graded across its rows: ordinary soil (yield 2)
+        // along the top, prime (yield 3) along the bottom, the keep side. All the
+        // ground around it already grows a one-food field, so these two bands are the
+        // ABOVE-baseline spots — the good rows a player aims a field at. Two plain
+        // bands, so both mirrored patches grade identically.
         void FillFertile(int x0, int y0, int x1, int y1)
         {
             int lo = Math.Max(0, y0), hi = Math.Min(Height - 1, y1);
-            int span = Math.Max(1, hi - lo + 1);
+            int mid = (lo + hi) / 2;
             for (int y = lo; y <= hi; y++)
             {
-                int band = (y - lo) * 3 / span;   // 0 (top), 1, 2 (bottom)
-                Terrain t = band == 0 ? Terrain.FertilePoor : band == 1 ? Terrain.Fertile : Terrain.FertileRich;
+                Terrain t = y <= mid ? Terrain.Fertile : Terrain.FertileRich;
                 for (int x = Math.Max(0, x0); x <= Math.Min(Width - 1, x1); x++)
                     _tiles[Index(x, y)] = t;
             }

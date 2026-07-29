@@ -230,12 +230,13 @@ public partial class World3D : Node3D
     bool _showResources;
     Button _resButton;
 
-    // Highlight colour by a tile's yield: pale tan for thin soil up to a vivid green
-    // for prime, so grade reads by colour as well as by the printed number.
+    // Highlight colour by a tile's food yield: a faint green wash for plain one-food
+    // ground, wheaten gold for good soil, a vivid green for prime — so grade reads by
+    // colour as well as by the printed number.
     static Color FertileGlow(int yld) =>
-        yld >= 3 ? new Color(0.52f, 0.95f, 0.34f, 0.50f)   // rich
-      : yld == 2 ? new Color(0.92f, 0.86f, 0.30f, 0.45f)   // normal — wheaten gold
-      :            new Color(0.86f, 0.73f, 0.46f, 0.40f);  // poor — pale tan
+        yld >= 3 ? new Color(0.52f, 0.95f, 0.34f, 0.50f)   // rich (3)
+      : yld == 2 ? new Color(0.92f, 0.86f, 0.30f, 0.45f)   // good (2) — wheaten gold
+      :            new Color(0.55f, 0.82f, 0.46f, 0.16f);  // plain (1) — faint green wash
     long _terrSig = long.MinValue;
     int _terrTick;
     // My territory as a rectangle in tile coords, so fog can be cleared inside it.
@@ -579,46 +580,39 @@ public partial class World3D : Node3D
         };
         AddChild(ground);
 
-        // Over every fertile tile: a highlight tinted by grade, and the tile's yield
-        // number floating above it. Both hidden until you pick the Farm to build
-        // (UpdateGhost lights them) — a field grows ONLY on this soil, and the richer
-        // the tile the more each reap brings, so seeing the numbers is how you decide
-        // where the farms go. Built once: terrain never changes.
-        var fertMesh = new ImmediateMesh();
+        // Over every FOOD tile — any passable land that isn't a deposit — a highlight
+        // tinted by yield, so the whole farmable spread reads at a glance. A number
+        // floats on the ABOVE-baseline soil (the 2s and 3s); the plain one-food ground
+        // is shown by its faint wash alone (a number on every tile of the map would
+        // bury it). Deposits carry no food, so they get neither tint nor number.
+        // Hidden until you pick the Farm to build, or press V (UpdateGhost lights it).
+        var foodMesh = new ImmediateMesh();
         var labels = new Node3D { Visible = false };
-        bool anyFertile = false;
-        fertMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        var deposit = new HashSet<int>();
+        foreach (var n in _sim.NodeList)
+            if (n.Type == ResourceType.Wood || n.Type == ResourceType.Stone || n.Type == ResourceType.Iron)
+                deposit.Add(n.Y * MapSize + n.X);
+        bool anyFood = false;
+        foodMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         for (int y = 0; y < MapSize; y++)
             for (int x = 0; x < MapSize; x++)
             {
-                if (!map.IsFertile(x, y)) continue;
-                anyFertile = true;
                 int yld = map.FieldYield(x, y);
+                if (yld <= 0 || deposit.Contains(y * MapSize + x)) continue;
+                anyFood = true;
                 var glow = FertileGlow(yld);
                 float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
                 Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
-                foreach (var v in new[] { a, b, c, a, c, d }) { fertMesh.SurfaceSetColor(glow); fertMesh.SurfaceAddVertex(v); }
-
-                var lbl = new Label3D
-                {
-                    Text = yld.ToString(),
-                    Position = new Vector3(x, 0.55f, y),
-                    Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-                    FontSize = 42,
-                    PixelSize = 0.008f,
-                    Modulate = new Color(glow.R, glow.G, glow.B, 1f),
-                    OutlineSize = 14,
-                    OutlineModulate = new Color(0.08f, 0.07f, 0.03f, 1f),
-                    NoDepthTest = true,
-                };
-                labels.AddChild(lbl);
+                foreach (var v in new[] { a, b, c, a, c, d }) { foodMesh.SurfaceSetColor(glow); foodMesh.SurfaceAddVertex(v); }
+                if (yld >= 2)
+                    labels.AddChild(ValueLabel(x, y, yld.ToString(), new Color(glow.R, glow.G, glow.B, 1f)));
             }
-        fertMesh.SurfaceEnd();
-        if (anyFertile)
+        foodMesh.SurfaceEnd();
+        if (anyFood)
         {
             _fertileOverlay = new MeshInstance3D
             {
-                Mesh = fertMesh,
+                Mesh = foodMesh,
                 Visible = false,
                 MaterialOverride = new StandardMaterial3D
                 {
@@ -675,9 +669,10 @@ public partial class World3D : Node3D
             _resButton.Modulate = _showResources ? new Color(1f, 0.9f, 0.5f) : new Color(1f, 1f, 1f);
     }
 
-    // Rebuild every value label from the live world: each deposit's remaining amount
-    // (wood, stone, iron) and each soil tile's grain yield. Rebuilt on toggle-on so
-    // the numbers are current — deposits drain, fields come and go.
+    // Rebuild the DEPOSIT labels — each wood, stone and iron deposit's remaining
+    // amount. (The food side of the survey — the green wash and the 2/3 numbers — is
+    // the same overlay the Farm build shows, switched on alongside this.) Rebuilt on
+    // toggle-on so the amounts are current: deposits drain in a finite match.
     void RebuildResourceOverlay()
     {
         if (_resourceOverlay == null) { _resourceOverlay = new Node3D(); AddChild(_resourceOverlay); }
@@ -692,20 +687,10 @@ public partial class World3D : Node3D
                 case ResourceType.Wood:  col = new Color(0.82f, 0.58f, 0.30f); break;   // timber
                 case ResourceType.Stone: col = new Color(0.82f, 0.84f, 0.88f); break;   // pale stone
                 case ResourceType.Iron:  col = new Color(0.62f, 0.75f, 0.92f); break;   // steel blue
-                default: continue;   // grain fields are covered by the soil-yield labels below
+                default: continue;   // grain fields aren't deposits
             }
             _resourceOverlay.AddChild(ValueLabel(n.X, n.Y, n.Amount.ToString(), col));
         }
-
-        var map = _sim.Map;
-        for (int y = 0; y < MapSize; y++)
-            for (int x = 0; x < MapSize; x++)
-                if (map.IsFertile(x, y))
-                {
-                    var g = FertileGlow(map.FieldYield(x, y));
-                    _resourceOverlay.AddChild(ValueLabel(x, y, map.FieldYield(x, y).ToString(),
-                        new Color(g.R, g.G, g.B, 1f)));
-                }
     }
 
     static Label3D ValueLabel(int x, int y, string text, Color color) => new()
@@ -1576,9 +1561,11 @@ public partial class World3D : Node3D
     {
         // Light the fertile soil only while placing a farm — that is when knowing
         // where a field will grow actually matters.
-        bool farming = _buildType == BuildingType.Farm;
-        if (_fertileOverlay != null) _fertileOverlay.Visible = farming;
-        if (_fertileLabels != null) _fertileLabels.Visible = farming;
+        // The food overlay (green wash + 2/3 numbers) shows while placing a farm OR
+        // while the survey is up; the deposit numbers show only in the survey.
+        bool showFood = _buildType == BuildingType.Farm || _showResources;
+        if (_fertileOverlay != null) _fertileOverlay.Visible = showFood;
+        if (_fertileLabels != null) _fertileLabels.Visible = showFood;
 
         if (_buildType is not BuildingType t)
         { foreach (var g in _ghosts) g.Visible = false; if (_ghostModel != null) _ghostModel.Visible = false; return; }

@@ -27,7 +27,7 @@ static class Program
         AFarmPlantsAFieldAndGrainFlows();
         AFarmReplantsItsFieldSoItNeverRunsDry();
         AnInexhaustibleFieldStaysPutAndNeverEmpties();
-        FieldsGrowOnlyOnFertileSoil();
+        EveryPassableTileGrowsAField();
         RicherSoilYieldsMoreGrain();
         AMillGrindsGrainIntoFlour();
         AMillWithNoGrainStaysIdle();
@@ -133,32 +133,29 @@ static class Program
               sim.Stockpile(1, ResourceType.Grain) > 0);
     }
 
-    // With RequireFertileSoil on, a farm's field grows ONLY where the ground is
-    // fertile: a farm ringed by fertile soil sows and reaps; one on barren ground
-    // sows nothing at all. This is what makes WHERE you build a farm matter.
-    static void FieldsGrowOnlyOnFertileSoil()
+    // Every passable tile grows at least a one-food field, so a farm on plain,
+    // un-improved ground still feeds you — the fallback that means running short of
+    // prime soil never boxes you out of food. Only a deposit tile (or water/rock)
+    // grows nothing: a field can't overlap a forest, quarry or mine.
+    static void EveryPassableTileGrowsAField()
     {
-        Console.WriteLine("\nwith fertile soil required, only a farm on it yields:");
+        Console.WriteLine("\nany passable tile grows a field; a deposit tile does not:");
 
-        var goodMap = TileMap.Open(48);
-        for (int y = 18; y <= 26; y++) for (int x = 18; x <= 26; x++) goodMap.Set(x, y, Terrain.Fertile);
-        var good = new Simulation(goodMap) { RequireFertileSoil = true };
-        good.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
-        Seed(good, 1, 1);
-        good.PlaceBuilding(BuildingType.Farm, 1, 20, 20);          // ringed by fertile soil
-        for (int i = 0; i < 1500; i++) good.Tick(Array.Empty<Command>());
-        Check($"a farm on fertile soil sows and banks grain ({good.Stockpile(1, ResourceType.Grain)})",
-              good.Stockpile(1, ResourceType.Grain) > 0);
+        // Plain ground, no fertile soil anywhere — the field still sows and banks.
+        var plain = new Simulation(TileMap.Open(48)) { RequireFertileSoil = true };
+        plain.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+        Seed(plain, 1, 1);
+        plain.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
+        for (int i = 0; i < 1500; i++) plain.Tick(Array.Empty<Command>());
+        Check($"a farm on plain ground still banks grain ({plain.Stockpile(1, ResourceType.Grain)})",
+              plain.Stockpile(1, ResourceType.Grain) > 0);
 
-        var barren = new Simulation(TileMap.Open(48)) { RequireFertileSoil = true };
-        barren.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
-        Seed(barren, 1, 1);
-        barren.PlaceBuilding(BuildingType.Farm, 1, 20, 20);        // no fertile ground anywhere
-        for (int i = 0; i < 1500; i++) barren.Tick(Array.Empty<Command>());
-        Check($"a farm on barren ground sows no field ({NodesOfType(barren, ResourceType.Grain)})",
-              NodesOfType(barren, ResourceType.Grain) == 0);
-        Check($"and banks no grain ({barren.Stockpile(1, ResourceType.Grain)})",
-              barren.Stockpile(1, ResourceType.Grain) == 0);
+        // A tile with a deposit on it has no food value — the field skips it.
+        var withOre = new Simulation(TileMap.Open(48));
+        Check($"plain ground has food value 1 ({withOre.FoodYieldAt(20, 20)})", withOre.FoodYieldAt(20, 20) == 1);
+        withOre.SpawnNode(ResourceType.Iron, 20, 20, 100);
+        Check($"an ore tile drops to 0 food ({withOre.FoodYieldAt(20, 20)})", withOre.FoodYieldAt(20, 20) == 0);
+        Check($"but plain ground beside it still grows a field ({withOre.FoodYieldAt(21, 20)})", withOre.FoodYieldAt(21, 20) == 1);
     }
 
     // Soil comes in grades, and a field reaps more per gather on richer ground — so

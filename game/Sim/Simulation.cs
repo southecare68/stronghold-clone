@@ -1726,12 +1726,14 @@ namespace Sim
         // tile comes from the same fixed-order ring scan as everything else.
         void PlantField(Building farm)
         {
-            // Where the wheat goes: any free tile around the farm, or — when fertile
-            // soil is required — a free FERTILE tile in that ring. A farm ringed by
-            // no fertile ground sows nothing and stands idle, which is exactly why
-            // its placement matters.
-            var spot = RequireFertileSoil ? FertileSpotAround(farm) : SpawnPointAround(farm);
-            if (!spot.HasValue) return;               // hemmed in (or no good soil); retry next tick
+            // Where the wheat goes: the first free food tile in the ring around the
+            // farm — any passable tile that isn't water, rock, or another deposit.
+            // Same top-first scan as SpawnPointAround, which keeps the field on the
+            // OPEN side of the farm rather than chasing a richer tile wedged behind
+            // the keep (which would leave the hauler pathless). Its yield is that
+            // tile's grade, so you still choose it by WHERE you place the farm.
+            var spot = RequireFertileSoil ? FieldSpotAround(farm) : SpawnPointAround(farm);
+            if (!spot.HasValue) return;               // hemmed in entirely; retry next tick
             Nodes.Add(new ResourceNode
             {
                 Id = _nextNodeId++, Type = ResourceType.Grain,
@@ -1739,36 +1741,53 @@ namespace Sim
             });
         }
 
-        // A free, fertile tile in the ring around a building — where a farm may sow.
-        // Same scan order as SpawnPointAround, so the choice is deterministic.
-        Tile? FertileSpotAround(Building b)
+        // A tile's food value to a farm: its soil yield, but ZERO where a wood, stone
+        // or iron deposit sits — a field cannot overlap a mine or a forest. Every
+        // other passable tile grows at least a basic field, so you are never boxed
+        // out of food even when space runs short.
+        public int FoodYieldAt(int x, int y)
+        {
+            int soil = Map.FieldYield(x, y);
+            if (soil <= 0) return 0;
+            foreach (var n in Nodes)
+                if (n.Amount > 0 && n.X == x && n.Y == y &&
+                    (n.Type == ResourceType.Wood || n.Type == ResourceType.Stone || n.Type == ResourceType.Iron))
+                    return 0;
+            return soil;
+        }
+
+        // The first free food tile in the ring around a building (same scan order as
+        // SpawnPointAround, so deterministic) — passable, and not a deposit. Null only
+        // if every ring tile is water, rock, or a deposit.
+        Tile? FieldSpotAround(Building b)
         {
             for (int tx = b.X - 1; tx <= b.X + b.W; tx++)
             {
-                if (Map.IsFertile(tx, b.Y - 1) && Map.Passable(tx, b.Y - 1)) return new Tile(tx, b.Y - 1);
-                if (Map.IsFertile(tx, b.Y + b.H) && Map.Passable(tx, b.Y + b.H)) return new Tile(tx, b.Y + b.H);
+                if (Map.Passable(tx, b.Y - 1) && FoodYieldAt(tx, b.Y - 1) > 0) return new Tile(tx, b.Y - 1);
+                if (Map.Passable(tx, b.Y + b.H) && FoodYieldAt(tx, b.Y + b.H) > 0) return new Tile(tx, b.Y + b.H);
             }
             for (int ty = b.Y; ty < b.Y + b.H; ty++)
             {
-                if (Map.IsFertile(b.X - 1, ty) && Map.Passable(b.X - 1, ty)) return new Tile(b.X - 1, ty);
-                if (Map.IsFertile(b.X + b.W, ty) && Map.Passable(b.X + b.W, ty)) return new Tile(b.X + b.W, ty);
+                if (Map.Passable(b.X - 1, ty) && FoodYieldAt(b.X - 1, ty) > 0) return new Tile(b.X - 1, ty);
+                if (Map.Passable(b.X + b.W, ty) && FoodYieldAt(b.X + b.W, ty) > 0) return new Tile(b.X + b.W, ty);
             }
             return null;
         }
 
-        // Would a farm with this footprint find fertile ground to sow — i.e. is any
-        // ring tile fertile and free? Used by the bot to place farms on good soil.
+        // Would a farm with this footprint find any tile to sow — i.e. is any ring
+        // tile passable, off-deposit food ground? Used by the bot; near-anywhere on
+        // land it is true, which is why the bot can farm freely now.
         public bool FarmWouldYield(int x, int y, int w, int h)
         {
             for (int tx = x - 1; tx <= x + w; tx++)
             {
-                if (Map.IsFertile(tx, y - 1) && Map.Passable(tx, y - 1)) return true;
-                if (Map.IsFertile(tx, y + h) && Map.Passable(tx, y + h)) return true;
+                if (Map.Passable(tx, y - 1) && FoodYieldAt(tx, y - 1) > 0) return true;
+                if (Map.Passable(tx, y + h) && FoodYieldAt(tx, y + h) > 0) return true;
             }
             for (int ty = y; ty < y + h; ty++)
             {
-                if (Map.IsFertile(x - 1, ty) && Map.Passable(x - 1, ty)) return true;
-                if (Map.IsFertile(x + w, ty) && Map.Passable(x + w, ty)) return true;
+                if (Map.Passable(x - 1, ty) && FoodYieldAt(x - 1, ty) > 0) return true;
+                if (Map.Passable(x + w, ty) && FoodYieldAt(x + w, ty) > 0) return true;
             }
             return false;
         }
