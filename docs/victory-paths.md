@@ -142,6 +142,14 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   House / Cathedral / Printing Press / Provincial Keeps), the Bodyguard blocking the
   Assassin outright. The War branch is a shared tool (no capstone, no cross-branch
   penalty). A **Spies HUD** (X key) fires them; cooldowns and gates show on each.
+- **Conquest/annexation** (`AnnexKeep`, Domain war-tool node `Conquest`): once
+  Conquest is researched, a keep your army strikes down is **annexed, not razed** —
+  it stands battered under its new lord, becomes a new **territory** (feeding
+  Domain's "5 territories" *by force*), and the old owner's **idle folk within
+  `AnnexRadius`** change hands (the population payoff). Without the tech a felled
+  keep falls as before, so existing sieges are untouched. Units stop battering a
+  keep the moment it turns friendly; an "⚔ seized a territory" toast fires. This is
+  Domain's "or taken by force" — the aggressive player's road to the census crown.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -157,10 +165,9 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
 
 ## Decision: the multi-territory model (peaceful expansion shipped; conquest next)
 
-> **Status:** the seam below is now live for **peaceful expansion** — a Domain
-> player founds new keeps (each a territory) once Provincial Keeps is researched.
-> **Conquest/annexation** — taking an *enemy's* keep and its population by force —
-> is the remaining half, and lands with the war & espionage layer.
+> **Status:** the seam below is now live **both ways** — a Domain player founds new
+> keeps (each a territory) once Provincial Keeps is researched, **and** annexes an
+> enemy's keep by force once Conquest is researched (see the conquest note below).
 
 Two paths depend on holding more than one territory, but our world today is one
 home territory per player. Rather than build conquest now or stub the goals away,
@@ -199,7 +206,8 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **4** | **Science branch** — Scholar's Hut → Library → University fork → Academy → **Wonders** (the new buildable); HIGH = 2 wonders, MED = 1, capstone-gated | ✅ shipped |
 | **3** | **Domain branch + multi-territory** — Farmstead → Husbandry → Settlement fork → Provincial Keeps → **★ Sovereign's Court**; **found new keeps** (each a territory), Homesteads multiplies housing, Husbandry/Colonists speed growth; HIGH = pop + 5 territories | ✅ shipped (peaceful expansion) |
 | **5** | **The spy counter-web** — Muster → Spy Guild → the five spies + Bodyguard; each dagger pushes one rival metric back, blunted by that branch's Tier-III counter | ✅ shipped |
-| **6** | **War-tool payoffs** — Field Army mechanics + conquest/annexation (take a keep by force → its territory & population), and the branches' ⚔ nodes (Privateers/Crusade/War Loot/Conquest) | remaining |
+| **6** | **Conquest/annexation** — take a keep by force → its territory & population (Domain's ⚔ war-tool) | ✅ shipped |
+| **7** | **The rest of the war-tool payoffs** — Field Army mechanics + the other branches' ⚔ nodes (Privateers loot gold, Crusade seizes-and-converts, War Loot funds wonders) | remaining |
 
 The tech HUD comes next so a human can actually spend research (the AI already
 does). Spies land last on purpose: an Embezzler with no announced hoard, or an
@@ -232,6 +240,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   (`Simulation.cs`); `DomHighPop`/`DomMedPop`/`DomHighTerr`/`DomMedTerr`
   (`Victory.cs`) — the pop targets are scaled to the prototype (see the census
   note), the territory counts follow the design.
+- Conquest: `AnnexRadius` (`Simulation.cs`) — how much population a taken keep
+  carries; the `Conquest` node cost in `TechTree.cs`.
 - Spies: `SpyCost`, `SpyCooldown`, and the per-effect sizes `EmbezzleCap` /
   `InquisitHit`+`InquisitSoft` / `SabotageHit`+`SabotageSoft` / `AgitateHit`+
   `AgitateSoft` (`Spy.cs`); the counters are the branches' own Tier-III nodes.

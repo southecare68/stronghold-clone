@@ -3584,6 +3584,8 @@ public partial class World3D : Node3D
         {
             if (e.Kind == VictoryEventKind.Approaching)
                 ShowRealmToast($"⚑   {Who(e.Owner)} — nearing the {PathName(e.Path)} crown");
+            else if (e.Kind == VictoryEventKind.Annexed)
+                ShowRealmToast($"⚔   {Who(e.Owner)} seized a territory by force");
             else
             {
                 string verb = e.Owner == MyPlayer ? "win" : "wins";

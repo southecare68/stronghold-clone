@@ -1,0 +1,24 @@
+<!-- Conquest — taking a keep by force (docs/victory-paths.md, the Domain war-tool).
+
+     A keep struck down by an attacker who has researched Conquest is ANNEXED, not
+     razed: the territory and its idle population change hands, feeding the Domain
+     census. Without the tech, a felled keep falls as before. These tests hold down
+     both outcomes, the population payoff, and two-client determinism.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ConquestTests</RootNamespace>
+    <AssemblyName>ConquestTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

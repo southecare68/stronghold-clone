@@ -59,7 +59,7 @@ namespace Sim
         // Science 30..39
         public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34;
         // Domain 40..49
-        public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44;
+        public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44, Conquest = 45;
         // War & espionage 50..59 — the shared tool layer, not a scored path
         public const int SpyGuild = 50, Embezzler = 51, Inquisitor = 52, Saboteur = 53, Agitator = 54, Assassin = 55, Bodyguard = 56;
 
@@ -113,6 +113,7 @@ namespace Sim
                 new TechNode(Colonists,      "Colonists",       TechBranch.Domain, 2, 24, new[] { Husbandry }, forkGroup: ForkSettlement),   // settle faster
                 new TechNode(ProvincialKeeps,"Provincial Keeps",TechBranch.Domain, 3, 36, new[] { Husbandry }, requiresFork: ForkSettlement),   // lets you found new keeps
                 new TechNode(SovereignsCourt,"Sovereign's Court",TechBranch.Domain, 4, 58, new[] { ProvincialKeeps }, capstone: true),
+                new TechNode(Conquest,       "Conquest",        TechBranch.Domain, 3, 40, new[] { ProvincialKeeps }),   // ⚔ war-tool: annex an enemy keep by force
 
                 // --- War & espionage: the shared tool layer (any path, no capstone) --
                 // A spy is never generic harassment — each is the dedicated answer to

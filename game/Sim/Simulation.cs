@@ -400,6 +400,7 @@ namespace Sim
         // a genuine new territory, not a cluster of keeps on one spot.
         const int HomesteadMult = 4;
         const int KeepSpacing = 20;                             // tiles between your keeps
+        const int AnnexRadius = 16;                             // tiles of population a conquered keep carries to its new lord
 
         // Army upkeep. A standing army eats: every so often each soldier draws a
         // little food from the larder. Peasants are not charged here — their food
@@ -2175,6 +2176,9 @@ namespace Sim
         {
             var b = Buildings.Find(x => x.Id == u.TargetBuildingId);
             if (b == null || !b.Alive) { u.TargetBuildingId = 0; return; }
+            // A keep just annexed by conquest is now friendly — stop battering your
+            // own new territory.
+            if (b.Owner == u.Owner) { u.TargetBuildingId = 0; return; }
 
             var d = DesignOf(u.DesignId);
             if (DistToBuilding(u, b) <= d.RangeFixed)
@@ -2184,6 +2188,13 @@ namespace Sim
                 {
                     b.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
                     u.AttackTimer = d.Cooldown;
+                    // Conquest: an attacker who has researched it ANNEXES a keep struck
+                    // down rather than razing it — the territory and its people change
+                    // hands (see AnnexKeep). Without the tech, the keep just falls, and
+                    // RemoveDestroyedBuildings clears it as before.
+                    if (b.Hp <= 0 && b.Type == BuildingType.Keep && b.Owner != u.Owner
+                        && IsTechResearched(u.Owner, TechTree.Conquest))
+                        AnnexKeep(b, u.Owner);
                     // The blow lands on the part of the structure the unit is
                     // actually standing against, NOT the centre. Reach is measured
                     // to the nearest footprint tile (see DistToBuilding), so
@@ -2256,6 +2267,39 @@ namespace Sim
             if (CanGarrison(b.Type))
                 foreach (var u in Units)
                     if (u.GarrisonId == b.Id) u.GarrisonId = 0;
+        }
+
+        // Conquest: a keep struck down by a conqueror changes hands rather than
+        // falling. The territory becomes theirs (TerritoryCount counts keeps, so this
+        // is automatic), the keep is left battered but standing, and the old owner's
+        // idle folk near it are annexed under their new lord — the population payoff
+        // that feeds the Domain census. Working peasants are left to the old owner
+        // (they keep their jobs); only the loose population changes hands, exactly as
+        // emigration only ever moves idlers.
+        void AnnexKeep(Building keep, int newOwner)
+        {
+            int oldOwner = keep.Owner;
+            keep.Owner = newOwner;
+            keep.Hp = keep.MaxHp / 2;   // battered, but standing — and now yours
+
+            // The conqueror needs a drop-off only if this is their first keep; an
+            // established realm keeps delivering to its founding keep (multi-territory).
+            if (!_dropOff.ContainsKey(newOwner))
+            {
+                var drop = SpawnPointAround(keep) ?? new Tile(keep.CenterX, keep.CenterY);
+                SetDropOff(newOwner, drop.X, drop.Y);
+            }
+
+            int cx = Fixed.FromInt(keep.CenterX), cy = Fixed.FromInt(keep.CenterY);
+            int reach = Fixed.FromInt(AnnexRadius);
+            foreach (var u in Units)
+            {
+                if (!u.Alive || u.Owner != oldOwner || !u.IsPeasant || u.Job != Job.None) continue;
+                if (Fixed.VLen(u.X - cx, u.Y - cy) > reach) continue;
+                u.Owner = newOwner;
+            }
+
+            _victoryEvents.Add(new VictoryEvent(VictoryEventKind.Annexed, newOwner, VictoryPath.Domain));
         }
 
         // Nearest living enemy within aggro range, ties broken by id so every

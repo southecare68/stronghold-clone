@@ -9,7 +9,7 @@ namespace Sim
     // as an int, so it must never be reordered.
     public enum VictoryPath { Economic = 0, Religious = 1, Domain = 2, Science = 3 }
 
-    public enum VictoryEventKind { Approaching = 0, Won = 1 }
+    public enum VictoryEventKind { Approaching = 0, Won = 1, Annexed = 2 }
 
     // One realm-wide announcement: a rival crossed 80% of a HIGH goal (Approaching),
     // or someone claimed a crown (Won). Transient UI signal, not hashed state — both
