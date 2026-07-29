@@ -395,8 +395,32 @@ namespace Sim
             map.FillFertile(size * 73 / 100, size * 27 / 100, size * 80 / 100, size * 34 / 100);
             map.FillFertile(size * 74 / 100, size * 65 / 100, size * 81 / 100, size * 70 / 100);
 
+            // A light, deterministic scatter of better soil across the plain ground —
+            // the odd 2, and rarer 3 — so the map is a mixture to survey and pick from,
+            // not a flat field of 1s. A pure hash of the tile position (no RNG), plain
+            // ground ONLY, so it never touches water, rock, marsh or the patches above.
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                    if (map.At(x, y) == Terrain.Ground)
+                    {
+                        uint r = Scatter(x, y) % 100;
+                        if (r < 5) map.Set(x, y, Terrain.FertileRich);        // ~5% prime
+                        else if (r < 18) map.Set(x, y, Terrain.Fertile);      // ~13% good
+                    }
+
             map.SealTerrain();
             return map;
+        }
+
+        // A deterministic per-tile hash for the fertile scatter — same map on every
+        // machine, no RNG. Well-mixed so 2s and 3s land irregularly, not in stripes.
+        static uint Scatter(int x, int y)
+        {
+            uint h = 2166136261u;
+            h = (h ^ (uint)x) * 16777619u;
+            h = (h ^ (uint)y) * 16777619u;
+            h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+            return h;
         }
 
         // Paint a rectangle of terrain, clamped to the map.

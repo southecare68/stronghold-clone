@@ -630,11 +630,21 @@ public partial class World3D : Node3D
             if (n.Type == ResourceType.Wood || n.Type == ResourceType.Stone || n.Type == ResourceType.Iron)
                 deposit.Add(n.Y * MapSize + n.X);
 
+        // Only survey YOUR own land — the food overlay covers the local player's
+        // territory and no further, so it never spells out an opponent's ground.
+        var home = _sim.HomeRect(MyPlayer);
+        int hx0 = 0, hy0 = 0, hx1 = MapSize - 1, hy1 = MapSize - 1;
+        if (home.HasValue)
+        {
+            hx0 = Mathf.Max(0, home.Value.minX); hy0 = Mathf.Max(0, home.Value.minY);
+            hx1 = Mathf.Min(MapSize - 1, home.Value.maxX); hy1 = Mathf.Min(MapSize - 1, home.Value.maxY);
+        }
+
         var foodMesh = new ImmediateMesh();
         bool anyFood = false;
         foodMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        for (int y = 0; y < MapSize; y++)
-            for (int x = 0; x < MapSize; x++)
+        for (int y = hy0; y <= hy1; y++)
+            for (int x = hx0; x <= hx1; x++)
             {
                 int yld = map.FieldYield(x, y);
                 if (yld <= 0 || deposit.Contains(y * MapSize + x)) continue;
@@ -670,8 +680,8 @@ public partial class World3D : Node3D
             for (int v = 1; v <= 3; v++)
             {
                 var pts = new List<Vector3>();
-                for (int y = 0; y < MapSize; y++)
-                    for (int x = 0; x < MapSize; x++)
+                for (int y = hy0; y <= hy1; y++)
+                    for (int x = hx0; x <= hx1; x++)
                         if (map.FieldYield(x, y) == v && !deposit.Contains(y * MapSize + x))
                             pts.Add(new Vector3(x, 0.45f, y));
                 if (pts.Count == 0) continue;
@@ -747,9 +757,12 @@ public partial class World3D : Node3D
         if (_resourceOverlay == null) { _resourceOverlay = new Node3D(); AddChild(_resourceOverlay); }
         foreach (var c in _resourceOverlay.GetChildren()) c.QueueFree();
 
+        var home = _sim.HomeRect(MyPlayer);   // your own land only
         foreach (var n in _sim.NodeList)
         {
             if (n.Amount <= 0) continue;
+            if (home.HasValue && (n.X < home.Value.minX || n.X > home.Value.maxX
+                || n.Y < home.Value.minY || n.Y > home.Value.maxY)) continue;
             Color col;
             switch (n.Type)
             {
