@@ -668,7 +668,7 @@ public partial class World3D : Node3D
             // whole map), each quad a digit texture. Flat numbers on the ground read
             // as skewed nonsense at this angle; billboarded, they stay legible.
             _fertileLabels = new Node3D { Visible = false };
-            var quad = new QuadMesh { Size = new Vector2(0.62f, 0.62f) };
+            var quad = new QuadMesh { Size = new Vector2(0.28f, 0.28f) };
             for (int v = 1; v <= 3; v++)
             {
                 var pts = new List<Vector3>();
@@ -690,7 +690,8 @@ public partial class World3D : Node3D
                         BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
                         BillboardKeepScale = true,
                         TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                        NoDepthTest = true,
+                        // depth-tested (not on top of everything), so a number behind a
+                        // tree or rock is hidden by it — nothing floats over a deposit.
                     },
                 });
             }
