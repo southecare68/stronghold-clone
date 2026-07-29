@@ -28,6 +28,7 @@ static class Program
         AFarmReplantsItsFieldSoItNeverRunsDry();
         AnInexhaustibleFieldStaysPutAndNeverEmpties();
         FieldsGrowOnlyOnFertileSoil();
+        RicherSoilYieldsMoreGrain();
         AMillGrindsGrainIntoFlour();
         AMillWithNoGrainStaysIdle();
         ABakeryBakesFlourIntoBread();
@@ -158,6 +159,27 @@ static class Program
               NodesOfType(barren, ResourceType.Grain) == 0);
         Check($"and banks no grain ({barren.Stockpile(1, ResourceType.Grain)})",
               barren.Stockpile(1, ResourceType.Grain) == 0);
+    }
+
+    // Soil comes in grades, and a field reaps more per gather on richer ground — so
+    // the SAME farm, run the same time, banks far more grain on prime soil than thin.
+    static void RicherSoilYieldsMoreGrain()
+    {
+        Console.WriteLine("\nricher soil yields more grain:");
+        int Bank(Terrain grade)
+        {
+            var map = TileMap.Open(48);
+            for (int y = 18; y <= 26; y++) for (int x = 18; x <= 26; x++) map.Set(x, y, grade);
+            var sim = new Simulation(map) { RequireFertileSoil = true };
+            sim.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+            Seed(sim, 1, 1);
+            sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
+            for (int i = 0; i < 1500; i++) sim.Tick(Array.Empty<Command>());
+            return sim.Stockpile(1, ResourceType.Grain);
+        }
+        int poor = Bank(Terrain.FertilePoor), rich = Bank(Terrain.FertileRich);
+        Check($"thin soil still yields something ({poor})", poor > 0);
+        Check($"and prime soil out-yields it ({rich} > {poor})", rich > poor);
     }
 
     static ResourceNode GrainField(Simulation sim)

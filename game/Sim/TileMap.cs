@@ -25,7 +25,13 @@ namespace Sim
         Water = 1,      // impassable
         Rock = 2,       // impassable; later, the thing quarries are built on
         Marsh = 3,      // passable but slow
-        Fertile = 4,    // ordinary to cross, but the ONLY ground a farm's field yields on
+        // Fertile soil, in three grades — the only ground a farm's field yields on,
+        // and the richer the grade the more grain each reap brings (see FieldYield).
+        // Fertile stays the middle grade so older tests that set Terrain.Fertile keep
+        // getting an ordinary, working field.
+        Fertile = 4,        // normal soil
+        FertilePoor = 5,    // thin soil, a lean field
+        FertileRich = 6,    // prime soil, a bumper field
     }
 
     // A whole-tile coordinate. Distinct from a Unit's fixed-point position on
@@ -132,9 +138,25 @@ namespace Sim
             InBounds(x, y) && At(x, y) != Terrain.Water && At(x, y) != Terrain.Rock
             && !_blocked[Index(x, y)];
 
-        // Rich soil a farm's field will grow on. Ordinary to walk — it only matters
-        // to the farm, which sows its wheat here and nowhere else.
-        public bool IsFertile(int x, int y) => InBounds(x, y) && _tiles[Index(x, y)] == Terrain.Fertile;
+        // Soil a farm's field will grow on (any grade). Ordinary to walk — it only
+        // matters to the farm, which sows its wheat here and nowhere else.
+        public bool IsFertile(int x, int y)
+        {
+            if (!InBounds(x, y)) return false;
+            var t = _tiles[Index(x, y)];
+            return t == Terrain.Fertile || t == Terrain.FertilePoor || t == Terrain.FertileRich;
+        }
+
+        // Grain a field reaps per gather on this tile: richer soil, more per reap.
+        // Zero off fertile ground — nothing grows there. This is the "resource value"
+        // a tile carries, shown while placing a farm.
+        public int FieldYield(int x, int y) => !InBounds(x, y) ? 0 : _tiles[Index(x, y)] switch
+        {
+            Terrain.FertilePoor => 1,
+            Terrain.Fertile => 2,
+            Terrain.FertileRich => 3,
+            _ => 0,
+        };
 
         // Cost of ENTERING this tile, before the diagonal surcharge.
         public int EnterCost(int x, int y) =>
@@ -236,7 +258,7 @@ namespace Sim
                 else if (stepX) { err -= dy; x += sx; }
                 else { err += dx; y += sy; }
 
-                if (groundOnly) { var g = At(x, y); if (g != Terrain.Ground && g != Terrain.Fertile) return false; }
+                if (groundOnly) { if (At(x, y) != Terrain.Ground && !IsFertile(x, y)) return false; }
                 else if (!Passable(x, y)) return false;
             }
             return true;
@@ -244,7 +266,8 @@ namespace Sim
 
         // Build a map from text, which makes test cases readable and lets us
         // hand-author small maps before there is any editor:
-        //   '.' ground   '~' water   '#' rock   ',' marsh   '=' fertile
+        //   '.' ground   '~' water   '#' rock   ',' marsh
+        //   fertile soil by grade:   '-' poor   '=' normal   '+' rich
         public static TileMap FromRows(params string[] rows)
         {
             if (rows == null || rows.Length == 0)
@@ -263,7 +286,9 @@ namespace Sim
                         '~' => Terrain.Water,
                         '#' => Terrain.Rock,
                         ',' => Terrain.Marsh,
+                        '-' => Terrain.FertilePoor,
                         '=' => Terrain.Fertile,
+                        '+' => Terrain.FertileRich,
                         _ => Terrain.Ground,
                     });
             map.SealTerrain();
@@ -354,14 +379,13 @@ namespace Sim
             map.Fill(size * 18 / 100, size * 60 / 100, size * 24 / 100, size * 64 / 100, Terrain.Rock);
             map.Fill(size * 76 / 100, size * 36 / 100, size * 82 / 100, size * 40 / 100, Terrain.Rock);
 
-            // Fertile soil — the only ground a farm's field grows on. One patch to the
-            // drop-off side of each keep (west, where the keep's own delivery tile is),
-            // so a field sown here hauls home on a CLEAR path rather than detouring
-            // around the keep. Clear of the home wood, stone and iron, within the bot's
-            // build radius, but LIMITED — so where you lay your farms is a real
-            // decision: pack them onto the good soil, leave the rest for everything else.
-            map.Fill(size * 8 / 100,  size * 46 / 100, size * 13 / 100, size * 56 / 100, Terrain.Fertile);
-            map.Fill(size * 87 / 100, size * 46 / 100, size * 92 / 100, size * 56 / 100, Terrain.Fertile);
+            // Fertile soil — the only ground a farm's field grows on. One patch by
+            // each keep, on its drop-off side so the harvest hauls home on a clear
+            // path. Each patch is GRADED across its rows — thin soil, then ordinary,
+            // then prime — so even within a patch WHERE you sow decides how much you
+            // reap. Limited and clear of the home wood, stone and iron.
+            map.FillFertile(size * 8 / 100,  size * 46 / 100, size * 13 / 100, size * 56 / 100);
+            map.FillFertile(size * 87 / 100, size * 46 / 100, size * 92 / 100, size * 56 / 100);
 
             map.SealTerrain();
             return map;
@@ -373,6 +397,23 @@ namespace Sim
             for (int y = Math.Max(0, y0); y <= Math.Min(Height - 1, y1); y++)
                 for (int x = Math.Max(0, x0); x <= Math.Min(Width - 1, x1); x++)
                     _tiles[Index(x, y)] = t;
+        }
+
+        // Paint a fertile patch graded across its rows: thin soil along the top, then
+        // ordinary, then prime along the bottom (the drop-off/keep side). Three plain
+        // bands rather than a scatter, so a player can read the good rows at a glance
+        // and aim a field at them — and so both mirrored patches grade identically.
+        void FillFertile(int x0, int y0, int x1, int y1)
+        {
+            int lo = Math.Max(0, y0), hi = Math.Min(Height - 1, y1);
+            int span = Math.Max(1, hi - lo + 1);
+            for (int y = lo; y <= hi; y++)
+            {
+                int band = (y - lo) * 3 / span;   // 0 (top), 1, 2 (bottom)
+                Terrain t = band == 0 ? Terrain.FertilePoor : band == 1 ? Terrain.Fertile : Terrain.FertileRich;
+                for (int x = Math.Max(0, x0); x <= Math.Min(Width - 1, x1); x++)
+                    _tiles[Index(x, y)] = t;
+            }
         }
 
         // A deterministic scatter of obstacles: same seed, same map, on every

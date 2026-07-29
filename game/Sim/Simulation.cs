@@ -1432,12 +1432,18 @@ namespace Sim
                         {
                             u.GatherTimer = 0;
                             u.CarryType = node.Type;
-                            u.CarryAmount++;
+                            // A grain field's take per reap is the soil's yield — prime
+                            // ground brings three where thin brings one — so a farm on
+                            // richer soil fills up and banks grain faster. Every other
+                            // deposit gives one at a time as before.
+                            int gain = node.Type == ResourceType.Grain
+                                ? Math.Max(1, Map.FieldYield(node.X, node.Y)) : 1;
+                            u.CarryAmount += gain;
                             // Inexhaustible deposits give without ever drawing down — a
                             // wheat field included, so a farm keeps reaping the SAME field
                             // forever (no replant onto fresh ground), letting farms pack
                             // tight and leave room for other buildings.
-                            if (!InfiniteResources) node.Amount--;
+                            if (!InfiniteResources) node.Amount -= gain;
                         }
                     }
                     else ChaseTo(u, node.X, node.Y);

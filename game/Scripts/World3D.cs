@@ -216,10 +216,18 @@ public partial class World3D : Node3D
     ImmediateMesh _territoryMesh;
     bool _showTerritory = true;
 
-    // A glow over the fertile soil, lit only while the Farm is the chosen build, so
-    // you can see at a glance every tile a field will grow on. Built once (terrain
-    // never changes) in SetupGround.
+    // A glow over the fertile soil and a yield number on every fertile tile, lit
+    // only while the Farm is the chosen build, so you can read the good ground at a
+    // glance before you place. Built once (terrain never changes) in SetupGround.
     MeshInstance3D _fertileOverlay;
+    Node3D _fertileLabels;
+
+    // Highlight colour by a tile's yield: pale tan for thin soil up to a vivid green
+    // for prime, so grade reads by colour as well as by the printed number.
+    static Color FertileGlow(int yld) =>
+        yld >= 3 ? new Color(0.52f, 0.95f, 0.34f, 0.50f)   // rich
+      : yld == 2 ? new Color(0.92f, 0.86f, 0.30f, 0.45f)   // normal — wheaten gold
+      :            new Color(0.86f, 0.73f, 0.46f, 0.40f);  // poor — pale tan
     long _terrSig = long.MinValue;
     int _terrTick;
     // My territory as a rectangle in tile coords, so fog can be cleared inside it.
@@ -533,7 +541,11 @@ public partial class World3D : Node3D
     static readonly Color TerrMarsh  = new(0.33f, 0.34f, 0.21f);   // boggy, browner
     static readonly Color TerrWater  = new(0.17f, 0.30f, 0.45f);   // deep water
     static readonly Color TerrRock   = new(0.44f, 0.42f, 0.39f);   // stone
-    static readonly Color TerrFertile = new(0.30f, 0.40f, 0.16f);  // rich, dark tilled soil — where farms grow
+    // Fertile soil, by grade: thin/pale, ordinary, and prime/dark — richer soil
+    // reads darker and greener, so the good ground is visible even before you build.
+    static readonly Color TerrFertilePoor = new(0.40f, 0.44f, 0.24f);
+    static readonly Color TerrFertile     = new(0.31f, 0.40f, 0.17f);
+    static readonly Color TerrFertileRich = new(0.23f, 0.35f, 0.11f);
 
     void SetupGround()
     {
@@ -559,23 +571,40 @@ public partial class World3D : Node3D
         };
         AddChild(ground);
 
-        // A highlight over every fertile tile, hidden until you pick the Farm to
-        // build (UpdateGhost lights it) — a field grows ONLY on this soil, so seeing
-        // it laid out is how you decide where the farms go. Built once: terrain never
-        // changes. Skipped entirely on a map with no fertile ground.
+        // Over every fertile tile: a highlight tinted by grade, and the tile's yield
+        // number floating above it. Both hidden until you pick the Farm to build
+        // (UpdateGhost lights them) — a field grows ONLY on this soil, and the richer
+        // the tile the more each reap brings, so seeing the numbers is how you decide
+        // where the farms go. Built once: terrain never changes.
         var fertMesh = new ImmediateMesh();
-        var glow = new Color(0.92f, 0.86f, 0.30f, 0.42f);   // wheaten gold
+        var labels = new Node3D { Visible = false };
         bool anyFertile = false;
         fertMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         for (int y = 0; y < MapSize; y++)
             for (int x = 0; x < MapSize; x++)
-                if (map.At(x, y) == Sim.Terrain.Fertile)
+            {
+                if (!map.IsFertile(x, y)) continue;
+                anyFertile = true;
+                int yld = map.FieldYield(x, y);
+                var glow = FertileGlow(yld);
+                float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
+                Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
+                foreach (var v in new[] { a, b, c, a, c, d }) { fertMesh.SurfaceSetColor(glow); fertMesh.SurfaceAddVertex(v); }
+
+                var lbl = new Label3D
                 {
-                    anyFertile = true;
-                    float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
-                    Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
-                    foreach (var v in new[] { a, b, c, a, c, d }) { fertMesh.SurfaceSetColor(glow); fertMesh.SurfaceAddVertex(v); }
-                }
+                    Text = yld.ToString(),
+                    Position = new Vector3(x, 0.55f, y),
+                    Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                    FontSize = 42,
+                    PixelSize = 0.008f,
+                    Modulate = new Color(glow.R, glow.G, glow.B, 1f),
+                    OutlineSize = 14,
+                    OutlineModulate = new Color(0.08f, 0.07f, 0.03f, 1f),
+                    NoDepthTest = true,
+                };
+                labels.AddChild(lbl);
+            }
         fertMesh.SurfaceEnd();
         if (anyFertile)
         {
@@ -592,6 +621,8 @@ public partial class World3D : Node3D
                 },
             };
             AddChild(_fertileOverlay);
+            AddChild(labels);
+            _fertileLabels = labels;
         }
 
         // Rock raised into relief — the central ridge and the outcrops become a
@@ -630,7 +661,9 @@ public partial class World3D : Node3D
         Sim.Terrain.Water => TerrWater,
         Sim.Terrain.Rock  => TerrRock,
         Sim.Terrain.Marsh => TerrMarsh,
+        Sim.Terrain.FertilePoor => TerrFertilePoor,
         Sim.Terrain.Fertile => TerrFertile,
+        Sim.Terrain.FertileRich => TerrFertileRich,
         _                     => TerrGround,
     };
 
@@ -1465,7 +1498,9 @@ public partial class World3D : Node3D
     {
         // Light the fertile soil only while placing a farm — that is when knowing
         // where a field will grow actually matters.
-        if (_fertileOverlay != null) _fertileOverlay.Visible = _buildType == BuildingType.Farm;
+        bool farming = _buildType == BuildingType.Farm;
+        if (_fertileOverlay != null) _fertileOverlay.Visible = farming;
+        if (_fertileLabels != null) _fertileLabels.Visible = farming;
 
         if (_buildType is not BuildingType t)
         { foreach (var g in _ghosts) g.Visible = false; if (_ghostModel != null) _ghostModel.Visible = false; return; }
