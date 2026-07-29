@@ -178,6 +178,7 @@
           <div class="row"><span class="in"><kbd>V</kbd><span class="sep">/</span><span class="m">Resources btn</span></span><span class="act">Survey <b>your own land</b>: a food value on every tile — <b>1</b> plain, <b>2</b>/<b>3</b> richer soil — plus each wood, stone &amp; iron deposit's amount. Nothing shown past your border.</span></div>
           <div class="row"><span class="in"><kbd>G</kbd><span class="sep">/</span><span class="m">Goals btn</span></span><span class="act">Toggle the <b>Paths to Victory</b> tracker — your standing on all four crowns (see <b>Paths to Victory</b>).</span></div>
           <div class="row"><span class="in"><kbd>C</kbd><span class="sep">/</span><span class="m">Tech btn</span></span><span class="act">Open the <b>tech tree</b> — spend banked research to climb a branch toward its crown (see <b>The Tech Tree</b>).</span></div>
+          <div class="row"><span class="in"><kbd>X</kbd><span class="sep">/</span><span class="m">Spies btn</span></span><span class="act">Open the <b>spy ring</b> — fire a dagger at your rival (see <b>Spies &amp; War</b>).</span></div>
         </div>
       </section>
 
@@ -291,10 +292,26 @@
             <tr><td>Economic</td><td>Market → trade income → Banking</td><td>★ Grand Exchange</td></tr>
             <tr><td>Religious</td><td>Chapel → churches convert faith</td><td>★ Grand Temple</td></tr>
             <tr><td>Science</td><td>Scholar's Hut → research → wonders</td><td>★ Academy</td></tr>
-            <tr><td>Domain</td><td>population + lands <span style="color:var(--ink-soft)">(soon)</span></td><td>★ Sovereign's Court</td></tr>
+            <tr><td>Domain</td><td>Farmstead → grow the census, found keeps</td><td>★ Sovereign's Court</td></tr>
           </tbody>
         </table>
-        <p class="lead" style="margin:.7rem 0 0"><b>Religious:</b> a <b style="color:var(--accent)">church</b> converts your people (faith opens at 25%, a small dense town converts fastest). <b>Economic:</b> the branch pays a <b style="color:var(--gold)">trade income</b> on top of tax. <b>Science:</b> research speeds itself, then the Academy lets you raise wonders.</p>
+        <p class="lead" style="margin:.7rem 0 0"><b>Religious:</b> a <b style="color:var(--accent)">church</b> converts your people (faith opens at 25%, a small dense town converts fastest). <b>Economic:</b> the branch pays a <b style="color:var(--gold)">trade income</b> on top of tax. <b>Science:</b> research speeds itself, then the Academy raises wonders. <b>Domain:</b> Homesteads swell your housing, and <b>Provincial Keeps</b> let you build a new <b>keep</b> — each a fresh territory (found five for the crown).</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">IX</span> Spies &amp; War</h2>
+        <p class="lead">Every crown is <b>announced</b> at 80% — and a spy is the one thing that pushes a rival's score <em>back</em>. Research a dagger in the <b>Spy Guild</b> (the shared war branch — any path can reach it), then press <kbd>X</kbd> and loose it at your rival. Each costs gold and rests on a cooldown.</p>
+        <table class="dials">
+          <thead><tr><th>Dagger</th><th>Strikes</th><th>Blunted by</th></tr></thead>
+          <tbody>
+            <tr><td>Embezzler</td><td>skims their <b style="color:var(--gold)">gold</b> into yours</td><td>Banking House</td></tr>
+            <tr><td>Inquisitor</td><td>knocks their <b>faith</b> back</td><td>Cathedral</td></tr>
+            <tr><td>Saboteur</td><td>wrecks a <b>wonder</b></td><td>Printing Press</td></tr>
+            <tr><td>Agitator</td><td>drives their <b>people</b> off</td><td>Provincial Keeps</td></tr>
+            <tr><td>Assassin</td><td>cuts down a <b>soldier</b></td><td>Bodyguard</td></tr>
+          </tbody>
+        </table>
+        <p class="lead" style="margin:.7rem 0 0">Notice the counters: a branch's own <b>Tier-III</b> node hardens it against the dagger meant for it — so climbing your crown makes you tougher to knock off it, and the <b>Bodyguard</b> stops the Assassin cold. <span style="color:var(--ink-soft)">Taking a rival's keep by force — conquest — is still being built.</span></p>
       </section>
 
     </div>
