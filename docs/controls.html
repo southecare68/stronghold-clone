@@ -177,6 +177,7 @@
           <div class="row"><span class="in"><kbd>T</kbd></span><span class="act">Toggle territory borders</span></div>
           <div class="row"><span class="in"><kbd>V</kbd><span class="sep">/</span><span class="m">Resources btn</span></span><span class="act">Survey <b>your own land</b>: a food value on every tile — <b>1</b> plain, <b>2</b>/<b>3</b> richer soil — plus each wood, stone &amp; iron deposit's amount. Nothing shown past your border.</span></div>
           <div class="row"><span class="in"><kbd>G</kbd><span class="sep">/</span><span class="m">Goals btn</span></span><span class="act">Toggle the <b>Paths to Victory</b> tracker — your standing on all four crowns (see <b>Paths to Victory</b>).</span></div>
+          <div class="row"><span class="in"><kbd>C</kbd><span class="sep">/</span><span class="m">Tech btn</span></span><span class="act">Open the <b>tech tree</b> — spend banked research to climb a branch toward its crown (see <b>The Tech Tree</b>).</span></div>
         </div>
       </section>
 
@@ -262,19 +263,38 @@
         <p class="lead">More than one way to win — a scored race, not just the last keep standing. Take the <b>HIGH</b> goal of one path <b>and</b> the <b>MEDIUM</b> of a <em>different</em> path, each <b>held</b> for a spell. Cross <b>80%</b> of any HIGH goal and the whole realm is told — the window for a rival to strike back.</p>
         <div class="rows">
           <div class="row"><span class="in"><kbd>G</kbd><span class="sep">/</span><span class="m">Goals btn</span></span><span class="act">Open the <b>Paths to Victory</b> tracker (top-right): a progress bar on each crown for your realm.</span></div>
-          <div class="row"><span class="in"><span class="m">Faith</span></span><span class="act">Your realm's converted share, in the top bar. Opens at <b>25%</b>; a <b style="color:var(--accent)">church</b> wins the people over toward the <b>75%</b> religious crown.</span></div>
-          <div class="row"><span class="in"><span class="m">Church</span></span><span class="act">Build one from the palette — each ministers to a flock, so churches sized to your <b>population</b> lift faith. A small, dense town converts fastest.</span></div>
+          <div class="row"><span class="in"><span class="m">★ Capstone</span></span><span class="act">A crown is <b>locked</b> until you research its branch's <b>capstone</b> in the tech tree — reaching the number alone is not enough (see <b>The Tech Tree</b>).</span></div>
         </div>
         <table class="dials">
           <thead><tr><th>Crown</th><th>HIGH goal</th><th>Medium</th></tr></thead>
           <tbody>
             <tr><td>Economic</td><td>hold 1,000,000 gold</td><td>bank 500,000</td></tr>
             <tr><td>Religious</td><td>convert 75%</td><td>convert 50%</td></tr>
+            <tr><td>Science</td><td>Academy + 2 wonders</td><td>1 wonder</td></tr>
             <tr><td>Domain</td><td>5,000 pop · 5 lands</td><td>2,500 · 2 lands</td></tr>
-            <tr><td>Science</td><td>tech tree + wonders</td><td>1 wonder</td></tr>
           </tbody>
         </table>
-        <p class="lead" style="margin:.7rem 0 0">Every crown is <b>economy-first</b>; war is a shared <b>tool</b> that feeds whoever wields it — loot gold, annex land, convert by force. <span style="color:var(--ink-soft)">Faith &amp; the Economic hoard are in; Domain's extra lands, the Science tree, and the counter-spies are still being built.</span></p>
+        <p class="lead" style="margin:.7rem 0 0">Every crown is <b>economy-first</b>; war is a shared <b>tool</b> that feeds whoever wields it — loot gold, annex land, convert by force. <span style="color:var(--ink-soft)">Economic, Religious &amp; Science are playable now; Domain's extra lands and the counter-spies are still being built.</span></p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">VIII</span> The Tech Tree</h2>
+        <p class="lead"><b>The tree is how you win.</b> A realm banks <b style="color:#4a86c8">research</b> every turn (top bar); press <kbd>C</kbd> and spend it, node by node, to climb a branch. Each branch's <b>★ capstone</b> unlocks its crown — and you can capstone only <b>one</b> branch, while a second branch costs ever more. So one branch to its capstone + a shallow dip into another <em>is</em> the dual-goal.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Trunk</span></span><span class="act"><b>Roads</b> (faster research) opens the branch gates — <b>Chapel</b>, <b>Market</b>, <b>Scholar's Hut</b>.</span></div>
+          <div class="row"><span class="in"><span class="m">Fork</span></span><span class="act">Each branch has a <b>pick-one</b> sidegrade — taking one closes the other.</span></div>
+          <div class="row"><span class="in"><span class="m">Wonder</span></span><span class="act">The Science crown you <b>build</b>: unlocked by the <b>Academy</b>, a grand monument on the palette. Each one costs more than the last.</span></div>
+        </div>
+        <table class="dials">
+          <thead><tr><th>Path</th><th>Climb its branch</th><th>Crown</th></tr></thead>
+          <tbody>
+            <tr><td>Economic</td><td>Market → trade income → Banking</td><td>★ Grand Exchange</td></tr>
+            <tr><td>Religious</td><td>Chapel → churches convert faith</td><td>★ Grand Temple</td></tr>
+            <tr><td>Science</td><td>Scholar's Hut → research → wonders</td><td>★ Academy</td></tr>
+            <tr><td>Domain</td><td>population + lands <span style="color:var(--ink-soft)">(soon)</span></td><td>★ Sovereign's Court</td></tr>
+          </tbody>
+        </table>
+        <p class="lead" style="margin:.7rem 0 0"><b>Religious:</b> a <b style="color:var(--accent)">church</b> converts your people (faith opens at 25%, a small dense town converts fastest). <b>Economic:</b> the branch pays a <b style="color:var(--gold)">trade income</b> on top of tax. <b>Science:</b> research speeds itself, then the Academy lets you raise wonders.</p>
       </section>
 
     </div>
