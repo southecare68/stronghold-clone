@@ -98,6 +98,7 @@ public partial class World3D : Node3D
     // keyboard shortcuts, but with their effects spelled out and +/- buttons.
     Control _realmPanel;
     Label _realmHeader, _realmSummary, _realmTaxName, _realmTaxFx, _realmRationName, _realmRationFx;
+    Label _realmFaith;
     // Demolish asks first: a stray Del arms this confirm popup, and only a second
     // Del (or the Demolish button) actually razes. 0 = nothing pending.
     Control _confirmPanel;
@@ -178,6 +179,7 @@ public partial class World3D : Node3D
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Granary,
+        BuildingType.Church,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -185,7 +187,7 @@ public partial class World3D : Node3D
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
     Label _netInfo;
-    const int StatCount = 10;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval
+    const int StatCount = 11;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith
 
     // A brief, prominent confirmation flashed when you turn a realm dial (tax or
     // rations). The setting's live reading sits in the top bar, but it is small and
@@ -194,6 +196,16 @@ public partial class World3D : Node3D
     Control _realmToastPanel;
     Label _realmToast;
     float _realmToastLeft;   // seconds the toast stays up (fades over the last stretch)
+
+    // The victory tracker: one progress bar per scored path for your own realm, a
+    // toggle to tuck it away, and the centre banner that declares the winner.
+    Control _goalsPanel;
+    Button _goalsButton;
+    bool _showGoals = true;
+    readonly Label[] _goalLabel = new Label[4];
+    readonly ProgressBar[] _goalBar = new ProgressBar[4];
+    Control _victoryBannerPanel;
+    Label _victoryBanner;
 
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
@@ -372,6 +384,7 @@ public partial class World3D : Node3D
         SetupBuild();
         SetupTrainPanel();
         SetupRealmPanel();
+        SetupGoalsPanel();
         SetupConfirmPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
@@ -544,6 +557,7 @@ public partial class World3D : Node3D
         B(BuildingType.Bakery,        "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.5f);
         B(BuildingType.IronMine,      "Buildings/Preset_Houses/SM_Bld_Preset_Tower_01_Optimized", 0.5f);   // a mine headframe
         B(BuildingType.Granary,       "Buildings/Preset_Houses/SM_Bld_Preset_Shelter_01_Optimized", 0.5f);  // an open barn for the harvest
+        B(BuildingType.Church,        "Buildings/Preset_Houses/SM_Bld_Preset_Church_01_A_Optimized", 0.5f);  // ministers to the flock — raises faith
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
@@ -1227,6 +1241,7 @@ public partial class World3D : Node3D
         ("Army",  new Color(0.86f, 0.40f, 0.36f)),
         ("Gold",  new Color(0.92f, 0.80f, 0.30f)),
         ("Approval", new Color(0.52f, 0.74f, 0.95f)),
+        ("Faith", new Color(0.78f, 0.62f, 0.92f)),
     };
 
     // Readable names for the realm dials, indexed by level. Tax runs from a bribe
@@ -1312,7 +1327,7 @@ public partial class World3D : Node3D
             Text = "Resources  (V)",
             FocusMode = Control.FocusModeEnum.None,
             AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
-            OffsetLeft = -170, OffsetRight = -12, OffsetTop = -46, OffsetBottom = -12,
+            OffsetLeft = -170, OffsetRight = -12, OffsetTop = -110, OffsetBottom = -78,
         };
         _resButton.AddThemeFontSizeOverride("font_size", 14);
         _resButton.Pressed += () => ToggleResourceOverlay();
@@ -1423,6 +1438,10 @@ public partial class World3D : Node3D
         _stat[9].AddThemeColorOverride("font_color",
             starving ? new Color(0.96f, 0.52f, 0.40f) : new Color(0.92f, 0.94f, 0.97f));
 
+        // Faith: the share of the realm won over to the church, the Religious path's
+        // whole metric. A church raises it; watch it climb toward the 75% crown.
+        _stat[10].Text = $"Faith {_sim.Faith(me)}%";
+
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
             : _selected.Count > 1 ? $"{_selected.Count} units selected"
@@ -1528,7 +1547,8 @@ public partial class World3D : Node3D
         BuildingType.Quarry => "Quarry", BuildingType.Storehouse => "Store", BuildingType.Farm => "Farm",
         BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
-        BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary", _ => t.ToString(),
+        BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
+        BuildingType.Church => "Church", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial.
@@ -1792,6 +1812,8 @@ public partial class World3D : Node3D
         UpdateGhost();
         UpdateTrainPanel();
         UpdateRealmPanel();
+        UpdateGoalsPanel();
+        PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
     }
@@ -2945,6 +2967,14 @@ public partial class World3D : Node3D
             return;
         }
 
+        // G shows or hides the Paths-to-Victory tracker, like V and T — local only.
+        if (e is InputEventKey goals && goals.Pressed && goals.Keycode == Key.G &&
+            !goals.CtrlPressed && !goals.MetaPressed && !goals.AltPressed)
+        {
+            ToggleGoals();
+            return;
+        }
+
         // R rotates the building being placed a quarter-turn, so you can face it
         // whichever way looks best before committing.
         if (e is InputEventKey rot && rot.Pressed && rot.Keycode == Key.R &&
@@ -3259,6 +3289,9 @@ public partial class World3D : Node3D
         col.AddChild(DialRow("Food", () => AdjustRations(-1), () => AdjustRations(1), out _realmRationName));
         _realmRationFx = RealmLabel(col, "", 12, new Color(0.68f, 0.72f, 0.78f));
 
+        // Faith, the Religious path: a church raises it, no dial to turn.
+        _realmFaith = RealmLabel(col, "", 12, new Color(0.80f, 0.68f, 0.92f));
+
         RealmLabel(col, "keys:  − / =  tax      [ / ]  rations", 11, new Color(0.55f, 0.58f, 0.64f));
     }
 
@@ -3329,6 +3362,13 @@ public partial class World3D : Node3D
         _realmTaxFx.Text = TaxEffect(tax);
         _realmRationName.Text = RationNames[ration];
         _realmRationFx.Text = RationEffect(ration, demand);
+
+        int faith = _sim.Faith(me);
+        int churches = _sim.CountBuildings(me, BuildingType.Church);
+        string toward = faith >= 75 ? "at the crown (75%)"
+                      : churches == 0 ? "build a Church to convert them"
+                      : $"climbing toward the crown (75%)";
+        _realmFaith.Text = $"Faith {faith}%   ·   {churches} church{(churches == 1 ? "" : "es")}   ·   {toward}";
     }
 
     // Human-readable effect lines, read from the sim's own tables so the promise
@@ -3348,6 +3388,178 @@ public partial class World3D : Node3D
     }
 
     static string Signed(int n) => n > 0 ? $"+{n}" : n.ToString();
+
+    // ---- paths to victory --------------------------------------------------
+
+    // The victory tracker, top-right: a progress bar per scored path for your own
+    // realm, so the race you are running (and how close a rival's announced push
+    // is) reads at a glance. Read-only, rebuilt each frame from Progress(); the win
+    // banner and the 80% toasts are driven by PollVictoryEvents from the sim's
+    // own announcements, so both clients raise them off the same deterministic state.
+    void SetupGoalsPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        var panel = new PanelContainer
+        {
+            AnchorLeft = 1, AnchorRight = 1, AnchorTop = 0,
+            OffsetLeft = -302, OffsetRight = -12, OffsetTop = 52,
+        };
+        panel.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.88f)));
+        layer.AddChild(panel);
+        _goalsPanel = panel;
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 12);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 10);
+        panel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 7);
+        margin.AddChild(col);
+
+        var head = new Label { Text = "Paths to Victory" };
+        head.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.70f));
+        head.AddThemeFontSizeOverride("font_size", 14);
+        col.AddChild(head);
+
+        var hint = new Label { Text = "win a HIGH goal + a MEDIUM on another path" };
+        hint.AddThemeColorOverride("font_color", new Color(0.60f, 0.63f, 0.69f));
+        hint.AddThemeFontSizeOverride("font_size", 11);
+        col.AddChild(hint);
+
+        for (int pi = 0; pi < 4; pi++)
+        {
+            var rowCol = new VBoxContainer();
+            rowCol.AddThemeConstantOverride("separation", 2);
+            col.AddChild(rowCol);
+
+            var lab = new Label { Text = "" };
+            lab.AddThemeColorOverride("font_color", new Color(0.90f, 0.92f, 0.96f));
+            lab.AddThemeFontSizeOverride("font_size", 12);
+            rowCol.AddChild(lab);
+            _goalLabel[pi] = lab;
+
+            var bar = new ProgressBar
+            {
+                MinValue = 0, MaxValue = 100, Value = 0, ShowPercentage = false,
+                CustomMinimumSize = new Vector2(268, 7),
+            };
+            bar.AddThemeStyleboxOverride("background", Panel(new Color(0.16f, 0.18f, 0.22f)));
+            bar.AddThemeStyleboxOverride("fill", Panel(PathColor((VictoryPath)pi)));
+            rowCol.AddChild(bar);
+            _goalBar[pi] = bar;
+        }
+
+        // Toggle, bottom-right beside the Resources button.
+        _goalsButton = new Button
+        {
+            Text = "Goals  (G)", FocusMode = Control.FocusModeEnum.None,
+            AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = -328, OffsetRight = -180, OffsetTop = -110, OffsetBottom = -78,
+        };
+        _goalsButton.AddThemeFontSizeOverride("font_size", 14);
+        _goalsButton.Pressed += ToggleGoals;
+        layer.AddChild(_goalsButton);
+
+        // The winner's banner — centre screen, hidden until a crown is claimed.
+        var bannerWrap = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.28f, AnchorBottom = 0.28f,
+            GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+            Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        bannerWrap.AddThemeStyleboxOverride("panel", Panel(new Color(0.10f, 0.09f, 0.14f, 0.95f)));
+        layer.AddChild(bannerWrap);
+        _victoryBannerPanel = bannerWrap;
+        var bMargin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) bMargin.AddThemeConstantOverride("margin_" + s, 34);
+        foreach (var s in new[] { "top", "bottom" }) bMargin.AddThemeConstantOverride("margin_" + s, 22);
+        bannerWrap.AddChild(bMargin);
+        _victoryBanner = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _victoryBanner.AddThemeColorOverride("font_color", new Color(0.98f, 0.92f, 0.70f));
+        _victoryBanner.AddThemeFontSizeOverride("font_size", 30);
+        bMargin.AddChild(_victoryBanner);
+    }
+
+    void ToggleGoals() => _showGoals = !_showGoals;
+
+    void UpdateGoalsPanel()
+    {
+        _goalsPanel.Visible = _showGoals;
+        if (_goalsButton != null)
+            _goalsButton.Modulate = _showGoals ? Colors.White : new Color(0.7f, 0.7f, 0.7f);
+        if (!_showGoals) return;
+
+        int me = MyPlayer;
+        for (int pi = 0; pi < 4; pi++)
+        {
+            var path = (VictoryPath)pi;
+            var p = _sim.Progress(me, path);
+            string metric = pi switch
+            {
+                0 => $"{_sim.Gold(me):N0} / 1,000,000 gold",
+                1 => $"{_sim.Faith(me)}% / 75% converted",
+                2 => $"{_sim.PeasantCount(me):N0} / 5,000 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
+                _ => "tech tree & wonders — coming soon",
+            };
+            string mark = p.MediumBanked ? "   ✓ medium" : "";
+            string hold = p.HoldTicks > 0 ? $"   ·   held {FmtClock(p.HoldTicks)} / {FmtClock(p.HoldNeeded)}" : "";
+            _goalLabel[pi].Text = $"{PathName(path)}   {p.HighPercent}%{mark}{hold}\n{metric}";
+            _goalBar[pi].Value = p.HighPercent;
+        }
+    }
+
+    // Raise the sim's realm-wide announcements as UI: an 80% push flashes the toast,
+    // a claimed crown raises the banner. The events are transient (not hashed), so we
+    // drain them each frame — both clients derive the same ones from the same state.
+    void PollVictoryEvents()
+    {
+        var events = _sim.VictoryEvents;
+        if (events.Count == 0) return;
+        foreach (var e in events)
+        {
+            if (e.Kind == VictoryEventKind.Approaching)
+                ShowRealmToast($"⚑   {Who(e.Owner)} — nearing the {PathName(e.Path)} crown");
+            else
+            {
+                string verb = e.Owner == MyPlayer ? "win" : "wins";
+                _victoryBanner.Text = $"👑   {Who(e.Owner)} {verb} the {CrownName(e.Path)}!\n{PathName(e.Path)} victory";
+                _victoryBannerPanel.Visible = true;
+            }
+        }
+        _sim.ClearVictoryEvents();
+    }
+
+    static string PathName(VictoryPath p) => p switch
+    {
+        VictoryPath.Economic => "Economic",
+        VictoryPath.Religious => "Religious",
+        VictoryPath.Domain => "Domain",
+        _ => "Science",
+    };
+
+    static string CrownName(VictoryPath p) => p switch
+    {
+        VictoryPath.Economic => "Crown of the Merchant",
+        VictoryPath.Religious => "Crown of the Faithful",
+        VictoryPath.Domain => "Crown of the Sovereign",
+        _ => "Crown of the Scholar",
+    };
+
+    static Color PathColor(VictoryPath p) => p switch
+    {
+        VictoryPath.Economic => new Color(0.92f, 0.80f, 0.30f),
+        VictoryPath.Religious => new Color(0.78f, 0.62f, 0.92f),
+        VictoryPath.Domain => new Color(0.42f, 0.78f, 0.44f),
+        _ => new Color(0.52f, 0.74f, 0.95f),
+    };
+
+    string Who(int owner) => owner == MyPlayer ? "You" : $"Player {owner}";
+
+    // Ticks (20/s) to m:ss, for the sustained-hold countdowns.
+    static string FmtClock(int ticks) { int s = ticks / 20; return $"{s / 60}:{s % 60:00}"; }
 
     // ---- demolish confirmation --------------------------------------------
 

@@ -785,10 +785,12 @@ namespace Sim
         // The share of a realm's people won over to the faith, 0..100. A realm with no
         // keep yet has no congregation.
         public int Faith(int owner) => _stock.TryGetValue(owner, out var s) ? s[FaithIdx] : 0;
-        int ChurchCount(int owner)
+        int ChurchCount(int owner) => CountBuildings(owner, BuildingType.Church);
+        // How many live buildings of a type an owner holds. Public for the HUD.
+        public int CountBuildings(int owner, BuildingType type)
         {
             int n = 0;
-            foreach (var b in Buildings) if (b.Alive && b.Owner == owner && b.Type == BuildingType.Church) n++;
+            foreach (var b in Buildings) if (b.Alive && b.Owner == owner && b.Type == type) n++;
             return n;
         }
         public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
