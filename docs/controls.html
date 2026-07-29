@@ -1,0 +1,287 @@
+<title>Stronghold Clone — Command Reference</title>
+<style>
+  :root {
+    --parch:      #efe4c9;
+    --parch-deep: #e5d5b1;
+    --ink:        #33281a;
+    --ink-soft:   #6a5837;
+    --rule:       #c9b487;
+    --card:       #f6eed9;
+    --card-edge:  #d8c295;
+    --accent:     #7c2f26;   /* heraldic red */
+    --gold:       #a9812f;
+    --key-face:   #fbf5e6;
+    --key-edge:   #c7b283;
+    --key-shadow: #b39b64;
+    --mouse:      #4a5c46;    /* mossy green for mouse actions */
+    --shadow:     rgba(60,44,20,.18);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans:  system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --parch:      #211c15;
+      --parch-deep: #1a1610;
+      --ink:        #ece0c6;
+      --ink-soft:   #b7a37c;
+      --rule:       #57492f;
+      --card:       #2b2419;
+      --card-edge:  #4a3d27;
+      --accent:     #d98576;
+      --gold:       #d6ad5c;
+      --key-face:   #38301f;
+      --key-edge:   #574627;
+      --key-shadow: #14100a;
+      --mouse:      #9fb894;
+      --shadow:     rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="light"] {
+    --parch:#efe4c9; --parch-deep:#e5d5b1; --ink:#33281a; --ink-soft:#6a5837; --rule:#c9b487;
+    --card:#f6eed9; --card-edge:#d8c295; --accent:#7c2f26; --gold:#a9812f;
+    --key-face:#fbf5e6; --key-edge:#c7b283; --key-shadow:#b39b64; --mouse:#4a5c46; --shadow:rgba(60,44,20,.18);
+  }
+  :root[data-theme="dark"] {
+    --parch:#211c15; --parch-deep:#1a1610; --ink:#ece0c6; --ink-soft:#b7a37c; --rule:#57492f;
+    --card:#2b2419; --card-edge:#4a3d27; --accent:#d98576; --gold:#d6ad5c;
+    --key-face:#38301f; --key-edge:#574627; --key-shadow:#14100a; --mouse:#9fb894; --shadow:rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .sheet {
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      radial-gradient(120% 90% at 12% 0%, var(--parch) 0%, var(--parch-deep) 100%);
+    min-height: 100vh;
+    padding: clamp(1.1rem, 3vw, 2.4rem);
+    display: flex;
+    justify-content: center;
+  }
+  .charter {
+    width: 100%;
+    max-width: 60rem;
+    background: var(--parch);
+    border: 1px solid var(--card-edge);
+    box-shadow: 0 1px 0 var(--rule) inset, 0 12px 34px var(--shadow);
+    border-radius: 4px;
+    padding: clamp(1.1rem, 2.6vw, 2rem);
+  }
+
+  header { text-align: center; padding-bottom: .9rem; border-bottom: 2px double var(--rule); }
+  .eyebrow {
+    font-family: var(--sans); font-size: .72rem; letter-spacing: .32em;
+    text-transform: uppercase; color: var(--gold); font-weight: 700; margin: 0 0 .35rem;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: clamp(1.8rem, 4.5vw, 2.9rem); line-height: 1.02;
+    margin: 0; color: var(--ink); text-wrap: balance;
+  }
+  .sub { font-family: var(--serif); font-style: italic; color: var(--ink-soft); margin: .45rem 0 0; font-size: 1rem; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(.8rem, 2vw, 1.3rem); margin-top: 1.3rem; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--card-edge); border-radius: 4px; padding: .85rem 1rem 1rem; }
+  .card h2 {
+    font-family: var(--serif); font-size: 1.12rem; font-weight: 600; margin: 0 0 .1rem;
+    color: var(--accent); display: flex; align-items: baseline; gap: .5rem;
+  }
+  .card h2 .num {
+    font-family: var(--mono); font-size: .68rem; color: var(--gold);
+    border: 1px solid var(--rule); border-radius: 3px; padding: .05rem .3rem; letter-spacing: .05em;
+  }
+  .card > .lead { font-size: .78rem; color: var(--ink-soft); margin: 0 0 .7rem; }
+
+  .rows { display: grid; gap: .1rem; }
+  .row {
+    display: grid; grid-template-columns: minmax(8.2rem, auto) 1fr; gap: .7rem;
+    align-items: center; padding: .32rem 0; border-top: 1px solid color-mix(in srgb, var(--rule) 45%, transparent);
+  }
+  .row:first-child { border-top: 0; }
+  .in { display: flex; flex-wrap: wrap; gap: .28rem; align-items: center; }
+  .act { font-size: .86rem; color: var(--ink); line-height: 1.25; }
+  .act b { color: var(--accent); font-weight: 600; }
+
+  kbd {
+    font-family: var(--mono); font-size: .74rem; font-weight: 600; color: var(--ink);
+    background: linear-gradient(var(--key-face), color-mix(in srgb, var(--key-face) 82%, var(--key-edge)));
+    border: 1px solid var(--key-edge); border-bottom-width: 2px;
+    border-radius: 5px; padding: .16rem .42rem; min-width: 1.5rem; text-align: center;
+    box-shadow: 0 1px 0 var(--key-shadow); white-space: nowrap;
+  }
+  .sep { color: var(--ink-soft); font-size: .78rem; padding: 0 .05rem; }
+  .m {
+    font-family: var(--sans); font-size: .7rem; font-weight: 700; letter-spacing: .02em;
+    color: var(--parch); background: var(--mouse);
+    border-radius: 999px; padding: .2rem .55rem; white-space: nowrap;
+    text-transform: uppercase;
+  }
+
+  .dials {
+    width: 100%; border-collapse: collapse; margin: .7rem 0 0;
+    font-size: .78rem; font-variant-numeric: tabular-nums;
+  }
+  .dials th, .dials td { padding: .18rem .3rem; text-align: center; border-top: 1px solid color-mix(in srgb, var(--rule) 45%, transparent); }
+  .dials thead th { color: var(--gold); font-family: var(--sans); font-weight: 700; font-size: .66rem; letter-spacing: .05em; text-transform: uppercase; border-top: 0; }
+  .dials td:first-child, .dials th:first-child { color: var(--ink-soft); font-family: var(--mono); font-weight: 700; }
+  .dials tr.neutral td { background: color-mix(in srgb, var(--gold) 14%, transparent); font-weight: 600; }
+  .dials .up { color: #2f7d34; }
+  .dials .dn { color: var(--accent); }
+
+  footer {
+    margin-top: 1.2rem; padding-top: .8rem; border-top: 2px double var(--rule);
+    display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; justify-content: space-between;
+    font-size: .74rem; color: var(--ink-soft);
+  }
+  footer b { color: var(--accent); }
+
+  @media print {
+    .sheet { background: #fff; padding: 0; }
+    .charter { box-shadow: none; border: none; max-width: none; }
+    :root {
+      --parch:#fff; --parch-deep:#fff; --card:#fbf6ea; --card-edge:#c9b487; --rule:#c9b487;
+      --ink:#2a2114; --ink-soft:#6a5837; --accent:#7c2f26; --gold:#8a6a26;
+      --key-face:#fff; --key-edge:#b39b64; --key-shadow:#b39b64;
+    }
+    .grid { gap: .5rem; }
+    .card { break-inside: avoid; }
+  }
+</style>
+
+<div class="sheet">
+  <div class="charter">
+    <header>
+      <p class="eyebrow">Stronghold Clone</p>
+      <h1>Command Reference</h1>
+      <p class="sub">Keep it by your side while you hold the keep.</p>
+    </header>
+
+    <div class="grid">
+
+      <section class="card">
+        <h2><span class="num">I</span> Camera</h2>
+        <p class="lead">Move over the field and find your angle.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><kbd>W</kbd><span class="sep">/</span><kbd>↑</kbd></span><span class="act">Pan forward</span></div>
+          <div class="row"><span class="in"><kbd>S</kbd><span class="sep">/</span><kbd>↓</kbd></span><span class="act">Pan back</span></div>
+          <div class="row"><span class="in"><kbd>A</kbd><span class="sep">/</span><kbd>←</kbd></span><span class="act">Pan left</span></div>
+          <div class="row"><span class="in"><kbd>D</kbd><span class="sep">/</span><kbd>→</kbd></span><span class="act">Pan right</span></div>
+          <div class="row"><span class="in"><kbd>Q</kbd><span class="sep">·</span><kbd>E</kbd></span><span class="act">Rotate left · right</span></div>
+          <div class="row"><span class="in"><span class="m">Wheel</span><span class="sep">/</span><span class="m">Pinch</span></span><span class="act">Zoom — in drops to <b>ground level</b>, out rises to an overview</span></div>
+          <div class="row"><span class="in"><kbd>F11</kbd><span class="sep">·</span><kbd>⌘</kbd><span class="sep">+</span><kbd>Ctrl</kbd><span class="sep">+</span><kbd>F</kbd></span><span class="act">Toggle fullscreen <span style="color:var(--ink-soft)">(⌘⌃F on Mac)</span></span></div>
+          <div class="row"><span class="in"><kbd>F</kbd></span><span class="act">Toggle fog of war <span style="color:var(--ink-soft)">(solo only)</span></span></div>
+          <div class="row"><span class="in"><kbd>T</kbd></span><span class="act">Toggle territory borders</span></div>
+          <div class="row"><span class="in"><kbd>V</kbd><span class="sep">/</span><span class="m">Resources btn</span></span><span class="act">Survey <b>your own land</b>: a food value on every tile — <b>1</b> plain, <b>2</b>/<b>3</b> richer soil — plus each wood, stone &amp; iron deposit's amount. Nothing shown past your border.</span></div>
+          <div class="row"><span class="in"><kbd>G</kbd><span class="sep">/</span><span class="m">Goals btn</span></span><span class="act">Toggle the <b>Paths to Victory</b> tracker — your standing on all four crowns (see <b>Paths to Victory</b>).</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">II</span> Select &amp; Command</h2>
+        <p class="lead">One click chooses; a right-click reads the target.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Left-click</span></span><span class="act">Select a unit, or open a building's panel</span></div>
+          <div class="row"><span class="in"><span class="m">Drag</span></span><span class="act">Box-select your units</span></div>
+          <div class="row"><span class="in"><kbd>Shift</kbd><span class="sep">+</span><span class="m">Select</span></span><span class="act">Add to the selection</span></div>
+          <div class="row"><span class="in"><span class="m">Right-click</span></span><span class="act">on an <b>enemy</b> — attack</span></div>
+          <div class="row"><span class="in"><span class="m">Right-click</span></span><span class="act">on a <b>wall / turret / keep</b> — man it &amp; fire from it <span style="color:var(--ink-soft)">(needs <b>steps</b> to climb)</span></span></div>
+          <div class="row"><span class="in"><span class="m">Right-click</span></span><span class="act">on your <b>gatehouse</b> — open or close the gate</span></div>
+          <div class="row"><span class="in"><span class="m">Right-click</span></span><span class="act">on a <b>tree / rock</b> — gather (peasants)</span></div>
+          <div class="row"><span class="in"><span class="m">Right-click</span></span><span class="act">on <b>ground</b> — move</span></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">III</span> Build</h2>
+        <p class="lead">Pick from the palette; a green ghost means it fits.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Palette</span></span><span class="act">Choose a building to raise</span></div>
+          <div class="row"><span class="in"><span class="m">Left-click</span></span><span class="act">Place it</span></div>
+          <div class="row"><span class="in"><kbd>R</kbd></span><span class="act">Rotate the building to face any way before placing</span></div>
+          <div class="row"><span class="in"><span class="m">Drag</span></span><span class="act">Lay a whole <b>wall</b> run at once</span></div>
+          <div class="row"><span class="in"><span class="m">Left-click</span></span><span class="act">Drop a <b>turret</b> or <b>gate</b> onto a finished wall — it takes that piece's place</span></div>
+          <div class="row"><span class="in"><span class="m">Left-click</span><span class="sep">+</span><kbd>Del</kbd></span><span class="act">Select a building, then raze it — <b>half the cost back</b>, worker freed</span></div>
+          <div class="row"><span class="in"><kbd>Esc</kbd><span class="sep">/</span><span class="m">Right-click</span></span><span class="act">Leave build mode</span></div>
+        </div>
+        <p class="lead" style="margin:.7rem 0 0">Raise <b style="color:var(--accent)">steps</b> beside a wall so soldiers can climb it, a <b style="color:var(--accent)">turret</b> for archers to fire from the highest point, and a <b style="color:var(--accent)">gatehouse</b> to pass through — turrets and gates snap into the wall line.</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">IV</span> Train</h2>
+        <p class="lead">Every soldier is an armed peasant — keep some idle.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Click barracks</span></span><span class="act">Open the training panel</span></div>
+          <div class="row"><span class="in"><span class="m">Unit button</span></span><span class="act">Recruit one — costs wood &amp; a spare idle peasant</span></div>
+        </div>
+        <p class="lead" style="margin:.7rem 0 0">Build a <b style="color:var(--accent)">woodcutter</b>, <b style="color:var(--accent)">quarry</b> and <b style="color:var(--accent)">iron mine</b> by the trees, rock &amp; rusty ore — each hires its own worker. For bread, see the <b style="color:var(--accent)">Food Cycle</b>; a <b style="color:var(--accent)">house</b> raises how many people you can hold.</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">V</span> Food Cycle</h2>
+        <p class="lead">Bread is what grows your town. It runs down a chain — every link needs its own worker, and each waits on the one before it.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Farm</span></span><span class="act">Sows a <b>wheat field</b> and reaps <b>grain</b>. <b>Any</b> open ground grows a field (yield <b>1</b>), so you're never short of space — but the <b style="color:var(--accent)">richer soil</b> scattered across your land, and in patches out on your flanks, reaps <b>2</b> or <b>3</b>. Pick the Farm (or press V) to see it; aim your fields at the <b style="color:var(--accent)">3</b>s. A field can't sit on wood, stone or iron.</span></div>
+          <div class="row"><span class="in"><span class="m">Mill</span></span><span class="act">Grinds banked <b>grain → flour</b> — sits idle until there is grain to grind.</span></div>
+          <div class="row"><span class="in"><span class="m">Bakery</span></span><span class="act">Bakes <b>flour → bread</b>, your <b>Food</b> — sits idle until there is flour.</span></div>
+          <div class="row"><span class="in"><span class="m">Granary</span></span><span class="act">A food drop-off by the fields — like the <b>storehouse</b> is for timber. Cuts the haul home, so grain and bread bank faster.</span></div>
+          <div class="row"><span class="in"><span class="m">Keep</span></span><span class="act">Rations serve that bread each turn → <b>Approval</b> → newcomers arrive (see <b>Realm</b>).</span></div>
+        </div>
+        <p class="lead" style="margin:.7rem 0 0"><b style="color:var(--accent)">Wheat → Grain → Flour → Bread → mouths fed.</b> Staff all three or the chain stalls — a bakery with no flour bakes nothing. One bakery feeds a sizeable town, so lay the chain early and let a food buffer build before you raise rations.</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">VI</span> Realm</h2>
+        <p class="lead">Two dials share one number — <b>Approval</b>. Keep it above 50% and newcomers arrive; let it sink and idlers drift off (workers always stay).</p>
+        <div class="rows">
+          <div class="row"><span class="in"><span class="m">Click keep</span></span><span class="act">Open the <b>realm panel</b> — the two dials with <b>◀ ▶</b> buttons and every effect spelled out (gold per head, approval per turn)</span></div>
+          <div class="row"><span class="in"><kbd>-</kbd><span class="sep">·</span><kbd>=</kbd></span><span class="act"><b>Tax</b> down · up — higher fills the <b style="color:var(--gold)">treasury</b> but costs approval; the lowest steps <b>pay a bribe</b> that buys it back</span></div>
+          <div class="row"><span class="in"><kbd>[</kbd><span class="sep">·</span><kbd>]</kbd></span><span class="act"><b>Rations</b> down · up — a fuller table wins approval but eats more <b>food</b> each turn; an empty larder always starves the realm, whatever the order</span></div>
+        </div>
+        <p class="lead" style="margin:.7rem 0 0">Both dials move approval on the <b>same ±9 scale</b>, so they cancel step for step: crank <b>tax</b> to fill the treasury, then set a richer <b>table</b> to buy the approval back — you trade gold against food.</p>
+        <table class="dials">
+          <thead><tr><th>Approval</th><th>Tax</th><th>Rations</th></tr></thead>
+          <tbody>
+            <tr><td class="up">+9</td><td>Bribe</td><td>Feast</td></tr>
+            <tr><td class="up">+6</td><td>Gift</td><td>Rich</td></tr>
+            <tr><td class="up">+3</td><td>None</td><td>Hearty</td></tr>
+            <tr class="neutral"><td>0</td><td>Low</td><td>Full</td></tr>
+            <tr><td class="dn">−3</td><td>Fair</td><td>Lean</td></tr>
+            <tr><td class="dn">−6</td><td>High</td><td>Scant</td></tr>
+            <tr><td class="dn">−9</td><td>Cruel</td><td>None</td></tr>
+          </tbody>
+        </table>
+        <p class="lead" style="margin:.7rem 0 0">Tax also fills the <b style="color:var(--gold)">treasury</b> (a bribe pays out; cruelty rakes in) and rations eat <b>food</b> (a fuller table costs more each turn). It flashes <b style="color:var(--accent)">⚠ STARVING</b> the moment your larder can’t cover the ration you’ve set.</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">VII</span> Paths to Victory</h2>
+        <p class="lead">More than one way to win — a scored race, not just the last keep standing. Take the <b>HIGH</b> goal of one path <b>and</b> the <b>MEDIUM</b> of a <em>different</em> path, each <b>held</b> for a spell. Cross <b>80%</b> of any HIGH goal and the whole realm is told — the window for a rival to strike back.</p>
+        <div class="rows">
+          <div class="row"><span class="in"><kbd>G</kbd><span class="sep">/</span><span class="m">Goals btn</span></span><span class="act">Open the <b>Paths to Victory</b> tracker (top-right): a progress bar on each crown for your realm.</span></div>
+          <div class="row"><span class="in"><span class="m">Faith</span></span><span class="act">Your realm's converted share, in the top bar. Opens at <b>25%</b>; a <b style="color:var(--accent)">church</b> wins the people over toward the <b>75%</b> religious crown.</span></div>
+          <div class="row"><span class="in"><span class="m">Church</span></span><span class="act">Build one from the palette — each ministers to a flock, so churches sized to your <b>population</b> lift faith. A small, dense town converts fastest.</span></div>
+        </div>
+        <table class="dials">
+          <thead><tr><th>Crown</th><th>HIGH goal</th><th>Medium</th></tr></thead>
+          <tbody>
+            <tr><td>Economic</td><td>hold 1,000,000 gold</td><td>bank 500,000</td></tr>
+            <tr><td>Religious</td><td>convert 75%</td><td>convert 50%</td></tr>
+            <tr><td>Domain</td><td>5,000 pop · 5 lands</td><td>2,500 · 2 lands</td></tr>
+            <tr><td>Science</td><td>tech tree + wonders</td><td>1 wonder</td></tr>
+          </tbody>
+        </table>
+        <p class="lead" style="margin:.7rem 0 0">Every crown is <b>economy-first</b>; war is a shared <b>tool</b> that feeds whoever wields it — loot gold, annex land, convert by force. <span style="color:var(--ink-soft)">Faith &amp; the Economic hoard are in; Domain's extra lands, the Science tree, and the counter-spies are still being built.</span></p>
+      </section>
+
+    </div>
+
+    <footer>
+      <span>Launch: solo <b>no flags</b> · vs computer <b>--ai=easy|normal|hard</b> · networked <b>--host</b> / <b>--join=&lt;ip&gt;</b></span>
+      <span>Green HUD “in sync” = lockstep healthy</span>
+    </footer>
+  </div>
+</div>
