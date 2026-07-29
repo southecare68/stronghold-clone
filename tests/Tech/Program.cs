@@ -32,6 +32,9 @@ static class Program
         PrereqsAndTheForkGateTheBranch();
         ASecondBranchCostsMore();
         TheCapstoneUnlocksTheHighGoal();
+        TheEconomicBranchClimbsToItsCapstone();
+        TheEconomicBranchGeneratesGold();
+        TheGrandExchangeGatesTheEconomicHigh();
         TheResearchCommandTakes();
         TwoClientsAgreeOnResearch();
 
@@ -111,6 +114,67 @@ static class Program
         Check("researched, it unlocks the HIGH goal", sim.Progress(1, VictoryPath.Religious).HighMet);
     }
 
+    // The Economic branch mirrors the Religious one: Market → Trade Post → the Guild
+    // Charter fork → Banking House → the Grand Exchange capstone.
+    static void TheEconomicBranchClimbsToItsCapstone()
+    {
+        Console.WriteLine("the Economic branch climbs to its capstone:");
+        var sim = Realm();
+        sim.AddResearch(1, 1000);
+        sim.TryResearch(1, TechTree.Roads);
+        sim.TryResearch(1, TechTree.Market);
+
+        Check("Trade Post opens after Market", sim.TryResearch(1, TechTree.TradePost));
+        Check("Banking House is refused before a Guild fork pick", !sim.CanResearch(1, TechTree.BankingHouse));
+        Check("Monopoly can be taken at the Guild fork", sim.TryResearch(1, TechTree.Monopoly));
+        Check("its sibling Bourse is now closed", !sim.CanResearch(1, TechTree.Bourse));
+        Check("Banking House opens after the fork", sim.TryResearch(1, TechTree.BankingHouse));
+        Check("and the Grand Exchange capstone follows", sim.TryResearch(1, TechTree.GrandExchange));
+        Check("Grand Exchange is the Economic capstone",
+              TechTree.CapstoneFor(TechBranch.Economic) == TechTree.GrandExchange);
+    }
+
+    // The branch is a gold engine: trade income stacks per node and banks into the
+    // treasury each realm tick, on top of tax.
+    static void TheEconomicBranchGeneratesGold()
+    {
+        Console.WriteLine("the Economic branch generates gold:");
+        var sim = Realm();
+        sim.AddResearch(1, 1000);
+        Check("no branch, no trade income", sim.EconomicIncome(1) == 0);
+
+        sim.TryResearch(1, TechTree.Roads);
+        sim.TryResearch(1, TechTree.Market);
+        sim.TryResearch(1, TechTree.TradePost);
+        Check("Trade Post pays a steady flow", sim.EconomicIncome(1) == 5);
+        sim.TryResearch(1, TechTree.Monopoly);
+        Check("Monopoly stacks its high margin", sim.EconomicIncome(1) == 5 + 12);
+        sim.AddGold(1, 400);
+        sim.TryResearch(1, TechTree.BankingHouse);
+        Check("Banking House adds interest on the hoard", sim.EconomicIncome(1) == 5 + 12 + 2);
+
+        int before = sim.Gold(1);
+        Ticks(sim, 400);   // ten realm ticks
+        Check("trade income banks into the treasury over time", sim.Gold(1) > before);
+    }
+
+    // The Economic HIGH is capstone-gated too: a banked million is not the crown
+    // until the Grand Exchange sustains it.
+    static void TheGrandExchangeGatesTheEconomicHigh()
+    {
+        Console.WriteLine("the Grand Exchange gates the Economic HIGH:");
+        var sim = Realm();
+        sim.AddGold(1, 1_000_000);
+        Check("a million gold is banked", sim.Gold(1) >= 1_000_000);
+        Check("but 1M alone is not the HIGH goal without the capstone",
+              !sim.Progress(1, VictoryPath.Economic).HighMet);
+
+        sim.AddResearch(1, 1000);
+        foreach (int id in EconomicPlan) sim.TryResearch(1, id);
+        Check("the Grand Exchange unlocks the Economic HIGH",
+              sim.Progress(1, VictoryPath.Economic).HighMet);
+    }
+
     // Research also takes through the ordinary command path, charged and validated
     // exactly like a human clicking a node.
     static void TheResearchCommandTakes()
@@ -157,6 +221,12 @@ static class Program
     {
         TechTree.Roads, TechTree.Chapel, TechTree.Shrine,
         TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple,
+    };
+
+    static readonly int[] EconomicPlan =
+    {
+        TechTree.Roads, TechTree.Market, TechTree.TradePost,
+        TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange,
     };
 
     static Simulation Realm()

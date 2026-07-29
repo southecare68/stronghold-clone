@@ -84,7 +84,7 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   clock (`MatchClockTicks`, 0 = off). All four paths are wired; the metrics that
   exist today are gold (Economic), faith (Religious), and population (Domain).
 
-### The tech tree — the victory structure (shipped: spine + Religious branch)
+### The tech tree — the victory structure (shipped: spine + Religious & Economic branches + HUD)
 
 Per `tech.pdf`, **the tree *is* the victory structure**: the four paths are branches
 of one research web, and a branch's **capstone is what unlocks its HIGH goal**. The
@@ -109,6 +109,12 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
 - **Research command** (`CommandType.Research`) takes through the normal charged,
   validated path; the **AI** climbs its Religious branch to the capstone, so a bot
   is a genuine crown threat (Normal & Hard reach Grand Temple in `AiSim`).
+- **Economic branch** (`EconomicIncome`): a gold engine on top of tax — Trade Post
+  pays a steady flow, the Guild Charter fork adds Monopoly's flat high margin *or*
+  Bourse's per-building breadth, Banking House compounds interest on the hoard, and
+  the **Grand Exchange** capstone floors the income and unlocks the 1M HIGH. Added
+  to gold each realm tick; a **Tech HUD** (C key) lets a human spend research, node
+  by node, across every branch.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -156,9 +162,9 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **0** | Victory spine — metrics, 80% announce, hold-timers, match clock | ✅ shipped |
 | **1** | Faith metric + the Church | ✅ shipped |
 | **T** | **Tech spine** — research economy, the web, capstone-gates-HIGH, cross-branch cost + **Religious branch** ported, AI climbs it | ✅ shipped |
-| **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | next |
-| **2** | **Economic branch** — Trade Post → Guild Charter (fork) → Banking House → Grand Exchange, wired to gold velocity + the 1M hoard | after the tech HUD |
-| **4** | **Science branch** — Library → University (fork) → Academy → **Wonders** (visible, sabotageable) | greenfield branch |
+| **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | ✅ shipped |
+| **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the 1M HIGH | ✅ shipped |
+| **4** | **Science branch** — Library → University (fork) → Academy → **Wonders** (visible, sabotageable) | next (greenfield) |
 | **3** | **Domain branch** + **multi-territory** — Provincial Keeps → Sovereign's Court, on the conquest/annexation system (designed above) | biggest lift |
 | **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, and the five spies | last — spies need live, announced metrics to bite |
 
@@ -183,3 +189,6 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   the design's ~10–30 real minutes and tests can drive them exactly.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
+- Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,
+  `InterestDivisor`/`InterestCap`/`InterestCapGrand`, `GrandExchangeFloor`
+  (`Tech.cs`), added to gold each realm tick in `ResolveRealm`.

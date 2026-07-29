@@ -1690,8 +1690,11 @@ namespace Sim
                 int tax = Math.Clamp(s[TaxIdx], 0, TaxSteps - 1);
                 int ration = Math.Clamp(s[RationIdx], 0, RationSteps - 1);
 
-                // Taxation moves the treasury; a bribe (negative) is paid, never below zero.
-                int gold = s[GoldIdx] + TaxGold[tax] * peasants;
+                // Taxation moves the treasury; a bribe (negative) is paid, never below
+                // zero. On top of tax, the Economic tech web pays a trade income (0
+                // until that branch is researched — see EconomicIncome), the gold FLOW
+                // that carries the merchant path to its hoard.
+                int gold = s[GoldIdx] + TaxGold[tax] * peasants + EconomicIncome(owner);
                 s[GoldIdx] = gold < 0 ? 0 : gold;
 
                 // Research accrues every realm tick at the realm's pace (Tech.cs), the

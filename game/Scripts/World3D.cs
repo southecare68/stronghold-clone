@@ -3376,7 +3376,9 @@ public partial class World3D : Node3D
         int demand = _sim.RationDemand(me);
         bool starving = demand > food;
 
-        _realmSummary.Text = $"Approval {_sim.Popularity(me)}%     Gold {_sim.Gold(me)}     Food {food}"
+        int trade = _sim.EconomicIncome(me);
+        _realmSummary.Text = $"Approval {_sim.Popularity(me)}%     Gold {_sim.Gold(me)}"
+                             + (trade > 0 ? $" (+{trade} trade)" : "") + $"     Food {food}"
                              + (starving ? "     ⚠ STARVING" : "");
         _realmSummary.AddThemeColorOverride("font_color",
             starving ? new Color(0.96f, 0.52f, 0.40f) : new Color(0.85f, 0.88f, 0.93f));

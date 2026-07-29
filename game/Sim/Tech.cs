@@ -29,6 +29,41 @@ namespace Sim
         // Setup / test helper: bank research points directly, like AddGold.
         public void AddResearch(int owner, int amount) => StockOf(owner)[ResearchIdx] = Math.Max(0, ResearchPoints(owner) + amount);
 
+        // --- Economic branch: gold that isn't taxed from peasants ----------------
+        // The Economic branch is a gold engine — trade FLOW on top of tax, which is
+        // what carries a realm to the half-million and then holds the million.
+        const int TradePostGold = 5;         // caravans: a steady flow each realm tick
+        const int MonopolyGold = 12;         // one good, high margin — a fat flat rate
+        const int BourseGoldPerBld = 1;      // diversified, resilient — scales with a broad economy
+        const int InterestDivisor = 200;     // Banking House: compound interest, ~0.5% of the hoard/tick
+        const int InterestCap = 300;         // capped so it can't run away...
+        const int InterestCapGrand = 600;    // ...unless the Grand Exchange raises the ceiling
+        const int GrandExchangeFloor = 25;   // and it guarantees an income floor, to sustain the hold
+
+        int LiveBuildingCount(int owner)
+        {
+            int n = 0;
+            foreach (var b in Buildings) if (b.Alive && b.Owner == owner) n++;
+            return n;
+        }
+
+        // Gold the Economic tech web pays this realm each realm tick, on top of tax.
+        // Public so the HUD can show the trade income the branch is earning.
+        public int EconomicIncome(int owner)
+        {
+            int g = 0;
+            if (IsTechResearched(owner, TechTree.TradePost)) g += TradePostGold;
+            if (IsTechResearched(owner, TechTree.Monopoly)) g += MonopolyGold;
+            if (IsTechResearched(owner, TechTree.Bourse)) g += BourseGoldPerBld * LiveBuildingCount(owner);
+            if (IsTechResearched(owner, TechTree.BankingHouse))
+            {
+                int cap = IsTechResearched(owner, TechTree.GrandExchange) ? InterestCapGrand : InterestCap;
+                g += Math.Min(Gold(owner) / InterestDivisor, cap);
+            }
+            if (IsTechResearched(owner, TechTree.GrandExchange)) g = Math.Max(g, GrandExchangeFloor);
+            return g;
+        }
+
         // Is this node in this owner's researched set? Bit `id` of the tech mask.
         public bool IsTechResearched(int owner, int id)
         {

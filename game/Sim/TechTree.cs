@@ -54,11 +54,12 @@ namespace Sim
         public const int Roads = 0, Market = 1, Chapel = 2;   // + Scholar's Hut / Farmstead / Muster when their branches land
         // Religious 10..19
         public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14;
-        // Economic 20..29 (stub entry, for the cross-branch cost until the branch is ported)
-        public const int TradePost = 20;
+        // Economic 20..29
+        public const int TradePost = 20, Monopoly = 21, Bourse = 22, BankingHouse = 23, GrandExchange = 24;
 
         // Fork groups.
-        const int ForkHolyOrder = 1;   // Missionaries | Zealotry
+        const int ForkHolyOrder = 1;    // Missionaries | Zealotry
+        const int ForkGuild = 2;        // Monopoly | Bourse
 
         // The registry, indexed by Id (gaps are null). Kept small and explicit; the
         // spine ships the trunk unlocks + the full Religious branch, with one Economic
@@ -81,8 +82,12 @@ namespace Sim
                 new TechNode(Cathedral,    "Cathedral",    TechBranch.Religious, 3, 34, new[] { Shrine }, requiresFork: ForkHolyOrder),
                 new TechNode(GrandTemple,  "Grand Temple", TechBranch.Religious, 4, 55, new[] { Cathedral }, capstone: true),
 
-                // --- Economic branch entry (stub; full port is a later slice) --------
-                new TechNode(TradePost,    "Trade Post",   TechBranch.Economic, 1, 15, new[] { Market }),
+                // --- Economic branch: Market → Trade Post → (fork) → Banking → ★ ----
+                new TechNode(TradePost,    "Trade Post",    TechBranch.Economic, 1, 15, new[] { Market }),
+                new TechNode(Monopoly,     "Monopoly",      TechBranch.Economic, 2, 24, new[] { TradePost }, forkGroup: ForkGuild),
+                new TechNode(Bourse,       "Bourse",        TechBranch.Economic, 2, 24, new[] { TradePost }, forkGroup: ForkGuild),
+                new TechNode(BankingHouse, "Banking House", TechBranch.Economic, 3, 36, new[] { TradePost }, requiresFork: ForkGuild),
+                new TechNode(GrandExchange,"Grand Exchange",TechBranch.Economic, 4, 58, new[] { BankingHouse }, capstone: true),
             };
 
             int max = 0;
