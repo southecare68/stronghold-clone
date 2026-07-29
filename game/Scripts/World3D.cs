@@ -625,10 +625,18 @@ public partial class World3D : Node3D
         // tile carries its value (1, 2 or 3) without thousands of separate labels.
         // Deposits carry no food, so they get neither tint nor number. Hidden until
         // you pick the Farm to build, or press V (UpdateGhost lights them).
+        // Tiles a deposit stands on OR right beside carry no food number — a cluster's
+        // trees and rocks are spaced a tile apart, so without the neighbours the gaps
+        // between them would still show a number "under" the deposit.
         var deposit = new HashSet<int>();
         foreach (var n in _sim.NodeList)
             if (n.Type == ResourceType.Wood || n.Type == ResourceType.Stone || n.Type == ResourceType.Iron)
-                deposit.Add(n.Y * MapSize + n.X);
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int tx = n.X + dx, ty = n.Y + dy;
+                        if (tx >= 0 && ty >= 0 && tx < MapSize && ty < MapSize) deposit.Add(ty * MapSize + tx);
+                    }
 
         // Only survey YOUR own land — the food overlay covers the local player's
         // territory and no further, so it never spells out an opponent's ground.
