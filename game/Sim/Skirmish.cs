@@ -107,6 +107,11 @@ namespace Sim
             // deposits never run dry, so a match is never starved of raw materials.
             sim.InfiniteResources = true;
 
+            // Fields grow only on the map's fertile patches, so WHERE you lay your
+            // farms matters: pack them onto the good soil (see TileMap.Skirmish) and
+            // keep the rest of your land for everything else.
+            sim.RequireFertileSoil = true;
+
             // Mirrored starting parties, either side of the ridge.
             sim.SpawnUnit(1, w + 4, m - 2);
             sim.SpawnUnit(1, w + 4, m);

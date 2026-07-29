@@ -528,6 +528,7 @@ public partial class World3D : Node3D
     static readonly Color TerrMarsh  = new(0.33f, 0.34f, 0.21f);   // boggy, browner
     static readonly Color TerrWater  = new(0.17f, 0.30f, 0.45f);   // deep water
     static readonly Color TerrRock   = new(0.44f, 0.42f, 0.39f);   // stone
+    static readonly Color TerrFertile = new(0.30f, 0.40f, 0.16f);  // rich, dark tilled soil — where farms grow
 
     void SetupGround()
     {
@@ -589,6 +590,7 @@ public partial class World3D : Node3D
         Sim.Terrain.Water => TerrWater,
         Sim.Terrain.Rock  => TerrRock,
         Sim.Terrain.Marsh => TerrMarsh,
+        Sim.Terrain.Fertile => TerrFertile,
         _                     => TerrGround,
     };
 

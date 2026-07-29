@@ -27,6 +27,7 @@ static class Program
         AFarmPlantsAFieldAndGrainFlows();
         AFarmReplantsItsFieldSoItNeverRunsDry();
         AnInexhaustibleFieldStaysPutAndNeverEmpties();
+        FieldsGrowOnlyOnFertileSoil();
         AMillGrindsGrainIntoFlour();
         AMillWithNoGrainStaysIdle();
         ABakeryBakesFlourIntoBread();
@@ -129,6 +130,34 @@ static class Program
         // drawn down by exactly this haul, so the two together prove it gave freely.
         Check($"yet grain kept flowing off that full field ({sim.Stockpile(1, ResourceType.Grain)} banked)",
               sim.Stockpile(1, ResourceType.Grain) > 0);
+    }
+
+    // With RequireFertileSoil on, a farm's field grows ONLY where the ground is
+    // fertile: a farm ringed by fertile soil sows and reaps; one on barren ground
+    // sows nothing at all. This is what makes WHERE you build a farm matter.
+    static void FieldsGrowOnlyOnFertileSoil()
+    {
+        Console.WriteLine("\nwith fertile soil required, only a farm on it yields:");
+
+        var goodMap = TileMap.Open(48);
+        for (int y = 18; y <= 26; y++) for (int x = 18; x <= 26; x++) goodMap.Set(x, y, Terrain.Fertile);
+        var good = new Simulation(goodMap) { RequireFertileSoil = true };
+        good.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+        Seed(good, 1, 1);
+        good.PlaceBuilding(BuildingType.Farm, 1, 20, 20);          // ringed by fertile soil
+        for (int i = 0; i < 1500; i++) good.Tick(Array.Empty<Command>());
+        Check($"a farm on fertile soil sows and banks grain ({good.Stockpile(1, ResourceType.Grain)})",
+              good.Stockpile(1, ResourceType.Grain) > 0);
+
+        var barren = new Simulation(TileMap.Open(48)) { RequireFertileSoil = true };
+        barren.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+        Seed(barren, 1, 1);
+        barren.PlaceBuilding(BuildingType.Farm, 1, 20, 20);        // no fertile ground anywhere
+        for (int i = 0; i < 1500; i++) barren.Tick(Array.Empty<Command>());
+        Check($"a farm on barren ground sows no field ({NodesOfType(barren, ResourceType.Grain)})",
+              NodesOfType(barren, ResourceType.Grain) == 0);
+        Check($"and banks no grain ({barren.Stockpile(1, ResourceType.Grain)})",
+              barren.Stockpile(1, ResourceType.Grain) == 0);
     }
 
     static ResourceNode GrainField(Simulation sim)

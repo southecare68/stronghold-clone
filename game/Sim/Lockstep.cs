@@ -77,6 +77,7 @@ namespace Sim
         // and without it a returning player would find their own map blank.
         public bool FogEnabled;
         public bool InfiniteResources;                     // natural deposits never run dry
+        public bool RequireFertileSoil;                    // farm fields grow only on fertile ground
         public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
 
         // Turns the sender has ALREADY published for ticks at or after Tick.

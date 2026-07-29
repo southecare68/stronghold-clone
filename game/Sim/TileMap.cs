@@ -25,6 +25,7 @@ namespace Sim
         Water = 1,      // impassable
         Rock = 2,       // impassable; later, the thing quarries are built on
         Marsh = 3,      // passable but slow
+        Fertile = 4,    // ordinary to cross, but the ONLY ground a farm's field yields on
     }
 
     // A whole-tile coordinate. Distinct from a Unit's fixed-point position on
@@ -131,6 +132,10 @@ namespace Sim
             InBounds(x, y) && At(x, y) != Terrain.Water && At(x, y) != Terrain.Rock
             && !_blocked[Index(x, y)];
 
+        // Rich soil a farm's field will grow on. Ordinary to walk — it only matters
+        // to the farm, which sows its wheat here and nowhere else.
+        public bool IsFertile(int x, int y) => InBounds(x, y) && _tiles[Index(x, y)] == Terrain.Fertile;
+
         // Cost of ENTERING this tile, before the diagonal surcharge.
         public int EnterCost(int x, int y) =>
             At(x, y) == Terrain.Marsh ? MarshCost : StepCost;
@@ -231,7 +236,7 @@ namespace Sim
                 else if (stepX) { err -= dy; x += sx; }
                 else { err += dx; y += sy; }
 
-                if (groundOnly) { if (At(x, y) != Terrain.Ground) return false; }
+                if (groundOnly) { var g = At(x, y); if (g != Terrain.Ground && g != Terrain.Fertile) return false; }
                 else if (!Passable(x, y)) return false;
             }
             return true;
@@ -239,7 +244,7 @@ namespace Sim
 
         // Build a map from text, which makes test cases readable and lets us
         // hand-author small maps before there is any editor:
-        //   '.' ground   '~' water   '#' rock   ',' marsh
+        //   '.' ground   '~' water   '#' rock   ',' marsh   '=' fertile
         public static TileMap FromRows(params string[] rows)
         {
             if (rows == null || rows.Length == 0)
@@ -258,6 +263,7 @@ namespace Sim
                         '~' => Terrain.Water,
                         '#' => Terrain.Rock,
                         ',' => Terrain.Marsh,
+                        '=' => Terrain.Fertile,
                         _ => Terrain.Ground,
                     });
             map.SealTerrain();
@@ -347,6 +353,15 @@ namespace Sim
             // Outcrops for texture and a little cover near each base approach.
             map.Fill(size * 18 / 100, size * 60 / 100, size * 24 / 100, size * 64 / 100, Terrain.Rock);
             map.Fill(size * 76 / 100, size * 36 / 100, size * 82 / 100, size * 40 / 100, Terrain.Rock);
+
+            // Fertile soil — the only ground a farm's field grows on. One patch to the
+            // drop-off side of each keep (west, where the keep's own delivery tile is),
+            // so a field sown here hauls home on a CLEAR path rather than detouring
+            // around the keep. Clear of the home wood, stone and iron, within the bot's
+            // build radius, but LIMITED — so where you lay your farms is a real
+            // decision: pack them onto the good soil, leave the rest for everything else.
+            map.Fill(size * 8 / 100,  size * 46 / 100, size * 13 / 100, size * 56 / 100, Terrain.Fertile);
+            map.Fill(size * 87 / 100, size * 46 / 100, size * 92 / 100, size * 56 / 100, Terrain.Fertile);
 
             map.SealTerrain();
             return map;

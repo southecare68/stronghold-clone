@@ -179,6 +179,20 @@ namespace Sim
                         if (!CanPlace(type, x, y)) continue;
                         if (!BuildableFootprint(owner, type, x, y)) continue;
                         if (AiFootprintHasNode(type, x, y)) continue;   // don't bulldoze deposits
+                        // Never build over your own drop-off tile: a building there
+                        // walls the delivery point off and every hauler jams up full.
+                        if (_dropOff.TryGetValue(owner, out var drop))
+                        {
+                            var (dw, dh) = FootprintOf(type);
+                            if (drop.X >= x && drop.X < x + dw && drop.Y >= y && drop.Y < y + dh) continue;
+                        }
+                        // A farm on barren ground would yield nothing, so the bot only
+                        // sites one where its field will find fertile soil to grow on.
+                        if (type == BuildingType.Farm && RequireFertileSoil)
+                        {
+                            var (fw, fh) = FootprintOf(type);
+                            if (!FarmWouldYield(x, y, fw, fh)) continue;
+                        }
                         Apply(new Command { Owner = owner, Type = CommandType.Build, TargetId = (int)type, X = x, Y = y });
                         return true;
                     }

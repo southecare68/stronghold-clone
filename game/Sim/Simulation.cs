@@ -503,6 +503,14 @@ namespace Sim
         // 0xB1A7A676) behaves exactly as before.
         public bool InfiniteResources;
 
+        // When on, a farm's field grows ONLY on fertile soil (Terrain.Fertile): the
+        // farm sows its wheat on a fertile tile in reach and, finding none, yields
+        // nothing. That is what makes where you place a farm matter — the map's
+        // fertile patches are limited, so they must be spent well. Opt-in and
+        // snapshotted like the flags above; off by default, so a farm on any test's
+        // plain ground still sows and reaps exactly as it always did.
+        public bool RequireFertileSoil;
+
         // Can this player act on that spot at all? With fog off, everything is
         // both seen and known — which is what keeps every pre-fog scenario intact.
         public bool CanSee(int owner, int x, int y) => !FogEnabled || Fog.IsVisible(owner, x, y);
@@ -563,7 +571,7 @@ namespace Sim
                             int nextBuildingId, IReadOnlyList<Building> buildings,
                             IReadOnlyList<UnitDesign> designs,
                             bool fogEnabled = false, IReadOnlyDictionary<int, uint[]> explored = null,
-                            bool infiniteResources = false)
+                            bool infiniteResources = false, bool requireFertileSoil = false)
         {
             TickNumber = tickNumber;
             _nextId = nextUnitId;
@@ -609,6 +617,7 @@ namespace Sim
             // world should be deriving for itself.
             FogEnabled = fogEnabled;
             InfiniteResources = infiniteResources;
+            RequireFertileSoil = requireFertileSoil;
             Fog.RestoreExplored(explored);
             if (FogEnabled) Fog.RecomputeVisible(Units, Buildings);
         }
@@ -618,7 +627,7 @@ namespace Sim
         public void Restore(MatchSnapshot s) =>
             Restore(s.Tick, s.NextUnitId, s.RngState, s.Units, s.NextNodeId, s.Nodes,
                     s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs,
-                    s.FogEnabled, s.Explored, s.InfiniteResources);
+                    s.FogEnabled, s.Explored, s.InfiniteResources, s.RequireFertileSoil);
 
         // A complete, standalone snapshot of the simulation's state right now — no
         // network bookkeeping (no pending turns). This is what a rejoin adopts and
@@ -654,6 +663,7 @@ namespace Sim
                 DropOffs = drops,
                 FogEnabled = FogEnabled,
                 InfiniteResources = InfiniteResources,
+                RequireFertileSoil = RequireFertileSoil,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -1710,13 +1720,51 @@ namespace Sim
         // tile comes from the same fixed-order ring scan as everything else.
         void PlantField(Building farm)
         {
-            var spot = SpawnPointAround(farm);
-            if (!spot.HasValue) return;               // hemmed in this tick; retry next
+            // Where the wheat goes: any free tile around the farm, or — when fertile
+            // soil is required — a free FERTILE tile in that ring. A farm ringed by
+            // no fertile ground sows nothing and stands idle, which is exactly why
+            // its placement matters.
+            var spot = RequireFertileSoil ? FertileSpotAround(farm) : SpawnPointAround(farm);
+            if (!spot.HasValue) return;               // hemmed in (or no good soil); retry next tick
             Nodes.Add(new ResourceNode
             {
                 Id = _nextNodeId++, Type = ResourceType.Grain,
                 X = spot.Value.X, Y = spot.Value.Y, Amount = FieldGrain,
             });
+        }
+
+        // A free, fertile tile in the ring around a building — where a farm may sow.
+        // Same scan order as SpawnPointAround, so the choice is deterministic.
+        Tile? FertileSpotAround(Building b)
+        {
+            for (int tx = b.X - 1; tx <= b.X + b.W; tx++)
+            {
+                if (Map.IsFertile(tx, b.Y - 1) && Map.Passable(tx, b.Y - 1)) return new Tile(tx, b.Y - 1);
+                if (Map.IsFertile(tx, b.Y + b.H) && Map.Passable(tx, b.Y + b.H)) return new Tile(tx, b.Y + b.H);
+            }
+            for (int ty = b.Y; ty < b.Y + b.H; ty++)
+            {
+                if (Map.IsFertile(b.X - 1, ty) && Map.Passable(b.X - 1, ty)) return new Tile(b.X - 1, ty);
+                if (Map.IsFertile(b.X + b.W, ty) && Map.Passable(b.X + b.W, ty)) return new Tile(b.X + b.W, ty);
+            }
+            return null;
+        }
+
+        // Would a farm with this footprint find fertile ground to sow — i.e. is any
+        // ring tile fertile and free? Used by the bot to place farms on good soil.
+        public bool FarmWouldYield(int x, int y, int w, int h)
+        {
+            for (int tx = x - 1; tx <= x + w; tx++)
+            {
+                if (Map.IsFertile(tx, y - 1) && Map.Passable(tx, y - 1)) return true;
+                if (Map.IsFertile(tx, y + h) && Map.Passable(tx, y + h)) return true;
+            }
+            for (int ty = y; ty < y + h; ty++)
+            {
+                if (Map.IsFertile(x - 1, ty) && Map.Passable(x - 1, ty)) return true;
+                if (Map.IsFertile(x + w, ty) && Map.Passable(x + w, ty)) return true;
+            }
+            return false;
         }
 
         // The workshops: a mill grinds grain into flour, a bakery bakes flour into
