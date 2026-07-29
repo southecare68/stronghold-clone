@@ -237,6 +237,45 @@ public partial class World3D : Node3D
         yld >= 3 ? new Color(0.52f, 0.95f, 0.34f, 0.50f)   // rich (3)
       : yld == 2 ? new Color(0.92f, 0.86f, 0.30f, 0.45f)   // good (2) — wheaten gold
       :            new Color(0.55f, 0.82f, 0.46f, 0.16f);  // plain (1) — faint green wash
+
+    // Tiny 3x5 glyphs for the food digits, drawn into the number texture. Only 1..3
+    // exist (the only yields), so the map's food value shows on every tile at once.
+    static readonly string[][] Digit3x5 =
+    {
+        null,
+        new[] { " # ", "## ", " # ", " # ", "###" },  // 1
+        new[] { "###", "  #", "###", "#  ", "###" },  // 2
+        new[] { "###", "  #", "###", "  #", "###" },  // 3
+    };
+
+    // Stamp a food digit (scaled 2x, with a dark drop-shadow for contrast) into the
+    // RGBA byte buffer, centred in the tile's cell. Colour tracks the grade.
+    static void DrawDigit(byte[] d, int W, int px, int py, int cell, int v)
+    {
+        if (v < 1 || v >= Digit3x5.Length) return;
+        var pat = Digit3x5[v];
+        const int s = 2;                            // 3x5 -> 6x10
+        int ox = px + (cell - 3 * s) / 2, oy = py + (cell - 5 * s) / 2;
+        (byte r, byte g, byte b) c =
+            v >= 3 ? ((byte)110, (byte)255, (byte)90) :
+            v == 2 ? ((byte)255, (byte)235, (byte)100) :
+                     ((byte)225, (byte)248, (byte)210);
+        void Put(int x, int y, byte r, byte g, byte b, byte a)
+        { if (x >= 0 && y >= 0 && x < W && y < W) { int i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a; } }
+        for (int pass = 0; pass < 2; pass++)        // shadow first, then the digit on top
+            for (int r = 0; r < 5; r++)
+                for (int col = 0; col < 3; col++)
+                {
+                    if (pat[r][col] != '#') continue;
+                    for (int sy = 0; sy < s; sy++)
+                        for (int sx = 0; sx < s; sx++)
+                        {
+                            int gx = ox + col * s + sx, gy = oy + r * s + sy;
+                            if (pass == 0) Put(gx + 1, gy + 1, 8, 8, 5, 235);      // shadow
+                            else Put(gx, gy, c.r, c.g, c.b, 255);                  // digit
+                        }
+                }
+    }
     long _terrSig = long.MinValue;
     int _terrTick;
     // My territory as a rectangle in tile coords, so fog can be cleared inside it.
@@ -581,17 +620,19 @@ public partial class World3D : Node3D
         AddChild(ground);
 
         // Over every FOOD tile — any passable land that isn't a deposit — a highlight
-        // tinted by yield, so the whole farmable spread reads at a glance. A number
-        // floats on the ABOVE-baseline soil (the 2s and 3s); the plain one-food ground
-        // is shown by its faint wash alone (a number on every tile of the map would
-        // bury it). Deposits carry no food, so they get neither tint nor number.
-        // Hidden until you pick the Farm to build, or press V (UpdateGhost lights it).
-        var foodMesh = new ImmediateMesh();
-        var labels = new Node3D { Visible = false };
+        // tinted by yield AND the tile's food number, baked into one texture so EVERY
+        // tile carries its value (1, 2 or 3) without thousands of separate labels.
+        // Deposits carry no food, so they get neither tint nor number. Hidden until
+        // you pick the Farm to build, or press V (UpdateGhost lights them).
         var deposit = new HashSet<int>();
         foreach (var n in _sim.NodeList)
             if (n.Type == ResourceType.Wood || n.Type == ResourceType.Stone || n.Type == ResourceType.Iron)
                 deposit.Add(n.Y * MapSize + n.X);
+
+        var foodMesh = new ImmediateMesh();
+        const int cell = 10;   // texels per tile in the number texture
+        int numW = MapSize * cell;
+        var numData = new byte[numW * numW * 4];   // RGBA, transparent by default
         bool anyFood = false;
         foodMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         for (int y = 0; y < MapSize; y++)
@@ -604,8 +645,7 @@ public partial class World3D : Node3D
                 float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
                 Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
                 foreach (var v in new[] { a, b, c, a, c, d }) { foodMesh.SurfaceSetColor(glow); foodMesh.SurfaceAddVertex(v); }
-                if (yld >= 2)
-                    labels.AddChild(ValueLabel(x, y, yld.ToString(), new Color(glow.R, glow.G, glow.B, 1f)));
+                DrawDigit(numData, numW, x * cell, y * cell, cell, yld);
             }
         foodMesh.SurfaceEnd();
         if (anyFood)
@@ -623,8 +663,22 @@ public partial class World3D : Node3D
                 },
             };
             AddChild(_fertileOverlay);
-            AddChild(labels);
-            _fertileLabels = labels;
+
+            _fertileLabels = new MeshInstance3D
+            {
+                Mesh = new PlaneMesh { Size = new Vector2(MapSize, MapSize) },
+                Position = new Vector3(MapSize / 2f, 0.08f, MapSize / 2f),
+                Visible = false,
+                MaterialOverride = new StandardMaterial3D
+                {
+                    AlbedoTexture = ImageTexture.CreateFromImage(
+                        Image.CreateFromData(numW, numW, false, Image.Format.Rgba8, numData)),
+                    TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                },
+            };
+            AddChild(_fertileLabels);
         }
 
         // Rock raised into relief — the central ridge and the outcrops become a
