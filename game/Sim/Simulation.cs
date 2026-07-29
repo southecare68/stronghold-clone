@@ -21,7 +21,7 @@ namespace Sim
         SetTax = 9, SetRations = 10,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -342,10 +342,32 @@ namespace Sim
         // the per-owner stockpile array, so they ride the snapshot / wire / checksum
         // for free — no new plumbing.
         const int GoldIdx = 6, PopIdx = 7, TaxIdx = 8, RationIdx = 9;   // after Wood..Iron (0..5)
-        const int StockWidth = 10;                             // Resources.Count (6) + gold, pop, tax, ration
+        const int FaithIdx = 10;                               // % of the populace won over to the faith (0..100)
+        // Victory bookkeeping, one slot per path (Economic, Religious, Domain, Science),
+        // all riding the per-owner stock array so they snapshot / wire / checksum for
+        // free — the same free ride the comment above claims for gold and popularity.
+        //   Hold  — consecutive ticks the HIGH goal has been satisfied (a sustained hold)
+        //   Med   — 1 once the MEDIUM goal has EVER been met (sticky; the dual-goal half)
+        //   Ann   — 1 once the realm has been told this owner crossed 80% of a HIGH goal
+        const int VicHoldBase = 11, VicMedBase = 15, VicAnnBase = 19;  // 4 paths each
+        const int PathCount = 4;
+        const int StockWidth = 23;                             // 6 resources + gold/pop/tax/ration + faith + 12 victory slots
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
+
+        // Religion. Faith is the share of the populace won over — it opens at a
+        // starting congregation and climbs as churches reach more of the people. Each
+        // church can minister to a fixed flock (ChurchSeats); when a realm's total
+        // reach covers its whole population, faith drifts toward 100. With no church
+        // it simply rests at the starting share (BaseFaith) — the natural believers.
+        // The drift is deliberate (a few points a settle) so conversion is a campaign,
+        // not a switch, and it is reversible: let population outrun your churches and
+        // the share slips back down. (A future Inquisitor is the only thing that pushes
+        // it BELOW the resting share.)
+        const int StartFaith = 25, BaseFaith = 25;             // opening / resting congregation, %
+        const int ChurchSeats = 12;                            // peasants one church can minister to
+        const int ConvertRate = 3;                             // max points faith moves per PopInterval
 
         // Tax rate steps (index 0..6): gold taken per peasant per realm tick (negative
         // = a bribe you PAY out), and the popularity it costs or wins.
@@ -409,8 +431,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2 };  // ...Turret, IronMine, Granary
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2 };  // ...Turret, IronMine, Granary, Church
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -428,6 +450,7 @@ namespace Sim
             new[] { 10, 20, 0 },      // Turret — a raised archer platform over the wall
             new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
             new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
+            new[] { 20, 10, 0 },      // Church — timber and stone; ministers to a flock, converting the realm (see ResolveRealm)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -438,7 +461,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -516,6 +539,18 @@ namespace Sim
         // snapshotted like the flags above; off by default, so a farm on any test's
         // plain ground still sows and reaps exactly as it always did.
         public bool RequireFertileSoil;
+
+        // --- Victory (see game/Sim/Victory.cs and docs/victory-paths.md) ----------
+        // Who has won the match by a scored path, and by which path, or -1 for a match
+        // still in play. Sticky once set. The optional match clock decides the winner
+        // at the buzzer if no one has claimed a crown; 0 disables it (the default, so
+        // every existing test and the elimination MatchWinner() are untouched). All
+        // three are match state two machines must agree on, so they snapshot, wire and
+        // hash like the flags above. The per-owner hold/latch bookkeeping rides the
+        // stock array instead (see VicHoldBase).
+        public int VictoryOwner = -1;
+        public int VictoryPathIdx = -1;
+        public int MatchClockTicks = 0;
 
         // Can this player act on that spot at all? With fog off, everything is
         // both seen and known — which is what keeps every pre-fog scenario intact.
@@ -630,10 +665,17 @@ namespace Sim
 
         // Restore straight from a snapshot object — the same unpacking every
         // caller was doing by hand.
-        public void Restore(MatchSnapshot s) =>
+        public void Restore(MatchSnapshot s)
+        {
             Restore(s.Tick, s.NextUnitId, s.RngState, s.Units, s.NextNodeId, s.Nodes,
                     s.Stock, s.DropOffs, s.NextBuildingId, s.Buildings, s.Designs,
                     s.FogEnabled, s.Explored, s.InfiniteResources, s.RequireFertileSoil);
+            // Victory scalars ride here rather than on the already-vast low-level
+            // Restore signature; the per-owner hold/latch slots came back with Stock.
+            VictoryOwner = s.VictoryOwner;
+            VictoryPathIdx = s.VictoryPathIdx;
+            MatchClockTicks = s.MatchClockTicks;
+        }
 
         // A complete, standalone snapshot of the simulation's state right now — no
         // network bookkeeping (no pending turns). This is what a rejoin adopts and
@@ -670,6 +712,9 @@ namespace Sim
                 FogEnabled = FogEnabled,
                 InfiniteResources = InfiniteResources,
                 RequireFertileSoil = RequireFertileSoil,
+                VictoryOwner = VictoryOwner,
+                VictoryPathIdx = VictoryPathIdx,
+                MatchClockTicks = MatchClockTicks,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -737,6 +782,15 @@ namespace Sim
         // settings — read-only views for the HUD. Default to an un-opened realm.
         public int Gold(int owner) => _stock.TryGetValue(owner, out var s) ? s[GoldIdx] : 0;
         public int Popularity(int owner) => _stock.TryGetValue(owner, out var s) ? s[PopIdx] : 50;
+        // The share of a realm's people won over to the faith, 0..100. A realm with no
+        // keep yet has no congregation.
+        public int Faith(int owner) => _stock.TryGetValue(owner, out var s) ? s[FaithIdx] : 0;
+        int ChurchCount(int owner)
+        {
+            int n = 0;
+            foreach (var b in Buildings) if (b.Alive && b.Owner == owner && b.Type == BuildingType.Church) n++;
+            return n;
+        }
         public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
         public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 3;
 
@@ -826,6 +880,10 @@ namespace Sim
                 var s = StockOf(owner);
                 if (s[PopIdx] == 0 && s[TaxIdx] == 0 && s[RationIdx] == 0)
                 { s[PopIdx] = StartPopularity; s[TaxIdx] = 2; s[RationIdx] = 3; }
+                // Seed the starting congregation the first time a keep goes up. Kept
+                // separate from the guard above so it holds however setup ordered the
+                // popularity/gold calls (Skirmish sets popularity before the keep).
+                if (s[FaithIdx] == 0) s[FaithIdx] = StartFaith;
             }
 
             // A work building does NOT come with a worker any more: peasants are
@@ -1344,7 +1402,8 @@ namespace Sim
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
-            ResolveRealm();         // taxes, rations, popularity — and who comes or goes by it
+            ResolveRealm();         // taxes, rations, popularity, faith — and who comes or goes by it
+            ResolveVictory();       // scores each path, announces at 80%, decides a crown (Victory.cs)
             RemoveDead();           // sweep out any peasant that just emigrated
             ResolveUpkeep();        // while the standing army eats away at the larder
             TickNumber++;
@@ -1644,6 +1703,17 @@ namespace Sim
                 if (TickNumber % PopInterval != 0) continue;
                 int pop = Math.Clamp(s[PopIdx] + TaxPop[tax] + rationPop, 0, 100);
                 s[PopIdx] = pop;
+
+                // Conversion. A church's reach is its seats; a realm's total reach as
+                // a share of its people is the faith it is drifting toward — floored at
+                // the resting congregation, so faith never falls below BaseFaith on its
+                // own. Uses the head-count read at the top of the loop, so it settles on
+                // the same cadence as popularity.
+                int reach = ChurchCount(owner) * ChurchSeats;
+                int faithTarget = Math.Max(BaseFaith, peasants <= 0 ? BaseFaith : Math.Min(100, reach * 100 / peasants));
+                int faith = s[FaithIdx];
+                s[FaithIdx] = Math.Clamp(faith + Math.Clamp(faithTarget - faith, -ConvertRate, ConvertRate), 0, 100);
+
                 int net = pop >= 80 ? 2 : pop > 50 ? 1 : pop == 50 ? 0 : pop < 20 ? -2 : -1;
                 if (net > 0) for (int i = 0; i < net && PeasantCount(owner) < cap; i++) SpawnPeasant(owner);
                 else if (net < 0) for (int i = 0; i < -net; i++) EmigrateOnePeasant(owner);
@@ -2289,6 +2359,11 @@ namespace Sim
             // legal, so the flag itself is hashed too.
             Mix(FogEnabled ? 1 : 0);
             if (FogEnabled) Fog.MixInto(Mix);
+
+            // Victory: the crown (or -1), the path it was won by, and the match-clock
+            // length two machines must agree on. The per-owner hold/latch slots are
+            // already hashed above as part of the stock array.
+            Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks);
             return h;
         }
 

@@ -78,6 +78,9 @@ namespace Sim
         public bool FogEnabled;
         public bool InfiniteResources;                     // natural deposits never run dry
         public bool RequireFertileSoil;                    // farm fields grow only on fertile ground
+        public int VictoryOwner = -1;                      // who has won by a scored path, or -1
+        public int VictoryPathIdx = -1;                    // which path (VictoryPath) the crown was won by
+        public int MatchClockTicks = 0;                    // match-clock length in ticks, 0 = no buzzer
         public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
 
         // Turns the sender has ALREADY published for ticks at or after Tick.

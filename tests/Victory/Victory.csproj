@@ -1,0 +1,28 @@
+<!-- Victory — faith and the four scored paths (docs/victory-paths.md).
+
+     Faith is the share of a realm's people won over to the church; the victory
+     spine watches every owner's standing on each path, tells the whole realm when
+     one crosses 80% of a HIGH goal, makes a HIGH goal be HELD (not just touched)
+     before it counts, and awards the crown to anyone who holds one path's HIGH
+     while banking another path's MEDIUM. These tests hold down that faith opens at
+     its starting congregation and climbs with churches, that the 80% announcement
+     fires exactly once, that a dual goal (and only a dual goal, held to term) wins,
+     and — the one that matters for a match — that two clients agree on the crown.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>VictoryTests</RootNamespace>
+    <AssemblyName>VictoryTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>
