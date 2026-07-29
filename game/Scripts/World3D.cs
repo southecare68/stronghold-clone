@@ -215,6 +215,11 @@ public partial class World3D : Node3D
     MeshInstance3D _territory;
     ImmediateMesh _territoryMesh;
     bool _showTerritory = true;
+
+    // A glow over the fertile soil, lit only while the Farm is the chosen build, so
+    // you can see at a glance every tile a field will grow on. Built once (terrain
+    // never changes) in SetupGround.
+    MeshInstance3D _fertileOverlay;
     long _terrSig = long.MinValue;
     int _terrTick;
     // My territory as a rectangle in tile coords, so fog can be cleared inside it.
@@ -553,6 +558,41 @@ public partial class World3D : Node3D
             },
         };
         AddChild(ground);
+
+        // A highlight over every fertile tile, hidden until you pick the Farm to
+        // build (UpdateGhost lights it) — a field grows ONLY on this soil, so seeing
+        // it laid out is how you decide where the farms go. Built once: terrain never
+        // changes. Skipped entirely on a map with no fertile ground.
+        var fertMesh = new ImmediateMesh();
+        var glow = new Color(0.92f, 0.86f, 0.30f, 0.42f);   // wheaten gold
+        bool anyFertile = false;
+        fertMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        for (int y = 0; y < MapSize; y++)
+            for (int x = 0; x < MapSize; x++)
+                if (map.At(x, y) == Sim.Terrain.Fertile)
+                {
+                    anyFertile = true;
+                    float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
+                    Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
+                    foreach (var v in new[] { a, b, c, a, c, d }) { fertMesh.SurfaceSetColor(glow); fertMesh.SurfaceAddVertex(v); }
+                }
+        fertMesh.SurfaceEnd();
+        if (anyFertile)
+        {
+            _fertileOverlay = new MeshInstance3D
+            {
+                Mesh = fertMesh,
+                Visible = false,
+                MaterialOverride = new StandardMaterial3D
+                {
+                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                    VertexColorUseAsAlbedo = true,
+                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                },
+            };
+            AddChild(_fertileOverlay);
+        }
 
         // Rock raised into relief — the central ridge and the outcrops become a
         // real barrier rather than a painted one. One MultiMesh, so all the blocks
@@ -1423,6 +1463,10 @@ public partial class World3D : Node3D
     // The ghost(s) under the cursor, updated each frame while in build mode.
     void UpdateGhost()
     {
+        // Light the fertile soil only while placing a farm — that is when knowing
+        // where a field will grow actually matters.
+        if (_fertileOverlay != null) _fertileOverlay.Visible = _buildType == BuildingType.Farm;
+
         if (_buildType is not BuildingType t)
         { foreach (var g in _ghosts) g.Visible = false; if (_ghostModel != null) _ghostModel.Visible = false; return; }
 
