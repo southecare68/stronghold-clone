@@ -187,7 +187,7 @@ public partial class World3D : Node3D
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
     Label _netInfo;
-    const int StatCount = 11;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith
+    const int StatCount = 12;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith, research
 
     // A brief, prominent confirmation flashed when you turn a realm dial (tax or
     // rations). The setting's live reading sits in the top bar, but it is small and
@@ -206,6 +206,14 @@ public partial class World3D : Node3D
     readonly ProgressBar[] _goalBar = new ProgressBar[4];
     Control _victoryBannerPanel;
     Label _victoryBanner;
+
+    // The tech-tree panel: the research web for your realm, node by node, with a
+    // click to spend banked research on an available one. Toggled like the others.
+    Control _techPanel;
+    Button _techButton;
+    bool _showTech;
+    Label _techHeader;
+    readonly Dictionary<int, Button> _techButtons = new();
 
     // Fog of war, drawn from the sim's per-player vision (see Vision.cs). A veil
     // over the ground — near-black where we've never been, a dim haze over ground
@@ -385,6 +393,7 @@ public partial class World3D : Node3D
         SetupTrainPanel();
         SetupRealmPanel();
         SetupGoalsPanel();
+        SetupTechPanel();
         SetupConfirmPanel();
 
         // Audio. A current Camera3D is the 3D audio listener, so the SFX player
@@ -1242,6 +1251,7 @@ public partial class World3D : Node3D
         ("Gold",  new Color(0.92f, 0.80f, 0.30f)),
         ("Approval", new Color(0.52f, 0.74f, 0.95f)),
         ("Faith", new Color(0.78f, 0.62f, 0.92f)),
+        ("Research", new Color(0.55f, 0.82f, 0.86f)),
     };
 
     // Readable names for the realm dials, indexed by level. Tax runs from a bribe
@@ -1441,6 +1451,10 @@ public partial class World3D : Node3D
         // Faith: the share of the realm won over to the church, the Religious path's
         // whole metric. A church raises it; watch it climb toward the 75% crown.
         _stat[10].Text = $"Faith {_sim.Faith(me)}%";
+
+        // Research: the tech currency, banked each realm tick at the shown pace. Spend
+        // it in the tech panel (C) to climb a branch toward its capstone.
+        _stat[11].Text = $"Research {_sim.ResearchPoints(me)} (+{_sim.ResearchPace(me)})";
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
@@ -1813,6 +1827,7 @@ public partial class World3D : Node3D
         UpdateTrainPanel();
         UpdateRealmPanel();
         UpdateGoalsPanel();
+        UpdateTechPanel();
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -2975,6 +2990,14 @@ public partial class World3D : Node3D
             return;
         }
 
+        // C shows or hides the tech tree, where research is spent — local only.
+        if (e is InputEventKey tech && tech.Pressed && tech.Keycode == Key.C &&
+            !tech.CtrlPressed && !tech.MetaPressed && !tech.AltPressed)
+        {
+            ToggleTech();
+            return;
+        }
+
         // R rotates the building being placed a quarter-turn, so you can face it
         // whichever way looks best before committing.
         if (e is InputEventKey rot && rot.Pressed && rot.Keycode == Key.R &&
@@ -3560,6 +3583,153 @@ public partial class World3D : Node3D
 
     // Ticks (20/s) to m:ss, for the sustained-hold countdowns.
     static string FmtClock(int ticks) { int s = ticks / 20; return $"{s / 60}:{s % 60:00}"; }
+
+    // ---- the tech tree -----------------------------------------------------
+
+    // The research web for your realm (docs/victory-paths.md). Grouped by branch,
+    // one button per node; a lit (Available) node is clickable and spends banked
+    // research through a Research command, the same charged/validated path the AI
+    // uses. Read-only otherwise — TechStateOf is the sim's single source of truth for
+    // what is researched / affordable / locked / closed, so the panel never second-
+    // guesses the rules. Toggled like Goals; the game keeps ticking behind it.
+    static readonly TechBranch[] TechBranchOrder =
+        { TechBranch.Trunk, TechBranch.Religious, TechBranch.Economic, TechBranch.Science, TechBranch.Domain, TechBranch.War };
+
+    void SetupTechPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        var panel = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+            Visible = false,
+        };
+        panel.AddThemeStyleboxOverride("panel", Panel(new Color(0.08f, 0.10f, 0.13f, 0.95f)));
+        layer.AddChild(panel);
+        _techPanel = panel;
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 18);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 14);
+        panel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 7);
+        margin.AddChild(col);
+
+        _techHeader = new Label();
+        _techHeader.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.70f));
+        _techHeader.AddThemeFontSizeOverride("font_size", 16);
+        col.AddChild(_techHeader);
+
+        var hint = new Label { Text = "One branch to its capstone (★ unlocks its crown) + a dip into a second — a second branch costs more. Click a lit node." };
+        hint.AddThemeColorOverride("font_color", new Color(0.60f, 0.63f, 0.69f));
+        hint.AddThemeFontSizeOverride("font_size", 11);
+        col.AddChild(hint);
+
+        foreach (var branch in TechBranchOrder)
+        {
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 5);
+            bool any = false;
+
+            var head = new Label { Text = BranchName(branch), CustomMinimumSize = new Vector2(120, 0) };
+            head.AddThemeColorOverride("font_color", BranchColor(branch));
+            head.AddThemeFontSizeOverride("font_size", 13);
+            head.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(head);
+
+            foreach (var node in TechTree.All())
+            {
+                if (node.Branch != branch) continue;
+                any = true;
+                var b = new Button
+                {
+                    Text = node.Name, FocusMode = Control.FocusModeEnum.None,
+                    CustomMinimumSize = new Vector2(120, 40),
+                };
+                b.AddThemeFontSizeOverride("font_size", 11);
+                int id = node.Id;
+                b.Pressed += () => _me.Issue(new Command { Type = CommandType.Research, X = id });
+                row.AddChild(b);
+                _techButtons[id] = b;
+            }
+
+            if (any) col.AddChild(row);
+        }
+
+        _techButton = new Button
+        {
+            Text = "Tech  (C)", FocusMode = Control.FocusModeEnum.None,
+            AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = -486, OffsetRight = -338, OffsetTop = -110, OffsetBottom = -78,
+        };
+        _techButton.AddThemeFontSizeOverride("font_size", 14);
+        _techButton.Pressed += ToggleTech;
+        layer.AddChild(_techButton);
+    }
+
+    void ToggleTech() => _showTech = !_showTech;
+
+    void UpdateTechPanel()
+    {
+        _techPanel.Visible = _showTech;
+        if (_techButton != null) _techButton.Modulate = _showTech ? Colors.White : new Color(0.7f, 0.7f, 0.7f);
+        if (!_showTech) return;
+
+        int me = MyPlayer;
+        _techHeader.Text = $"Tech Tree        Research {_sim.ResearchPoints(me)}  (+{_sim.ResearchPace(me)}/turn)";
+        foreach (var kv in _techButtons)
+        {
+            int id = kv.Key;
+            var b = kv.Value;
+            var node = TechTree.Node(id);
+            var state = _sim.TechStateOf(me, id);
+            string name = node.IsCapstone ? "★ " + node.Name : node.Name;
+            string tail = state switch
+            {
+                TechState.Researched => "✓ done",
+                TechState.Available => $"{_sim.ResearchCostFor(me, id)} ⚡",
+                TechState.Unaffordable => $"{_sim.ResearchCostFor(me, id)} ⚡",
+                TechState.Closed => "closed",
+                _ => "locked",
+            };
+            b.Text = $"{name}\n{tail}";
+            b.Disabled = state != TechState.Available;
+            b.Modulate = TechStateColor(state);
+        }
+    }
+
+    static string BranchName(TechBranch b) => b switch
+    {
+        TechBranch.Trunk => "Shared Trunk",
+        TechBranch.Economic => "Economic",
+        TechBranch.Religious => "Religious",
+        TechBranch.Science => "Science",
+        TechBranch.Domain => "Domain",
+        _ => "War & Spies",
+    };
+
+    static Color BranchColor(TechBranch b) => b switch
+    {
+        TechBranch.Economic => new Color(0.92f, 0.80f, 0.30f),
+        TechBranch.Religious => new Color(0.78f, 0.62f, 0.92f),
+        TechBranch.Science => new Color(0.52f, 0.74f, 0.95f),
+        TechBranch.Domain => new Color(0.42f, 0.78f, 0.44f),
+        TechBranch.War => new Color(0.86f, 0.45f, 0.40f),
+        _ => new Color(0.80f, 0.72f, 0.52f),   // trunk
+    };
+
+    static Color TechStateColor(TechState s) => s switch
+    {
+        TechState.Researched => new Color(0.60f, 0.86f, 0.60f),
+        TechState.Available => new Color(1.00f, 0.94f, 0.66f),
+        TechState.Unaffordable => new Color(0.80f, 0.76f, 0.62f),
+        TechState.Closed => new Color(0.70f, 0.52f, 0.50f),
+        _ => new Color(0.56f, 0.58f, 0.62f),   // locked
+    };
 
     // ---- demolish confirmation --------------------------------------------
 

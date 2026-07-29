@@ -14,6 +14,12 @@ namespace Sim
     // must never be renumbered.
     public enum TechBranch { Trunk = 0, Economic = 1, Religious = 2, Science = 3, Domain = 4, War = 5 }
 
+    // A node's standing for one owner, for the HUD to colour and gate on. Available
+    // is exactly CanResearch == true (prereqs/fork/limit met AND affordable);
+    // Unaffordable means only the points are short; Locked means a prereq/fork/limit
+    // is unmet; Closed means a sibling fork was already taken.
+    public enum TechState { Researched, Available, Unaffordable, Locked, Closed }
+
     // One node in the web. Prereqs are ALL required (AND); RequiresFork additionally
     // demands that some node in that fork group is already taken (the tier gate).
     // ForkGroup > 0 marks mutually-exclusive sidegrades — taking one closes its

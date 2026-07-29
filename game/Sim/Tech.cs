@@ -104,6 +104,21 @@ namespace Sim
             return ResearchPoints(owner) >= ResearchCostFor(owner, id);
         }
 
+        // A node's standing for the HUD — the same checks as CanResearch, but split
+        // so the panel can tell "you can't afford it yet" from "it's locked" from "a
+        // fork closed it". Available here is exactly CanResearch == true.
+        public TechState TechStateOf(int owner, int id)
+        {
+            if (!TechTree.Exists(id)) return TechState.Locked;
+            if (IsTechResearched(owner, id)) return TechState.Researched;
+            var node = TechTree.Node(id);
+            if (node.ForkGroup != 0 && ForkGroupTaken(owner, node.ForkGroup)) return TechState.Closed;
+            foreach (int pre in node.Prereqs) if (!IsTechResearched(owner, pre)) return TechState.Locked;
+            if (node.RequiresFork != 0 && !ForkGroupTaken(owner, node.RequiresFork)) return TechState.Locked;
+            if (node.IsCapstone && CapstonesHeld(owner) >= CapstoneLimit) return TechState.Locked;
+            return ResearchPoints(owner) >= ResearchCostFor(owner, id) ? TechState.Available : TechState.Unaffordable;
+        }
+
         // Spend on a node if it is legal — the one mutation, behind every check above.
         // Returns whether it happened (the command path ignores the result; tests and
         // the AI read it).
