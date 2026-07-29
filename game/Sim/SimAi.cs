@@ -73,6 +73,13 @@ namespace Sim
             var keep = AiKeep(owner);
             if (keep == null) return;    // no keep — the bot has been beaten, nothing to do
 
+            // Research runs alongside the build ladder — it spends banked RESEARCH,
+            // its own currency, so it never takes a build slot or starves the economy.
+            // A bot that contests the faith (builds churches) also climbs the Religious
+            // branch to its Grand Temple capstone, which is what actually unlocks the
+            // 75% crown; Easy abstains from both.
+            if (t.Churches > 0) AiResearch(owner);
+
             // One considered step per cadence — helpers return true once they have
             // spent on a build, so the bot never empties its purse at once.
             //
@@ -139,6 +146,23 @@ namespace Sim
             foreach (var b in Buildings)
                 if (b.Alive && b.Owner == owner && b.Type == type) n++;
             return n;
+        }
+
+        // The bot's path up the Religious branch, in order — the trunk toward it, then
+        // the branch to its capstone (it takes Missionaries at the fork). Each realm
+        // it researches the first node it can afford, so it climbs steadily toward the
+        // Grand Temple that unlocks the 75% crown.
+        static readonly int[] AiReligiousPlan =
+        {
+            TechTree.Roads, TechTree.Chapel, TechTree.Shrine,
+            TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple,
+        };
+
+        bool AiResearch(int owner)
+        {
+            foreach (int id in AiReligiousPlan)
+                if (TryResearch(owner, id)) return true;
+            return false;
         }
 
         // Raise a harvester (hut/quarry) beside its resource. Placed a few tiles off

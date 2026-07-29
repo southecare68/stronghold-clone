@@ -1,0 +1,27 @@
+<!-- Tech — the research economy and the tech web (docs/victory-paths.md).
+
+     Research banks every realm tick and is spent, one node at a time, to climb a
+     branch: prereqs and a tier fork shape the path, a pick-limit caps capstones,
+     and an escalating cross-branch cost makes a second branch dear — together the
+     rules that turn "depth in one branch + a dip into a second" into the dual-goal.
+     A branch's capstone is what unlocks its HIGH victory goal. These tests hold
+     down accrual, the prereq/fork gates, the cross-branch cost, the capstone gate
+     on the HIGH goal, the Research command, and two-client determinism.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>TechTests</RootNamespace>
+    <AssemblyName>TechTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

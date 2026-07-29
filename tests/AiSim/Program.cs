@@ -29,6 +29,7 @@ static class Program
         public int PeakArmy1, PeakArmy2, PeakUnits, FinalUnits, Builds1, Builds2, Keep1, Keep2;
         public int PeakPeas2, PeakArmyP2;   // player-2 economy/army peaks, for the gradient
         public int Churches2, PeakFaith2;   // player-2 churches raised and the faith they won
+        public bool Capstone2;              // player-2 reached the Religious capstone (Grand Temple)
     }
 
     static Simulation FreshMatch(AiLevel level, bool botVsBot)
@@ -59,6 +60,7 @@ static class Program
             o.PeakFaith2 = Math.Max(o.PeakFaith2, a.Faith(2));
         }
         o.Churches2 = a.CountBuildings(2, BuildingType.Church);
+        o.Capstone2 = a.IsTechResearched(2, TechTree.GrandTemple);
         o.Checksum = a.StateChecksum();
         o.FinalUnits = a.Units.Count;
         o.Builds1 = a.Buildings.FindAll(x => x.Owner == 1 && x.Alive).Count;
@@ -91,9 +93,10 @@ static class Program
         // people past the 25% starting congregation. Easy abstains (0 churches); a
         // tougher bot commits MORE churches (the gradient lives in the church count,
         // since a small dense flock saturates its faith at 100% either way).
-        bool faithContest = easy.Churches2 == 0
+        bool faithContest = easy.Churches2 == 0 && !easy.Capstone2
                             && norm.Churches2 > 0 && hard.Churches2 > norm.Churches2
-                            && norm.PeakFaith2 > 25 && hard.PeakFaith2 > 25;
+                            && norm.PeakFaith2 > 25 && hard.PeakFaith2 > 25
+                            && norm.Capstone2 && hard.Capstone2;   // climbed the branch to the crown-unlocking capstone
 
         Console.WriteLine("Stronghold — AI skirmish check");
         Console.WriteLine($"  seed 0x{Simulation.DefaultSeed:X8}\n");
@@ -105,7 +108,8 @@ static class Program
         Line(gradient,     "difficulty scales the bot",      $"vs passive — peak peasants e{easy.PeakPeas2}/n{norm.PeakPeas2}/h{hard.PeakPeas2}, " +
                                                              $"peak army e{easy.PeakArmyP2}/n{norm.PeakArmyP2}/h{hard.PeakArmyP2}");
         Line(faithContest, "the bot contests the faith",     $"churches e{easy.Churches2}/n{norm.Churches2}/h{hard.Churches2}, " +
-                                                             $"peak faith e{easy.PeakFaith2}/n{norm.PeakFaith2}/h{hard.PeakFaith2}%");
+                                                             $"peak faith e{easy.PeakFaith2}/n{norm.PeakFaith2}/h{hard.PeakFaith2}%, " +
+                                                             $"capstone n{(norm.Capstone2 ? "✓" : "✗")}/h{(hard.Capstone2 ? "✓" : "✗")}");
 
         bool pass = inSync && reproducible && built && trained && fought && gradient && faithContest;
         Console.WriteLine("\nRESULT: " + (pass ? "PASS — the bot plays deterministically, and the levels form a real gradient." : "FAIL"));

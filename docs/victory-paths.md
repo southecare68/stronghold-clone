@@ -84,6 +84,32 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   clock (`MatchClockTicks`, 0 = off). All four paths are wired; the metrics that
   exist today are gold (Economic), faith (Religious), and population (Domain).
 
+### The tech tree — the victory structure (shipped: spine + Religious branch)
+
+Per `tech.pdf`, **the tree *is* the victory structure**: the four paths are branches
+of one research web, and a branch's **capstone is what unlocks its HIGH goal**. The
+spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTree.cs`
++ `Tech.cs`):
+
+- **Research points** (`ResearchIdx`) bank every realm tick at a `ResearchPace`
+  (base + Roads), on the stock array like faith/gold.
+- **The web** (`TechTree.cs`): a shared trunk (Roads → Chapel/Market unlocks) and
+  the full Religious branch — Shrine → the Holy Order **fork** (Missionaries |
+  Zealotry, pick one) → Cathedral → **★ Grand Temple** capstone. Nodes carry
+  prereqs, fork groups, and a capstone flag; the researched set is a 128-bit mask
+  on the stock array.
+- **The dual-goal, as economics**: an **escalating cross-branch cost**
+  (`CrossBranchPenalty` per off-branch node) makes a second branch dear, and a
+  **capstone pick-limit** (`CapstoneLimit = 1`) means you can only capstone *one*
+  branch — so "depth in one + a dip into a second" is enforced by the tree itself.
+- **Capstone-gates-HIGH**: `Victory.Progress()` now requires a branch's capstone
+  (`TechTree.CapstoneFor`) before its HIGH goal counts. **75% faith no longer wins
+  on its own — you must research the Grand Temple.** Branches with no capstone yet
+  (Economic/Domain/Science) stay metric-only until ported.
+- **Research command** (`CommandType.Research`) takes through the normal charged,
+  validated path; the **AI** climbs its Religious branch to the capstone, so a bot
+  is a genuine crown threat (Normal & Hard reach Grand Temple in `AiSim`).
+
 ### Wired but dormant (waiting on later phases)
 
 - **Territories.** `TerritoryCount(owner)` counts live keeps — 1 in every current
@@ -92,7 +118,7 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   extra keeps, with no change to the scoring code. **This is the multi-territory
   seam** (see the decision below).
 - **Science** is a wired stub: a fourth path slot returning zero progress until
-  the tech-tree and wonder systems exist (Phase 4).
+  its tech branch (Library → University → Academy → Wonders) is filled in.
 
 ---
 
@@ -122,21 +148,23 @@ we **fix the shape now and implement it in Phase 3**:
 
 ## Roadmap
 
-Ordered by how much foundation already exists. Each phase is a plug-in to the
-spine, not a rewrite.
+The tech tree reframes the roadmap: the remaining work is **filling in branches**
+on the shipped tech spine. Each is a plug-in, not a rewrite.
 
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Victory spine — metrics, 80% announce, hold-timers, match clock | ✅ shipped |
-| **1** | Faith as a scored, reversible metric + the Church | ✅ shipped |
-| **2** | Economic scoring — a **market** for gold *velocity* + the 1M hoard on the HUD | next |
-| **3** | **Multi-territory** + Domain census + conquest/annexation | designed (above) |
-| **4** | Science — tech tree + wonders (visible, sabotageable) | greenfield |
-| **5** | War-as-tool (raid / loot / annex / sabotage) + the five spies | last — spies need a live, announced metric to bite |
+| **1** | Faith metric + the Church | ✅ shipped |
+| **T** | **Tech spine** — research economy, the web, capstone-gates-HIGH, cross-branch cost + **Religious branch** ported, AI climbs it | ✅ shipped |
+| **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | next |
+| **2** | **Economic branch** — Trade Post → Guild Charter (fork) → Banking House → Grand Exchange, wired to gold velocity + the 1M hoard | after the tech HUD |
+| **4** | **Science branch** — Library → University (fork) → Academy → **Wonders** (visible, sabotageable) | greenfield branch |
+| **3** | **Domain branch** + **multi-territory** — Provincial Keeps → Sovereign's Court, on the conquest/annexation system (designed above) | biggest lift |
+| **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, and the five spies | last — spies need live, announced metrics to bite |
 
-Spies land last on purpose: an Embezzler with no announced hoard, or an
-Inquisitor with no conversion score, has nothing to counter. Build at least two
-scored metrics first, then the daggers.
+The tech HUD comes next so a human can actually spend research (the AI already
+does). Spies land last on purpose: an Embezzler with no announced hoard, or an
+Inquisitor with no conversion score, has nothing to counter.
 
 ### Reserve (first expansion)
 
@@ -153,3 +181,5 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Windows: `AnnounceAt` (80%), `HoldTicksFor(path)`, `MatchClockTicks`
   (`Victory.cs`). Hold windows are in ticks (`TickRate` = 20/s) so they express
   the design's ~10–30 real minutes and tests can drive them exactly.
+- Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
+  (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.

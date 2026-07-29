@@ -25,6 +25,13 @@ static class Program
     static int _failures;
     static readonly Command[] None = Array.Empty<Command>();
 
+    // The Religious branch from the trunk up to its capstone, in dependency order.
+    static readonly int[] ReligiousToCapstone =
+    {
+        TechTree.Roads, TechTree.Chapel, TechTree.Shrine,
+        TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple,
+    };
+
     static void Main()
     {
         Console.WriteLine("Victory — faith, the four paths, and the crown\n");
@@ -99,6 +106,14 @@ static class Program
 
         TickUntil(sim, () => sim.Faith(1) >= 75, 6000);
         Check("the half-million banks the Economic MEDIUM", sim.Progress(1, VictoryPath.Economic).MediumBanked);
+        // Capstone gate: 75% faith alone is not the crown — the tech tree gates the
+        // Religious HIGH behind the Grand Temple.
+        Check("75% faith is not the HIGH goal without the capstone", !sim.Progress(1, VictoryPath.Religious).HighMet);
+
+        // Climb the Religious branch to its capstone; now the HIGH goal is live.
+        sim.AddResearch(1, 1000);
+        foreach (int id in ReligiousToCapstone) sim.TryResearch(1, id);
+        Check("the Grand Temple capstone unlocks the HIGH goal", sim.Progress(1, VictoryPath.Religious).HighMet);
         Check("no crown the instant the HIGH goal is first met", sim.VictoryOwner == -1);
 
         int need = Simulation.HoldTicksFor(VictoryPath.Religious);
@@ -136,6 +151,8 @@ static class Program
             Seed(sim, 1, 4);
             sim.AddGold(1, 500_000);
             sim.PlaceBuilding(BuildingType.Church, 1, 20, 20);
+            sim.AddResearch(1, 1000);
+            foreach (int id in ReligiousToCapstone) sim.TryResearch(1, id);   // unlock the Religious HIGH on both clients
         }
 
         int cap = Simulation.HoldTicksFor(VictoryPath.Religious) + 4000;

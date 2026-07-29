@@ -139,6 +139,14 @@ namespace Sim
                     highMet = false; medMet = false; highPct = 0;
                     break;
             }
+
+            // Capstone gate: the tech tree IS the victory structure, so a HIGH goal
+            // only counts once its branch capstone is researched. A branch with no
+            // capstone defined yet (Economic/Domain/Science, until ported) is ungated,
+            // so its HIGH stays metric-only for now.
+            int capstone = TechTree.CapstoneFor(TechTree.BranchOf(path));
+            if (capstone >= 0 && !IsTechResearched(owner, capstone)) highMet = false;
+
             return new VictoryProgress(highMet, medMet, highPct, hold, HoldTicksFor(path), banked, announced);
         }
 

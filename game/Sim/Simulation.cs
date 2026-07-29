@@ -18,7 +18,7 @@ namespace Sim
     public enum CommandType
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
-        SetTax = 9, SetRations = 10,
+        SetTax = 9, SetRations = 10, Research = 11,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15 }
@@ -351,7 +351,12 @@ namespace Sim
         //   Ann   — 1 once the realm has been told this owner crossed 80% of a HIGH goal
         const int VicHoldBase = 11, VicMedBase = 15, VicAnnBase = 19;  // 4 paths each
         const int PathCount = 4;
-        const int StockWidth = 23;                             // 6 resources + gold/pop/tax/ration + faith + 12 victory slots
+        // Research and the tech web (see TechTree.cs / Tech.cs). Banked research
+        // points, then a 128-bit researched-node bitmask — both on the stock array,
+        // so they snapshot / wire / checksum for free like everything else here.
+        const int ResearchIdx = 23;
+        const int TechBase = 24, TechWords = 4;                // 24..27 — up to 128 node Ids
+        const int StockWidth = 28;                             // 6 resources + gold/pop/tax/ration + faith + 12 victory + research + 4 tech words
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
@@ -1144,6 +1149,10 @@ namespace Sim
                 case CommandType.SetRations:   // X carries the ration step (0..RationSteps-1)
                     StockOf(cmd.Owner)[RationIdx] = Math.Clamp(cmd.X, 0, RationSteps - 1);
                     break;
+
+                case CommandType.Research:     // X carries the tech node Id
+                    TryResearch(cmd.Owner, cmd.X);   // validates prereqs/fork/limit/cost (Tech.cs)
+                    break;
             }
         }
 
@@ -1684,6 +1693,10 @@ namespace Sim
                 // Taxation moves the treasury; a bribe (negative) is paid, never below zero.
                 int gold = s[GoldIdx] + TaxGold[tax] * peasants;
                 s[GoldIdx] = gold < 0 ? 0 : gold;
+
+                // Research accrues every realm tick at the realm's pace (Tech.cs), the
+                // currency that climbs the tech web toward a capstone.
+                s[ResearchIdx] += ResearchPace(owner);
 
                 // Rations eat food; if the larder cannot cover them the people go
                 // hungry (the harshest popularity hit), whatever the setting says.
