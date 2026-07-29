@@ -179,7 +179,7 @@ public partial class World3D : Node3D
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Granary,
-        BuildingType.Church, BuildingType.Wonder,
+        BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -1465,6 +1465,14 @@ public partial class World3D : Node3D
             wb.Disabled = !unlocked;
             wb.Text = unlocked ? $"Wonder\n{CostText(BuildingType.Wonder)}" : "Wonder\n🔒 Academy";
             wb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
+        }
+        // A new Keep founds a new territory — locked until Provincial Keeps (Domain).
+        if (_buildButtons.TryGetValue(BuildingType.Keep, out var kb))
+        {
+            bool unlocked = _sim.IsTechResearched(me, TechTree.ProvincialKeeps);
+            kb.Disabled = !unlocked;
+            kb.Text = unlocked ? $"Keep\n{CostText(BuildingType.Keep)}" : "Keep\n🔒 Prov. Keeps";
+            kb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
         }
 
         _selInfo.Text =
@@ -3538,7 +3546,7 @@ public partial class World3D : Node3D
             {
                 0 => $"{_sim.Gold(me):N0} / 1,000,000 gold",
                 1 => $"{_sim.Faith(me)}% / 75% converted",
-                2 => $"{_sim.PeasantCount(me):N0} / 5,000 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
+                2 => $"{_sim.PeasantCount(me):N0} / 250 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
                 _ => $"{_sim.ResearchedCount(me, TechBranch.Science)} / 4 tree   ·   {_sim.WonderCount(me)} / 2 wonders",
             };
             string mark = p.MediumBanked ? "   ✓ medium" : "";

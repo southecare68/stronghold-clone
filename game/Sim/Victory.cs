@@ -55,8 +55,12 @@ namespace Sim
         // (The design's "+ the faith of N other territories" clause reads through
         // TerritoryCount and is dormant until multi-territory ships — Phase 3.)
         const int RelHighFaith = 75, RelMedFaith = 50;
-        // Domain — the census: a great population across many keeps.
-        const int DomHighPop = 5000, DomMedPop = 2500;
+        // Domain — the census: a great population across many keeps. The design's
+        // 5,000 assumes a far larger-scale game; at this prototype's scale (dozens of
+        // real units per realm, thousands would not be performant) the population
+        // targets are scaled down, while the territory counts (5 / 2 keeps) — the
+        // path's identity — stand. Tunable; see docs/victory-paths.md.
+        const int DomHighPop = 250, DomMedPop = 120;
         const int DomHighTerr = 5, DomMedTerr = 2;
         // Science — the tech tree + wonders. The Academy capstone completes the branch
         // and unlocks Wonders; the HIGH is two of them, the MEDIUM one. (The design's

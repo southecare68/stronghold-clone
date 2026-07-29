@@ -84,7 +84,7 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   clock (`MatchClockTicks`, 0 = off). All four paths are wired; the metrics that
   exist today are gold (Economic), faith (Religious), and population (Domain).
 
-### The tech tree — the victory structure (shipped: spine + Religious / Economic / Science branches + HUD)
+### The tech tree — the victory structure (shipped: spine + all four branches + HUD)
 
 Per `tech.pdf`, **the tree *is* the victory structure**: the four paths are branches
 of one research web, and a branch's **capstone is what unlocks its HIGH goal**. The
@@ -122,6 +122,16 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   (`BuildCostFor`). The Science HIGH is **two wonders** (the MED is one); research
   nodes along the way quicken `ResearchPace`. The Wonder sits in the build palette,
   locked until the Academy stands.
+- **Domain branch + multi-territory**: Farmstead → Husbandry → the Settlement fork
+  (Homesteads = ×4 housing | Colonists = faster growth) → **Provincial Keeps** →
+  the **Sovereign's Court** capstone. Provincial Keeps lets you **found a new keep**
+  through the build palette — each keep is a new **territory** (`TerritoryCount`),
+  costs dear, and must sit `KeepSpacing` clear of your others (a real territory, not
+  a cluster); the first keep keeps its drop-off so the original economy holds.
+  Homesteads multiplies `PopulationCap`, Husbandry/Colonists add arrivals while a
+  realm grows. The Domain HIGH is **population + 5 territories** (capstone-gated).
+  *Peaceful expansion only for now — conquest/annexation (taking a territory by
+  force) lands with the war layer.*
 
 ### Wired but dormant (waiting on later phases)
 
@@ -135,7 +145,12 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
 
 ---
 
-## Decision: the multi-territory model (design now, build later)
+## Decision: the multi-territory model (peaceful expansion shipped; conquest next)
+
+> **Status:** the seam below is now live for **peaceful expansion** — a Domain
+> player founds new keeps (each a territory) once Provincial Keeps is researched.
+> **Conquest/annexation** — taking an *enemy's* keep and its population by force —
+> is the remaining half, and lands with the war & espionage layer.
 
 Two paths depend on holding more than one territory, but our world today is one
 home territory per player. Rather than build conquest now or stub the goals away,
@@ -172,8 +187,8 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | ✅ shipped |
 | **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the 1M HIGH | ✅ shipped |
 | **4** | **Science branch** — Scholar's Hut → Library → University fork → Academy → **Wonders** (the new buildable); HIGH = 2 wonders, MED = 1, capstone-gated | ✅ shipped |
-| **3** | **Domain branch** + **multi-territory** — Provincial Keeps → Sovereign's Court, on the conquest/annexation system (designed above) | next (biggest lift) |
-| **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, and the five spies | last — spies need live, announced metrics to bite |
+| **3** | **Domain branch + multi-territory** — Farmstead → Husbandry → Settlement fork → Provincial Keeps → **★ Sovereign's Court**; **found new keeps** (each a territory), Homesteads multiplies housing, Husbandry/Colonists speed growth; HIGH = pop + 5 territories | ✅ shipped (peaceful expansion) |
+| **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, the five spies, **and conquest/annexation** (take a territory by force) | next — spies need live metrics to bite; conquest completes Domain |
 
 The tech HUD comes next so a human can actually spend research (the AI already
 does). Spies land last on purpose: an Embezzler with no announced hoard, or an
@@ -202,3 +217,7 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Science: research-pace nodes `LibraryPace`/`ScholarshipPace`/`PrintingPace`
   (`Tech.cs`); Wonder base cost in `BuildCost`, its escalation + Engineering
   discount in `BuildCostFor`; `SciHighWonders`/`SciMedWonders` (`Victory.cs`).
+- Domain: `HomesteadMult`, `KeepSpacing`, Keep build cost in `BuildCost`
+  (`Simulation.cs`); `DomHighPop`/`DomMedPop`/`DomHighTerr`/`DomMedTerr`
+  (`Victory.cs`) — the pop targets are scaled to the prototype (see the census
+  note), the territory counts follow the design.

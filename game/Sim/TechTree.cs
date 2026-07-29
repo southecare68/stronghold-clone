@@ -51,18 +51,21 @@ namespace Sim
         // Node Ids — stable, never renumber (they are bit positions in the researched
         // mask). Grouped by branch with room to grow between groups.
         // Trunk 0..9
-        public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3;   // + Farmstead / Muster when their branches land
+        public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3, Farmstead = 4;   // + Muster when the war layer lands
         // Religious 10..19
         public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14;
         // Economic 20..29
         public const int TradePost = 20, Monopoly = 21, Bourse = 22, BankingHouse = 23, GrandExchange = 24;
         // Science 30..39
         public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34;
+        // Domain 40..49
+        public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44;
 
         // Fork groups.
         const int ForkHolyOrder = 1;    // Missionaries | Zealotry
         const int ForkGuild = 2;        // Monopoly | Bourse
         const int ForkUniversity = 3;   // Engineering | Scholarship
+        const int ForkSettlement = 4;   // Homesteads | Colonists
 
         // The registry, indexed by Id (gaps are null). Kept small and explicit; the
         // spine ships the trunk unlocks + the full Religious branch, with one Economic
@@ -78,6 +81,7 @@ namespace Sim
                 new TechNode(Chapel,      "Chapel",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Religious
                 new TechNode(Market,      "Market",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Economic
                 new TechNode(ScholarsHut, "Scholar's Hut", TechBranch.Trunk, 0, 10, new[] { Roads }),  // → Science
+                new TechNode(Farmstead,   "Farmstead",    TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Domain
 
                 // --- Religious branch: Chapel → Shrine → (fork) → Cathedral → ★ ------
                 new TechNode(Shrine,       "Shrine",       TechBranch.Religious, 1, 15, new[] { Chapel }),
@@ -99,6 +103,13 @@ namespace Sim
                 new TechNode(Scholarship,  "Scholarship",   TechBranch.Science, 2, 24, new[] { Library }, forkGroup: ForkUniversity),
                 new TechNode(PrintingPress,"Printing Press",TechBranch.Science, 3, 36, new[] { Library }, requiresFork: ForkUniversity),
                 new TechNode(Academy,      "Academy",       TechBranch.Science, 4, 58, new[] { PrintingPress }, capstone: true),   // unlocks Wonders
+
+                // --- Domain branch: Farmstead → Husbandry → (fork) → Keeps → ★ ------
+                new TechNode(Husbandry,      "Husbandry",       TechBranch.Domain, 1, 15, new[] { Farmstead }),   // food variety → faster growth
+                new TechNode(Homesteads,     "Homesteads",      TechBranch.Domain, 2, 24, new[] { Husbandry }, forkGroup: ForkSettlement),   // raise capacity
+                new TechNode(Colonists,      "Colonists",       TechBranch.Domain, 2, 24, new[] { Husbandry }, forkGroup: ForkSettlement),   // settle faster
+                new TechNode(ProvincialKeeps,"Provincial Keeps",TechBranch.Domain, 3, 36, new[] { Husbandry }, requiresFork: ForkSettlement),   // lets you found new keeps
+                new TechNode(SovereignsCourt,"Sovereign's Court",TechBranch.Domain, 4, 58, new[] { ProvincialKeeps }, capstone: true),
             };
 
             int max = 0;

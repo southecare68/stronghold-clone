@@ -38,6 +38,10 @@ static class Program
         TheScienceBranchClimbsToItsCapstone();
         WondersAreGatedAndEscalate();
         TheScienceMetricCountsTreeAndWonders();
+        TheDomainBranchClimbsToItsCapstone();
+        FoundingKeepsGrowsTerritory();
+        HomesteadsRaiseThePopulationCap();
+        TheSovereignsCourtGatesTheDomainHigh();
         TheResearchCommandTakes();
         TwoClientsAgreeOnResearch();
 
@@ -238,6 +242,88 @@ static class Program
         Check("two wonders + the Academy take the HIGH", sim.Progress(1, VictoryPath.Science).HighMet);
     }
 
+    // The Domain branch: Farmstead → Husbandry → the Settlement fork → Provincial
+    // Keeps → the Sovereign's Court capstone.
+    static void TheDomainBranchClimbsToItsCapstone()
+    {
+        Console.WriteLine("the Domain branch climbs to its capstone:");
+        var sim = Realm();
+        sim.AddResearch(1, 1000);
+        sim.TryResearch(1, TechTree.Roads);
+        sim.TryResearch(1, TechTree.Farmstead);
+
+        Check("Husbandry opens after Farmstead", sim.TryResearch(1, TechTree.Husbandry));
+        Check("Provincial Keeps refused before the Settlement fork", !sim.CanResearch(1, TechTree.ProvincialKeeps));
+        Check("Homesteads can be taken at the fork", sim.TryResearch(1, TechTree.Homesteads));
+        Check("its sibling Colonists is now closed", !sim.CanResearch(1, TechTree.Colonists));
+        Check("Provincial Keeps opens after the fork", sim.TryResearch(1, TechTree.ProvincialKeeps));
+        Check("and the Sovereign's Court capstone follows", sim.TryResearch(1, TechTree.SovereignsCourt));
+        Check("Sovereign's Court is the Domain capstone", TechTree.CapstoneFor(TechBranch.Domain) == TechTree.SovereignsCourt);
+    }
+
+    // Multi-territory: a new keep founds a new territory — gated by Provincial Keeps,
+    // spaced clear of your others, and it must not steal the first keep's drop-off.
+    static void FoundingKeepsGrowsTerritory()
+    {
+        Console.WriteLine("founding keeps grows territory:");
+        var sim = new Simulation(TileMap.Open(96));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 10, 10);   // the founding keep (setup path)
+        sim.AddResource(1, ResourceType.Wood, 3000);
+        sim.AddResource(1, ResourceType.Stone, 3000);
+        Check("one territory to start", sim.TerritoryCount(1) == 1);
+
+        BuildAt(sim, BuildingType.Keep, 40, 10);
+        Check("a new keep is refused without Provincial Keeps", sim.TerritoryCount(1) == 1);
+
+        sim.AddResearch(1, 1000);
+        foreach (int id in new[] { TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry, TechTree.Homesteads, TechTree.ProvincialKeeps })
+            sim.TryResearch(1, id);
+
+        BuildAt(sim, BuildingType.Keep, 12, 12);
+        Check("a keep too close to another is refused", sim.TerritoryCount(1) == 1);
+
+        var drop0 = sim.DropOffs[1];
+        BuildAt(sim, BuildingType.Keep, 40, 10);
+        Check("a spaced keep founds a second territory", sim.TerritoryCount(1) == 2);
+        Check("and the first territory keeps its drop-off",
+              sim.DropOffs[1].X == drop0.X && sim.DropOffs[1].Y == drop0.Y);
+    }
+
+    // Homesteads (Domain fork) multiplies the whole realm's housing capacity.
+    static void HomesteadsRaiseThePopulationCap()
+    {
+        Console.WriteLine("homesteads raise the population cap:");
+        var sim = Realm();
+        sim.PlaceBuilding(BuildingType.House, 1, 20, 20);
+        sim.PlaceBuilding(BuildingType.House, 1, 24, 20);
+        int baseCap = sim.PopulationCap(1);
+        sim.AddResearch(1, 1000);
+        foreach (int id in new[] { TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry, TechTree.Homesteads })
+            sim.TryResearch(1, id);
+        Check("Homesteads multiplies the cap", sim.PopulationCap(1) > baseCap);
+    }
+
+    // The Domain HIGH is capstone-gated: population and five territories are not the
+    // crown until the Sovereign's Court sustains them.
+    static void TheSovereignsCourtGatesTheDomainHigh()
+    {
+        Console.WriteLine("the Sovereign's Court gates the Domain HIGH:");
+        var sim = new Simulation(TileMap.Open(96));
+        foreach (var (kx, ky) in new[] { (10, 10), (40, 10), (70, 10), (10, 40), (40, 40) })
+            sim.PlaceBuilding(BuildingType.Keep, 1, kx, ky);
+        Check("five keeps, five territories", sim.TerritoryCount(1) == 5);
+
+        for (int i = 0; i < 260; i++) sim.SpawnPeasant(1);
+        Check("population is over the Domain HIGH mark", sim.PeasantCount(1) >= 250);
+
+        Check("but pop + land is not the crown without the capstone",
+              !sim.Progress(1, VictoryPath.Domain).HighMet);
+        sim.AddResearch(1, 1000);
+        foreach (int id in DomainPlan) sim.TryResearch(1, id);
+        Check("the Sovereign's Court unlocks the Domain HIGH",
+              sim.Progress(1, VictoryPath.Domain).HighMet);
+    }
+
     // Research also takes through the ordinary command path, charged and validated
     // exactly like a human clicking a node.
     static void TheResearchCommandTakes()
@@ -296,6 +382,12 @@ static class Program
     {
         TechTree.Roads, TechTree.ScholarsHut, TechTree.Library,
         TechTree.Engineering, TechTree.PrintingPress, TechTree.Academy,
+    };
+
+    static readonly int[] DomainPlan =
+    {
+        TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry,
+        TechTree.Homesteads, TechTree.ProvincialKeeps, TechTree.SovereignsCourt,
     };
 
     static void BuildAt(Simulation sim, BuildingType t, int x, int y)

@@ -394,6 +394,11 @@ namespace Sim
         // a starting court; every house shelters ten more.
         const int HousingPerHouse = 10;
         const int KeepHousing = 8;                              // the keep's own household
+        // Domain branch (see Tech.cs): Homesteads multiplies a realm's whole housing
+        // capacity, and founding a new keep needs it spaced well clear of the others —
+        // a genuine new territory, not a cluster of keeps on one spot.
+        const int HomesteadMult = 4;
+        const int KeepSpacing = 20;                             // tiles between your keeps
 
         // Army upkeep. A standing army eats: every so often each soldier draws a
         // little food from the larder. Peasants are not charged here — their food
@@ -440,7 +445,7 @@ namespace Sim
         static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3 };
         static readonly int[][] BuildCost =
         {
-            new[] { 30, 20, 0 },   // Keep
+            new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
             new[] { 40, 0, 0 },    // Barracks
             new[] { 0, 5, 0 },     // Wall — cheap stone, meant to be spammed
             new[] { 10, 10, 0 },   // Gatehouse
@@ -880,8 +885,15 @@ namespace Sim
             // worker could path to or stand on).
             if (type == BuildingType.Keep)
             {
-                var drop = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
-                SetDropOff(owner, drop.X, drop.Y);
+                // A FOUNDING keep sets the realm's drop-off; a SECOND keep (a new
+                // territory) must not hijack it, or every worker would suddenly haul to
+                // the new keep and the first territory's economy would jam. So only the
+                // first keep claims the drop-off.
+                if (!_dropOff.ContainsKey(owner))
+                {
+                    var drop = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
+                    SetDropOff(owner, drop.X, drop.Y);
+                }
                 // Open this camp's realm the first time its keep goes up: content
                 // (so it grows), no taxes, full rations. The array is zero-filled, so
                 // these must be set explicitly.
@@ -1061,6 +1073,12 @@ namespace Sim
                     // A Wonder is science-exclusive: raised only once the Academy
                     // capstone stands, and refused otherwise.
                     if (type == BuildingType.Wonder && !IsTechResearched(cmd.Owner, TechTree.Academy)) break;
+                    // Founding a NEW keep — a new territory — needs Provincial Keeps
+                    // (Domain branch), and it must sit well clear of your other keeps
+                    // so it is its own land, not a cluster. (The match's first keep is
+                    // placed at setup through PlaceBuilding, which skips all of this.)
+                    if (type == BuildingType.Keep &&
+                        (!IsTechResearched(cmd.Owner, TechTree.ProvincialKeeps) || !KeepFarEnough(cmd.Owner, cmd.X, cmd.Y))) break;
                     // A turret or gatehouse raised on one of your own walls replaces
                     // that segment — a tower or gateway sits IN the line, so it drops
                     // straight into a finished wall rather than being refused.
@@ -1741,7 +1759,14 @@ namespace Sim
                 s[FaithIdx] = Math.Clamp(faith + Math.Clamp(faithTarget - faith, -ConvertRate, ConvertRate), 0, 100);
 
                 int net = pop >= 80 ? 2 : pop > 50 ? 1 : pop == 50 ? 0 : pop < 20 ? -2 : -1;
-                if (net > 0) for (int i = 0; i < net && PeasantCount(owner) < cap; i++) SpawnPeasant(owner);
+                // The Domain branch quickens settling: Husbandry and Colonists each add
+                // an arrival when the realm is already growing (0 effect otherwise).
+                if (net > 0)
+                {
+                    net += (IsTechResearched(owner, TechTree.Husbandry) ? 1 : 0)
+                         + (IsTechResearched(owner, TechTree.Colonists) ? 1 : 0);
+                    for (int i = 0; i < net && PeasantCount(owner) < cap; i++) SpawnPeasant(owner);
+                }
                 else if (net < 0) for (int i = 0; i < -net; i++) EmigrateOnePeasant(owner);
             }
         }
@@ -1770,7 +1795,24 @@ namespace Sim
                 if (b.Type == BuildingType.Keep) cap += KeepHousing;
                 else if (b.Type == BuildingType.House) cap += HousingPerHouse;
             }
+            // Homesteads (Domain branch) raises the whole realm's capacity — the room
+            // a census-racer needs to grow the population its crown counts.
+            if (IsTechResearched(owner, TechTree.Homesteads)) cap *= HomesteadMult;
             return cap;
+        }
+
+        // Can a new keep sit here — far enough from this owner's other keeps to be its
+        // OWN territory rather than a cluster? Measured keep-centre to keep-centre.
+        bool KeepFarEnough(int owner, int x, int y)
+        {
+            int cx = x + FootW[(int)BuildingType.Keep] / 2, cy = y + FootH[(int)BuildingType.Keep] / 2;
+            foreach (var b in Buildings)
+                if (b.Alive && b.Owner == owner && b.Type == BuildingType.Keep)
+                {
+                    int dx = b.CenterX - cx, dy = b.CenterY - cy;
+                    if (dx * dx + dy * dy < KeepSpacing * KeepSpacing) return false;
+                }
+            return true;
         }
 
         // How many peasants an owner currently has (population, not army).
