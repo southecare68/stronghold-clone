@@ -37,11 +37,11 @@ namespace Sim
         // play (it still obeys fog, cost, and placement like anyone else).
         readonly struct AiTuning
         {
-            public readonly int Interval, FoodChains, Woodcutters, MaxHouses, ArmyCap, AttackAt, BonusPeasants, BonusWood, BonusFood;
-            public AiTuning(int interval, int foodChains, int woodcutters, int maxHouses, int armyCap, int attackAt, int bonusPeasants, int bonusWood, int bonusFood)
+            public readonly int Interval, FoodChains, Woodcutters, MaxHouses, ArmyCap, AttackAt, BonusPeasants, BonusWood, BonusFood, Churches;
+            public AiTuning(int interval, int foodChains, int woodcutters, int maxHouses, int armyCap, int attackAt, int bonusPeasants, int bonusWood, int bonusFood, int churches)
             {
                 Interval = interval; FoodChains = foodChains; Woodcutters = woodcutters; MaxHouses = maxHouses;
-                ArmyCap = armyCap; AttackAt = attackAt; BonusPeasants = bonusPeasants; BonusWood = bonusWood; BonusFood = bonusFood;
+                ArmyCap = armyCap; AttackAt = attackAt; BonusPeasants = bonusPeasants; BonusWood = bonusWood; BonusFood = bonusFood; Churches = churches;
             }
         }
 
@@ -52,10 +52,10 @@ namespace Sim
         // would never actually grow. It feeds the head start until the bakeries bake.
         static AiTuning TuningFor(AiLevel level) => level switch
         {
-            //                          interval chains wood houses armyCap attackAt +peas +wood +food
-            AiLevel.Easy   => new AiTuning(30,     1,    1,    1,      4,      4,      0,     0,     0),
-            AiLevel.Hard   => new AiTuning(8,      2,    2,    6,     30,      6,     10,   400,   200),
-            _  /* Normal*/ => new AiTuning(12,     1,    2,    3,     12,      5,      4,   150,    60),
+            //                          interval chains wood houses armyCap attackAt +peas +wood +food churches
+            AiLevel.Easy   => new AiTuning(30,     1,    1,    1,      4,      4,      0,     0,     0,    0),
+            AiLevel.Hard   => new AiTuning(8,      2,    2,    6,     30,      6,     10,   400,   200,    4),
+            _  /* Normal*/ => new AiTuning(12,     1,    2,    3,     12,      5,      4,   150,    60,    2),
         };
 
         const int AiWorkerReserve = 1;  // idle peasants to keep spare (buildings hire the rest)
@@ -110,6 +110,16 @@ namespace Sim
                 AiBuildHarvester(owner, keep, BuildingType.WoodcutterHut, ResourceType.Wood)) return;
             if (AiCount(owner, BuildingType.Quarry) < 1 &&
                 AiBuildHarvester(owner, keep, BuildingType.Quarry, ResourceType.Stone)) return;
+
+            // 3b) Churches win hearts, not bread. Workerless like a house, so they
+            //     never starve the economy; they raise the realm's FAITH toward the
+            //     religious crown. Raised out here, once a quarry is feeding stone, so
+            //     the bot contests the faith path in earnest — more churches on a
+            //     tougher bot (sized to cover more of its people), none on Easy. When
+            //     stone is still short the buy simply fails and the ladder falls
+            //     through to the army, so this never deadlocks.
+            if (AiCount(owner, BuildingType.Church) < t.Churches &&
+                AiBuildByKeep(owner, keep, BuildingType.Church)) return;
 
             // 4) Arm the surplus peasants up to the cap, then send the army out.
             if (AiTryTrain(owner, t.ArmyCap)) return;
