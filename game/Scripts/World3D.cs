@@ -1233,7 +1233,7 @@ public partial class World3D : Node3D
     // you pay the people up to a ruinous squeeze (Simulation.TaxSteps of them);
     // rations from an empty table up to a feast (Simulation.RationSteps).
     static readonly string[] TaxNames = { "Bribe", "Gift", "None", "Low", "Fair", "High", "Cruel" };
-    static readonly string[] RationNames = { "None", "Half", "Full", "Extra" };
+    static readonly string[] RationNames = { "None", "Scant", "Lean", "Full", "Hearty", "Rich", "Feast" };
 
     void SetupHud()
     {

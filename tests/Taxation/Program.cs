@@ -50,8 +50,9 @@ static class Program
     {
         Console.WriteLine("tax turns a populace into gold:");
         var sim = Realm(out _);
-        Order(sim, SetTax(1, 4));       // +2 gold a head; -4 popularity...
-        Order(sim, SetRations(1, 3));   // ...paid off by a lavish table (+4)
+        Order(sim, SetTax(1, 4));       // +2 gold a head; -3 popularity...
+        sim.AddResource(1, ResourceType.Food, 5000);
+        Order(sim, SetRations(1, 4));   // ...paid off by a hearty table (+3): net zero
         Seed(sim, 1, 6);
 
         Ticks(sim, 80);
@@ -86,7 +87,7 @@ static class Program
     {
         Console.WriteLine("\nrations eat the larder every realm tick:");
         var full = Realm(out _);
-        Order(full, SetRations(1, 2));                 // full table
+        Order(full, SetRations(1, 3));                 // full table
         full.AddResource(1, ResourceType.Food, 500);
         Seed(full, 1, 8);
         Ticks(full, 400);
@@ -109,7 +110,7 @@ static class Program
     {
         Console.WriteLine("\nan order you cannot feed still starves the realm:");
         var sim = Realm(out _);
-        Order(sim, SetRations(1, 3));   // "extra" on paper...
+        Order(sim, SetRations(1, 6));   // a Feast on paper...
         Seed(sim, 1, 6);                // ...but not a scrap of food banked
         Ticks(sim, 120);
         Check($"popularity fell despite the lavish order ({sim.Popularity(1)} < 55)",
@@ -117,18 +118,18 @@ static class Program
     }
 
     // RationDemand is the food one realm tick will draw at the current order — the
-    // number the sim spends AND the HUD reads to warn "STARVING". One formula, so
-    // the two can never disagree: None nothing, Half a quarter-loaf a head, Full a
-    // half, Extra three-quarters. Eight heads make the fractions land clean.
+    // number the sim spends AND the HUD reads to warn "STARVING". One formula
+    // (peasants x level / 6), so the two can never disagree: None nothing, a Full
+    // table (level 3) half a loaf a head, a Feast (level 6) a whole loaf. Twelve
+    // heads make the fractions land clean.
     static void RationDemandScalesWithTheOrder()
     {
         Console.WriteLine("\nration demand scales with the order:");
         var sim = Realm(out _);
-        Seed(sim, 1, 8);
+        Seed(sim, 1, 12);
         Order(sim, SetRations(1, 0)); Check($"None asks for nothing ({sim.RationDemand(1)})", sim.RationDemand(1) == 0);
-        Order(sim, SetRations(1, 1)); Check($"Half asks a quarter each ({sim.RationDemand(1)})", sim.RationDemand(1) == 2);
-        Order(sim, SetRations(1, 2)); Check($"Full asks a half each ({sim.RationDemand(1)})", sim.RationDemand(1) == 4);
-        Order(sim, SetRations(1, 3)); Check($"Extra asks three-quarters ({sim.RationDemand(1)})", sim.RationDemand(1) == 6);
+        Order(sim, SetRations(1, 3)); Check($"a full table asks half a loaf each ({sim.RationDemand(1)})", sim.RationDemand(1) == 6);
+        Order(sim, SetRations(1, 6)); Check($"a Feast asks a whole loaf each ({sim.RationDemand(1)})", sim.RationDemand(1) == 12);
     }
 
     // The point of the whole loop: keep people fed and fairly taxed and popularity
@@ -138,7 +139,7 @@ static class Program
         Console.WriteLine("\na fed, content realm grows:");
         var sim = Realm(out _);
         sim.AddResource(1, ResourceType.Food, 5000);
-        Order(sim, SetRations(1, 2));   // full table (defaults would do, but be explicit)
+        Order(sim, SetRations(1, 4));   // a hearty table (+3), on top of the default light tax
         Seed(sim, 1, 2);                // room under the keep's roof to grow into
 
         int before = Peasants(sim, 1);

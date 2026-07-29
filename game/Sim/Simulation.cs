@@ -350,16 +350,18 @@ namespace Sim
         // Tax rate steps (index 0..6): gold taken per peasant per realm tick (negative
         // = a bribe you PAY out), and the popularity it costs or wins.
         //
-        // Tax and rations trade on the SAME popularity scale — a uniform step of 3,
-        // symmetric about a neutral middle — so the two dials offset one another
-        // exactly: every step you raise tax (-3) is bought back by one step of richer
-        // rations (+3). Tax is neutral at "Low" (index 3); rations at "Full" (index 2).
+        // Tax and rations trade on the SAME popularity scale — SEVEN steps each, a
+        // uniform step of 3 spanning +9..-9, symmetric about a neutral middle (index
+        // 3) — so the two dials offset one another EXACTLY at every level: crank tax to
+        // Cruel (-9) and a Feast table (+9) buys it all back. Tax also moves gold, and
+        // richer rations eat more food, so they still cost different things.
         static readonly int[] TaxGold = { -2, -1, 0, 1, 2, 3, 4 };
-        static readonly int[] TaxPop  = {  9,  6, 3,  0, -3, -6, -9 };
-        // Ration steps (index 0..3 = none, half, full, extra): the popularity each
-        // wins; the food each eats is a fraction of the head-count (see ResolveRealm).
-        static readonly int[] RationPop = { -6, -3, 0, 3 };
-        public const int TaxSteps = 7, RationSteps = 4;
+        static readonly int[] TaxPop  = {  9,  6,  3,  0, -3, -6, -9 };
+        // Ration steps (index 0..6, None..Feast): the popularity each wins or costs;
+        // the food each eats scales with the level (see RationDemand). Neutral at
+        // index 3 (a full table): no popularity either way, the ordinary ration.
+        static readonly int[] RationPop = { -9, -6, -3, 0, 3, 6, 9 };
+        public const int TaxSteps = 7, RationSteps = 7;
 
         // Population is capped by HOUSING: a peasant needs a roof. The keep shelters
         // a starting court; every house shelters ten more.
@@ -736,7 +738,7 @@ namespace Sim
         public int Gold(int owner) => _stock.TryGetValue(owner, out var s) ? s[GoldIdx] : 0;
         public int Popularity(int owner) => _stock.TryGetValue(owner, out var s) ? s[PopIdx] : 50;
         public int TaxLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[TaxIdx] : 2;
-        public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 2;
+        public int RationLevel(int owner) => _stock.TryGetValue(owner, out var s) ? s[RationIdx] : 3;
 
         // The effects a tax/ration STEP has, for a management UI to show before you
         // commit to it — read straight off the same tables ResolveRealm settles by,
@@ -750,13 +752,14 @@ namespace Sim
         // The food one realm tick's rations will draw at the current order and
         // head-count. If the larder holds less than this, the people go hungry
         // whatever the order says (ResolveRealm), and the HUD flags it as starving.
-        // The fractions: None 0, Half a quarter-loaf each, Full a half, Extra
-        // three-quarters — so a fuller table wins approval but eats far more food.
+        // Food scales with the level: nothing at None, half a loaf a head at the
+        // neutral full table (index 3), a whole loaf at a Feast (index 6) — so a
+        // richer table wins approval but eats far more food.
         public int RationDemand(int owner)
         {
             int peasants = PeasantCount(owner);
             int ration = Math.Clamp(RationLevel(owner), 0, RationSteps - 1);
-            return ration == 0 ? 0 : ration == 1 ? peasants / 4 : ration == 2 ? peasants / 2 : (peasants * 3) / 4;
+            return peasants * ration / 6;
         }
 
         public int NextNodeId => _nextNodeId;
@@ -822,7 +825,7 @@ namespace Sim
                 // these must be set explicitly.
                 var s = StockOf(owner);
                 if (s[PopIdx] == 0 && s[TaxIdx] == 0 && s[RationIdx] == 0)
-                { s[PopIdx] = StartPopularity; s[TaxIdx] = 2; s[RationIdx] = 2; }
+                { s[PopIdx] = StartPopularity; s[TaxIdx] = 2; s[RationIdx] = 3; }
             }
 
             // A work building does NOT come with a worker any more: peasants are
