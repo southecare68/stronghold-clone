@@ -248,33 +248,36 @@ public partial class World3D : Node3D
         new[] { "###", "  #", "###", "  #", "###" },  // 3
     };
 
-    // Stamp a food digit (scaled 2x, with a dark drop-shadow for contrast) into the
-    // RGBA byte buffer, centred in the tile's cell. Colour tracks the grade.
-    static void DrawDigit(byte[] d, int W, int px, int py, int cell, int v)
+    // A small square texture of one food digit — the 3x5 glyph scaled up with a dark
+    // outline, coloured by grade — used on the billboarded number quads.
+    static ImageTexture MakeDigitTex(int v)
     {
-        if (v < 1 || v >= Digit3x5.Length) return;
         var pat = Digit3x5[v];
-        const int s = 2;                            // 3x5 -> 6x10
-        int ox = px + (cell - 3 * s) / 2, oy = py + (cell - 5 * s) / 2;
+        const int s = 8, pad = 6;                   // 3x5 -> 24x40 glyph
+        int dim = 5 * s + pad * 2;                  // 52 square; digit centred
+        int ox = (dim - 3 * s) / 2, oy = pad;
+        var data = new byte[dim * dim * 4];
         (byte r, byte g, byte b) c =
-            v >= 3 ? ((byte)110, (byte)255, (byte)90) :
-            v == 2 ? ((byte)255, (byte)235, (byte)100) :
-                     ((byte)225, (byte)248, (byte)210);
+            v >= 3 ? ((byte)120, (byte)255, (byte)100) :
+            v == 2 ? ((byte)255, (byte)232, (byte)90) :
+                     ((byte)232, (byte)250, (byte)222);
         void Put(int x, int y, byte r, byte g, byte b, byte a)
-        { if (x >= 0 && y >= 0 && x < W && y < W) { int i = (y * W + x) * 4; d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a; } }
-        for (int pass = 0; pass < 2; pass++)        // shadow first, then the digit on top
-            for (int r = 0; r < 5; r++)
-                for (int col = 0; col < 3; col++)
-                {
-                    if (pat[r][col] != '#') continue;
+        { if (x >= 0 && y >= 0 && x < dim && y < dim) { int i = (y * dim + x) * 4; data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = a; } }
+        // dark outline: each lit block expanded by one pixel all round
+        for (int r = 0; r < 5; r++)
+            for (int col = 0; col < 3; col++)
+                if (pat[r][col] == '#')
+                    for (int sy = -1; sy <= s; sy++)
+                        for (int sx = -1; sx <= s; sx++)
+                            Put(ox + col * s + sx, oy + r * s + sy, 12, 12, 8, 255);
+        // bright fill on top
+        for (int r = 0; r < 5; r++)
+            for (int col = 0; col < 3; col++)
+                if (pat[r][col] == '#')
                     for (int sy = 0; sy < s; sy++)
                         for (int sx = 0; sx < s; sx++)
-                        {
-                            int gx = ox + col * s + sx, gy = oy + r * s + sy;
-                            if (pass == 0) Put(gx + 1, gy + 1, 8, 8, 5, 235);      // shadow
-                            else Put(gx, gy, c.r, c.g, c.b, 255);                  // digit
-                        }
-                }
+                            Put(ox + col * s + sx, oy + r * s + sy, c.r, c.g, c.b, 255);
+        return ImageTexture.CreateFromImage(Image.CreateFromData(dim, dim, false, Image.Format.Rgba8, data));
     }
     long _terrSig = long.MinValue;
     int _terrTick;
@@ -630,9 +633,6 @@ public partial class World3D : Node3D
                 deposit.Add(n.Y * MapSize + n.X);
 
         var foodMesh = new ImmediateMesh();
-        const int cell = 10;   // texels per tile in the number texture
-        int numW = MapSize * cell;
-        var numData = new byte[numW * numW * 4];   // RGBA, transparent by default
         bool anyFood = false;
         foodMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         for (int y = 0; y < MapSize; y++)
@@ -645,7 +645,6 @@ public partial class World3D : Node3D
                 float x0 = x - 0.5f, x1 = x + 0.5f, z0 = y - 0.5f, z1 = y + 0.5f, hh = 0.05f;
                 Vector3 a = new(x0, hh, z0), b = new(x1, hh, z0), c = new(x1, hh, z1), d = new(x0, hh, z1);
                 foreach (var v in new[] { a, b, c, a, c, d }) { foodMesh.SurfaceSetColor(glow); foodMesh.SurfaceAddVertex(v); }
-                DrawDigit(numData, numW, x * cell, y * cell, cell, yld);
             }
         foodMesh.SurfaceEnd();
         if (anyFood)
@@ -664,20 +663,37 @@ public partial class World3D : Node3D
             };
             AddChild(_fertileOverlay);
 
-            _fertileLabels = new MeshInstance3D
+            // Upright, camera-facing food numbers on every farmable tile: one
+            // MultiMesh of billboarded quads PER value (three draw calls for the
+            // whole map), each quad a digit texture. Flat numbers on the ground read
+            // as skewed nonsense at this angle; billboarded, they stay legible.
+            _fertileLabels = new Node3D { Visible = false };
+            var quad = new QuadMesh { Size = new Vector2(0.62f, 0.62f) };
+            for (int v = 1; v <= 3; v++)
             {
-                Mesh = new PlaneMesh { Size = new Vector2(MapSize, MapSize) },
-                Position = new Vector3(MapSize / 2f, 0.08f, MapSize / 2f),
-                Visible = false,
-                MaterialOverride = new StandardMaterial3D
+                var pts = new List<Vector3>();
+                for (int y = 0; y < MapSize; y++)
+                    for (int x = 0; x < MapSize; x++)
+                        if (map.FieldYield(x, y) == v && !deposit.Contains(y * MapSize + x))
+                            pts.Add(new Vector3(x, 0.45f, y));
+                if (pts.Count == 0) continue;
+                var dmm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = quad, InstanceCount = pts.Count };
+                for (int i = 0; i < pts.Count; i++) dmm.SetInstanceTransform(i, new Transform3D(Basis.Identity, pts[i]));
+                _fertileLabels.AddChild(new MultiMeshInstance3D
                 {
-                    AlbedoTexture = ImageTexture.CreateFromImage(
-                        Image.CreateFromData(numW, numW, false, Image.Format.Rgba8, numData)),
-                    TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                    Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                },
-            };
+                    Multimesh = dmm,
+                    MaterialOverride = new StandardMaterial3D
+                    {
+                        AlbedoTexture = MakeDigitTex(v),
+                        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                        BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+                        BillboardKeepScale = true,
+                        TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+                        NoDepthTest = true,
+                    },
+                });
+            }
             AddChild(_fertileLabels);
         }
 
