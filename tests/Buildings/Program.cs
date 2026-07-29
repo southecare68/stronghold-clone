@@ -13,7 +13,7 @@ static class Program
         Console.WriteLine("Buildings — placement, blocking, cost, production\n");
 
         PlacementCostsAndValidates();
-        TheMillAndBakeryCostGrain();
+        TheMillAndBakeryCostNoGrain();
         AFootprintBlocksPathing();
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
@@ -66,29 +66,28 @@ static class Program
         _ = worker;
     }
 
-    // The mill and bakery are gated behind a working grain supply: they cost
-    // grain to build, not just wood and stone, so you must farm before you mill.
-    static void TheMillAndBakeryCostGrain()
+    // The mill and bakery cost timber and stone, NEVER grain — so the food chain can
+    // keep growing even while a running mill grinds grain to flour as fast as it is
+    // reaped. Costing grain once deadlocked expansion: grain could never stockpile to
+    // the price of a second bakery, because the mill ate it first.
+    static void TheMillAndBakeryCostNoGrain()
     {
-        Console.WriteLine("\nthe mill and bakery cost grain, not just wood and stone:");
+        Console.WriteLine("\nthe mill and bakery cost timber and stone, never grain:");
         var sim = new Simulation(TileMap.Open(48));
+        Give(sim, 1, wood: 500, stone: 500);   // no grain banked at all
 
-        // Wood and stone to spare, but no grain: the mill is refused.
-        Give(sim, 1, wood: 200, stone: 200);
         Order(sim, Build(1, BuildingType.Mill, 10, 10));
-        Check("a mill with no grain is refused", sim.Buildings.Count == 0);
-
-        // With grain banked (from a farm), it goes up and grain is charged.
-        sim.AddResource(1, ResourceType.Grain, 50);
-        Order(sim, Build(1, BuildingType.Mill, 10, 10));
-        Check("with grain in store, the mill is built", sim.Buildings.Count == 1);
-        Check($"grain was charged (50 - 15 = 35, got {sim.Stockpile(1, ResourceType.Grain)})",
-              sim.Stockpile(1, ResourceType.Grain) == 35);
-
-        // The bakery is gated the same way.
+        Check("a mill builds on no grain", sim.Buildings.Count == 1);
         Order(sim, Build(1, BuildingType.Bakery, 20, 20));
-        Check($"the bakery too spends grain (35 - 20 = 15, got {sim.Stockpile(1, ResourceType.Grain)})",
-              sim.Stockpile(1, ResourceType.Grain) == 15 && sim.Buildings.Count == 2);
+        Check("so does a bakery", sim.Buildings.Count == 2);
+
+        // The whole point: a SECOND bakery goes up with zero grain banked — the
+        // deadlock can no longer block growing the food chain.
+        Order(sim, Build(1, BuildingType.Bakery, 30, 30));
+        Check("and a SECOND bakery too, grain or none",
+              sim.Buildings.FindAll(b => b.Type == BuildingType.Bakery).Count == 2);
+        Check($"no grain was spent ({sim.Stockpile(1, ResourceType.Grain)})",
+              sim.Stockpile(1, ResourceType.Grain) == 0);
     }
 
     static void AFootprintBlocksPathing()

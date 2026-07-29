@@ -419,17 +419,21 @@ namespace Sim
             new[] { 20, 5, 0 },    // Storehouse — a drop-off closer to the trees
             new[] { 20, 0, 0 },    // Quarry — built from wood, then it pays back in stone
             new[] { 15, 0, 0 },       // Farm — cheap; the field feeds the whole chain
-            new[] { 20, 15, 0, 15 },  // Mill — costs GRAIN too, so you must farm before you can mill
-            new[] { 25, 15, 0, 20 },  // Bakery — likewise gated behind a working grain supply
+            new[] { 25, 20, 0 },      // Mill — timber and stone; NOT grain (see below)
+            new[] { 30, 20, 0 },      // Bakery — timber and stone; NOT grain (see below)
             new[] { 15, 0, 0 },       // House — cheap timber; each one shelters ten more peasants
             new[] { 5, 5, 0 },        // Steps — the only way up onto a wall
             new[] { 10, 20, 0 },      // Turret — a raised archer platform over the wall
             new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
             new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
         };
-        // Costs are [wood, stone, food, grain]. Most buildings list only the first
-        // three (grain 0); the mill and bakery add a fourth entry, and CanAfford/Pay
-        // iterate each cost's own length, so the shorter rows charge no grain.
+        // Costs are [wood, stone, food, grain]. Every building lists only the first
+        // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
+        // to gate them behind a farm, but that deadlocked expansion: once a mill runs
+        // it grinds grain into flour as fast as the farm reaps it, so grain never
+        // stockpiled to the 20 a second bakery cost, and you could not grow the chain.
+        // They cost timber and stone instead; the natural gate (a bakery is useless
+        // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
         static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220 };
