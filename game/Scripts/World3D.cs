@@ -222,6 +222,14 @@ public partial class World3D : Node3D
     MeshInstance3D _fertileOverlay;
     Node3D _fertileLabels;
 
+    // A survey overlay (toggle with V, or the HUD button): a number floating on every
+    // resource tile — a deposit's remaining amount for wood, stone and iron, and a
+    // soil tile's grain yield for farming — so you can read the whole map's worth at
+    // once. Rebuilt from the live world each time it is switched on.
+    Node3D _resourceOverlay;
+    bool _showResources;
+    Button _resButton;
+
     // Highlight colour by a tile's yield: pale tan for thin soil up to a vivid green
     // for prime, so grade reads by colour as well as by the printed number.
     static Color FertileGlow(int yld) =>
@@ -655,6 +663,63 @@ public partial class World3D : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.46f, 0.44f, 0.41f) },
         });
     }
+
+    // ---- the resource-value survey overlay (V) -----------------------------
+
+    void ToggleResourceOverlay()
+    {
+        _showResources = !_showResources;
+        if (_showResources) RebuildResourceOverlay();
+        if (_resourceOverlay != null) _resourceOverlay.Visible = _showResources;
+        if (_resButton != null)
+            _resButton.Modulate = _showResources ? new Color(1f, 0.9f, 0.5f) : new Color(1f, 1f, 1f);
+    }
+
+    // Rebuild every value label from the live world: each deposit's remaining amount
+    // (wood, stone, iron) and each soil tile's grain yield. Rebuilt on toggle-on so
+    // the numbers are current — deposits drain, fields come and go.
+    void RebuildResourceOverlay()
+    {
+        if (_resourceOverlay == null) { _resourceOverlay = new Node3D(); AddChild(_resourceOverlay); }
+        foreach (var c in _resourceOverlay.GetChildren()) c.QueueFree();
+
+        foreach (var n in _sim.NodeList)
+        {
+            if (n.Amount <= 0) continue;
+            Color col;
+            switch (n.Type)
+            {
+                case ResourceType.Wood:  col = new Color(0.82f, 0.58f, 0.30f); break;   // timber
+                case ResourceType.Stone: col = new Color(0.82f, 0.84f, 0.88f); break;   // pale stone
+                case ResourceType.Iron:  col = new Color(0.62f, 0.75f, 0.92f); break;   // steel blue
+                default: continue;   // grain fields are covered by the soil-yield labels below
+            }
+            _resourceOverlay.AddChild(ValueLabel(n.X, n.Y, n.Amount.ToString(), col));
+        }
+
+        var map = _sim.Map;
+        for (int y = 0; y < MapSize; y++)
+            for (int x = 0; x < MapSize; x++)
+                if (map.IsFertile(x, y))
+                {
+                    var g = FertileGlow(map.FieldYield(x, y));
+                    _resourceOverlay.AddChild(ValueLabel(x, y, map.FieldYield(x, y).ToString(),
+                        new Color(g.R, g.G, g.B, 1f)));
+                }
+    }
+
+    static Label3D ValueLabel(int x, int y, string text, Color color) => new()
+    {
+        Text = text,
+        Position = new Vector3(x, 0.6f, y),
+        Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+        FontSize = 40,
+        PixelSize = 0.0085f,
+        Modulate = color,
+        OutlineSize = 14,
+        OutlineModulate = new Color(0.06f, 0.05f, 0.03f, 1f),
+        NoDepthTest = true,
+    };
 
     static Color ColorFor(Sim.Terrain t) => t switch
     {
@@ -1167,6 +1232,19 @@ public partial class World3D : Node3D
         _netInfo = new Label { HorizontalAlignment = HorizontalAlignment.Right };
         _netInfo.AddThemeFontSizeOverride("font_size", 14);
         netMargin.AddChild(_netInfo);
+
+        // A survey toggle, bottom-right — the same thing the V key does, for anyone
+        // who would rather click. Its tint tracks whether the overlay is on.
+        _resButton = new Button
+        {
+            Text = "Resources  (V)",
+            FocusMode = Control.FocusModeEnum.None,
+            AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1,
+            OffsetLeft = -170, OffsetRight = -12, OffsetTop = -46, OffsetBottom = -12,
+        };
+        _resButton.AddThemeFontSizeOverride("font_size", 14);
+        _resButton.Pressed += () => ToggleResourceOverlay();
+        layer.AddChild(_resButton);
 
         // Realm-dial toast: centred near the top, big, hidden until a change flashes
         // it. Anchored to the horizontal centre and grown both ways so it sizes to
@@ -2781,6 +2859,15 @@ public partial class World3D : Node3D
             !terr.CtrlPressed && !terr.MetaPressed && !terr.AltPressed)
         {
             _showTerritory = !_showTerritory;
+            return;
+        }
+
+        // V surveys the whole map's resources: every deposit's amount and every soil
+        // tile's yield, laid over the ground. Purely visual and local, like T.
+        if (e is InputEventKey rsv && rsv.Pressed && rsv.Keycode == Key.V &&
+            !rsv.CtrlPressed && !rsv.MetaPressed && !rsv.AltPressed)
+        {
+            ToggleResourceOverlay();
             return;
         }
 
