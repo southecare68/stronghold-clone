@@ -35,6 +35,9 @@ static class Program
         TheEconomicBranchClimbsToItsCapstone();
         TheEconomicBranchGeneratesGold();
         TheGrandExchangeGatesTheEconomicHigh();
+        TheScienceBranchClimbsToItsCapstone();
+        WondersAreGatedAndEscalate();
+        TheScienceMetricCountsTreeAndWonders();
         TheResearchCommandTakes();
         TwoClientsAgreeOnResearch();
 
@@ -175,6 +178,66 @@ static class Program
               sim.Progress(1, VictoryPath.Economic).HighMet);
     }
 
+    // The Science branch: Scholar's Hut → Library → the University fork → Printing
+    // Press → the Academy capstone, and every research-speed node quickens the pace.
+    static void TheScienceBranchClimbsToItsCapstone()
+    {
+        Console.WriteLine("the Science branch climbs to its capstone:");
+        var sim = Realm();
+        sim.AddResearch(1, 1000);
+        sim.TryResearch(1, TechTree.Roads);
+        sim.TryResearch(1, TechTree.ScholarsHut);
+
+        Check("Library opens after Scholar's Hut", sim.TryResearch(1, TechTree.Library));
+        Check("Printing Press is refused before the University fork", !sim.CanResearch(1, TechTree.PrintingPress));
+        Check("Engineering can be taken at the fork", sim.TryResearch(1, TechTree.Engineering));
+        Check("its sibling Scholarship is now closed", !sim.CanResearch(1, TechTree.Scholarship));
+        Check("Printing Press opens after the fork", sim.TryResearch(1, TechTree.PrintingPress));
+        Check("and the Academy capstone follows", sim.TryResearch(1, TechTree.Academy));
+        Check("Academy is the Science capstone", TechTree.CapstoneFor(TechBranch.Science) == TechTree.Academy);
+        Check("research-speed nodes quickened the pace", sim.ResearchPace(1) > 6);
+    }
+
+    // Wonders are science-exclusive (need the Academy) and escalate: the second costs
+    // more than the first.
+    static void WondersAreGatedAndEscalate()
+    {
+        Console.WriteLine("wonders are gated by the Academy and escalate:");
+        var sim = Realm();
+        sim.AddResource(1, ResourceType.Wood, 3000);
+        sim.AddResource(1, ResourceType.Stone, 3000);
+
+        BuildAt(sim, BuildingType.Wonder, 20, 20);
+        Check("a Wonder is refused without the Academy", sim.CountBuildings(1, BuildingType.Wonder) == 0);
+
+        sim.AddResearch(1, 1000);
+        foreach (int id in SciencePlan) sim.TryResearch(1, id);
+        var first = sim.BuildCostFor(1, BuildingType.Wonder);
+        BuildAt(sim, BuildingType.Wonder, 20, 20);
+        Check("with the Academy it can be raised", sim.CountBuildings(1, BuildingType.Wonder) == 1);
+        var second = sim.BuildCostFor(1, BuildingType.Wonder);
+        Check("and the next Wonder costs more", second[1] > first[1]);
+    }
+
+    // The Science metric: the Academy plus two wonders is the HIGH, one wonder the
+    // MEDIUM — a capstone-gated crown like the others.
+    static void TheScienceMetricCountsTreeAndWonders()
+    {
+        Console.WriteLine("the Science metric counts the tree and wonders:");
+        var sim = Realm();
+        sim.AddResource(1, ResourceType.Wood, 3000);
+        sim.AddResource(1, ResourceType.Stone, 3000);
+        sim.AddResearch(1, 1000);
+        foreach (int id in SciencePlan) sim.TryResearch(1, id);
+
+        Check("full tree, no wonder — HIGH unmet", !sim.Progress(1, VictoryPath.Science).HighMet);
+        BuildAt(sim, BuildingType.Wonder, 20, 20);
+        Check("one wonder banks the Science MEDIUM", sim.Progress(1, VictoryPath.Science).MediumMet);
+        Check("but one wonder is not the HIGH", !sim.Progress(1, VictoryPath.Science).HighMet);
+        BuildAt(sim, BuildingType.Wonder, 26, 20);
+        Check("two wonders + the Academy take the HIGH", sim.Progress(1, VictoryPath.Science).HighMet);
+    }
+
     // Research also takes through the ordinary command path, charged and validated
     // exactly like a human clicking a node.
     static void TheResearchCommandTakes()
@@ -228,6 +291,15 @@ static class Program
         TechTree.Roads, TechTree.Market, TechTree.TradePost,
         TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange,
     };
+
+    static readonly int[] SciencePlan =
+    {
+        TechTree.Roads, TechTree.ScholarsHut, TechTree.Library,
+        TechTree.Engineering, TechTree.PrintingPress, TechTree.Academy,
+    };
+
+    static void BuildAt(Simulation sim, BuildingType t, int x, int y)
+        => sim.Tick(new[] { new Command { Owner = 1, Type = CommandType.Build, TargetId = (int)t, X = x, Y = y } });
 
     static Simulation Realm()
     {

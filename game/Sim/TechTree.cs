@@ -51,15 +51,18 @@ namespace Sim
         // Node Ids — stable, never renumber (they are bit positions in the researched
         // mask). Grouped by branch with room to grow between groups.
         // Trunk 0..9
-        public const int Roads = 0, Market = 1, Chapel = 2;   // + Scholar's Hut / Farmstead / Muster when their branches land
+        public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3;   // + Farmstead / Muster when their branches land
         // Religious 10..19
         public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14;
         // Economic 20..29
         public const int TradePost = 20, Monopoly = 21, Bourse = 22, BankingHouse = 23, GrandExchange = 24;
+        // Science 30..39
+        public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34;
 
         // Fork groups.
         const int ForkHolyOrder = 1;    // Missionaries | Zealotry
         const int ForkGuild = 2;        // Monopoly | Bourse
+        const int ForkUniversity = 3;   // Engineering | Scholarship
 
         // The registry, indexed by Id (gaps are null). Kept small and explicit; the
         // spine ships the trunk unlocks + the full Religious branch, with one Economic
@@ -71,9 +74,10 @@ namespace Sim
             var nodes = new List<TechNode>
             {
                 // --- Trunk: everyone can open these; they gate the branches ---------
-                new TechNode(Roads,  "Roads",  TechBranch.Trunk, 0, 8,  new int[0]),
-                new TechNode(Chapel, "Chapel", TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Religious
-                new TechNode(Market, "Market", TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Economic
+                new TechNode(Roads,       "Roads",        TechBranch.Trunk, 0, 8,  new int[0]),
+                new TechNode(Chapel,      "Chapel",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Religious
+                new TechNode(Market,      "Market",       TechBranch.Trunk, 0, 10, new[] { Roads }),   // → Economic
+                new TechNode(ScholarsHut, "Scholar's Hut", TechBranch.Trunk, 0, 10, new[] { Roads }),  // → Science
 
                 // --- Religious branch: Chapel → Shrine → (fork) → Cathedral → ★ ------
                 new TechNode(Shrine,       "Shrine",       TechBranch.Religious, 1, 15, new[] { Chapel }),
@@ -88,6 +92,13 @@ namespace Sim
                 new TechNode(Bourse,       "Bourse",        TechBranch.Economic, 2, 24, new[] { TradePost }, forkGroup: ForkGuild),
                 new TechNode(BankingHouse, "Banking House", TechBranch.Economic, 3, 36, new[] { TradePost }, requiresFork: ForkGuild),
                 new TechNode(GrandExchange,"Grand Exchange",TechBranch.Economic, 4, 58, new[] { BankingHouse }, capstone: true),
+
+                // --- Science branch: Scholar's Hut → Library → (fork) → Press → ★ ---
+                new TechNode(Library,      "Library",       TechBranch.Science, 1, 15, new[] { ScholarsHut }),
+                new TechNode(Engineering,  "Engineering",   TechBranch.Science, 2, 24, new[] { Library }, forkGroup: ForkUniversity),
+                new TechNode(Scholarship,  "Scholarship",   TechBranch.Science, 2, 24, new[] { Library }, forkGroup: ForkUniversity),
+                new TechNode(PrintingPress,"Printing Press",TechBranch.Science, 3, 36, new[] { Library }, requiresFork: ForkUniversity),
+                new TechNode(Academy,      "Academy",       TechBranch.Science, 4, 58, new[] { PrintingPress }, capstone: true),   // unlocks Wonders
             };
 
             int max = 0;

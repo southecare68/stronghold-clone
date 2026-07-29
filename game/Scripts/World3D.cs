@@ -179,7 +179,7 @@ public partial class World3D : Node3D
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Granary,
-        BuildingType.Church,
+        BuildingType.Church, BuildingType.Wonder,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -567,6 +567,7 @@ public partial class World3D : Node3D
         B(BuildingType.IronMine,      "Buildings/Preset_Houses/SM_Bld_Preset_Tower_01_Optimized", 0.5f);   // a mine headframe
         B(BuildingType.Granary,       "Buildings/Preset_Houses/SM_Bld_Preset_Shelter_01_Optimized", 0.5f);  // an open barn for the harvest
         B(BuildingType.Church,        "Buildings/Preset_Houses/SM_Bld_Preset_Church_01_A_Optimized", 0.5f);  // ministers to the flock — raises faith
+        B(BuildingType.Wonder,        "Bonus/SM_Prop_Statue_King_01", 0.5f);   // a grand monument — the Science path's crown
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
@@ -1456,6 +1457,16 @@ public partial class World3D : Node3D
         // it in the tech panel (C) to climb a branch toward its capstone.
         _stat[11].Text = $"Research {_sim.ResearchPoints(me)} (+{_sim.ResearchPace(me)})";
 
+        // The Wonder is science-exclusive: its palette button stays locked until the
+        // Academy capstone stands, and its price escalates with each one raised.
+        if (_buildButtons.TryGetValue(BuildingType.Wonder, out var wb))
+        {
+            bool unlocked = _sim.IsTechResearched(me, TechTree.Academy);
+            wb.Disabled = !unlocked;
+            wb.Text = unlocked ? $"Wonder\n{CostText(BuildingType.Wonder)}" : "Wonder\n🔒 Academy";
+            wb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
+        }
+
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)
             : _selected.Count > 1 ? $"{_selected.Count} units selected"
@@ -1562,16 +1573,17 @@ public partial class World3D : Node3D
         BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
         BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
-        BuildingType.Church => "Church", _ => t.ToString(),
+        BuildingType.Church => "Church", BuildingType.Wonder => "Wonder", _ => t.ToString(),
     };
 
-    // Cost as a compact string: nonzero amounts with a resource initial.
+    // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
+    // so a Wonder shows its true next price (it escalates and Engineering discounts it).
     string CostText(BuildingType t)
     {
-        var cost = _sim.CostOf(t);
+        var cost = _sim.BuildCostFor(MyPlayer, t);
         string[] tag = { "w", "s", "f", "g" };
         var parts = new List<string>();
-        for (int i = 0; i < cost.Count; i++) if (cost[i] > 0) parts.Add($"{cost[i]}{tag[i]}");
+        for (int i = 0; i < cost.Length; i++) if (cost[i] > 0) parts.Add($"{cost[i]}{tag[i]}");
         return parts.Count == 0 ? "free" : string.Join(" ", parts);
     }
 
@@ -3527,7 +3539,7 @@ public partial class World3D : Node3D
                 0 => $"{_sim.Gold(me):N0} / 1,000,000 gold",
                 1 => $"{_sim.Faith(me)}% / 75% converted",
                 2 => $"{_sim.PeasantCount(me):N0} / 5,000 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
-                _ => "tech tree & wonders — coming soon",
+                _ => $"{_sim.ResearchedCount(me, TechBranch.Science)} / 4 tree   ·   {_sim.WonderCount(me)} / 2 wonders",
             };
             string mark = p.MediumBanked ? "   ✓ medium" : "";
             string hold = p.HoldTicks > 0 ? $"   ·   held {FmtClock(p.HoldTicks)} / {FmtClock(p.HoldNeeded)}" : "";

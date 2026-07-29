@@ -21,7 +21,7 @@ namespace Sim
         SetTax = 9, SetRations = 10, Research = 11,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -436,8 +436,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2 };  // ...Turret, IronMine, Granary, Church
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3 };  // ...Granary, Church, Wonder
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3 };
         static readonly int[][] BuildCost =
         {
             new[] { 30, 20, 0 },   // Keep
@@ -456,6 +456,7 @@ namespace Sim
             new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
             new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
             new[] { 20, 10, 0 },      // Church — timber and stone; ministers to a flock, converting the realm (see ResolveRealm)
+            new[] { 60, 100, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -466,7 +467,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1057,18 +1058,25 @@ namespace Sim
                     // a refused build simply spends nothing and places nothing.
                     var type = (BuildingType)cmd.TargetId;
                     if ((int)type < 0 || (int)type >= BuildCost.Length) break;
+                    // A Wonder is science-exclusive: raised only once the Academy
+                    // capstone stands, and refused otherwise.
+                    if (type == BuildingType.Wonder && !IsTechResearched(cmd.Owner, TechTree.Academy)) break;
                     // A turret or gatehouse raised on one of your own walls replaces
                     // that segment — a tower or gateway sits IN the line, so it drops
                     // straight into a finished wall rather than being refused.
                     var swap = type == BuildingType.Turret || type == BuildingType.Gatehouse
                         ? OwnWallAt(cmd.Owner, cmd.X, cmd.Y) : null;
                     if (swap == null && !CanPlace(type, cmd.X, cmd.Y)) break;
-                    if (!CanAfford(cmd.Owner, BuildCost[(int)type])) break;
+                    // Wonders escalate and Engineering discounts them, so the price is
+                    // owner-specific (see BuildCostFor); every other build is the flat
+                    // table price.
+                    var cost = BuildCostFor(cmd.Owner, type);
+                    if (!CanAfford(cmd.Owner, cost)) break;
                     // No building on ground you have never laid eyes on. Checked
                     // over the whole footprint, so a keep cannot be half-planted
                     // in the dark.
                     if (!BuildableFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
-                    Pay(cmd.Owner, BuildCost[(int)type]);
+                    Pay(cmd.Owner, cost);
                     if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
                     if (type == BuildingType.Wall || type == BuildingType.Gatehouse || type == BuildingType.Turret)

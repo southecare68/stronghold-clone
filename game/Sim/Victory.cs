@@ -58,9 +58,11 @@ namespace Sim
         // Domain — the census: a great population across many keeps.
         const int DomHighPop = 5000, DomMedPop = 2500;
         const int DomHighTerr = 5, DomMedTerr = 2;
-        // Science — the tech tree + wonders. Greenfield (Phase 4): wired here so the
-        // HUD and spies have a fourth slot, but progress is always zero until the
-        // research and wonder systems exist.
+        // Science — the tech tree + wonders. The Academy capstone completes the branch
+        // and unlocks Wonders; the HIGH is two of them, the MEDIUM one. (The design's
+        // "complete the tree" is subsumed by the Academy gate — the capstone's prereq
+        // chain IS the whole branch.)
+        const int SciHighWonders = 2, SciMedWonders = 1;
 
         // Cross this share of a HIGH goal and the whole realm is told — the window in
         // which spies and raids can still bite. A single dial for every path.
@@ -135,7 +137,19 @@ namespace Sim
                     highPct = Pct(pop, DomHighPop);   // the pop bar; the territory gate is a hard AND above
                     break;
                 }
-                default: // Science — no research/wonders yet (Phase 4)
+                case VictoryPath.Science:
+                {
+                    int wonders = WonderCount(owner);
+                    int tree = ResearchedCount(owner, TechBranch.Science);   // 0..4 nodes on a path
+                    highMet = IsTechResearched(owner, TechTree.Academy) && wonders >= SciHighWonders;
+                    medMet = wonders >= SciMedWonders;
+                    // The bar fills as the branch is researched (up to ~56) and jumps
+                    // with each wonder (+30) — full tree + one wonder lands near 80%,
+                    // the announce, with the second wonder the crown.
+                    highPct = Math.Clamp(tree * 14 + wonders * 30, 0, 100);
+                    break;
+                }
+                default:
                     highMet = false; medMet = false; highPct = 0;
                     break;
             }

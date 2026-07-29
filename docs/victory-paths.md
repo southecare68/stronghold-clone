@@ -84,7 +84,7 @@ else; the frozen units-only parity constant (`0xB1A7A676`) is untouched.
   clock (`MatchClockTicks`, 0 = off). All four paths are wired; the metrics that
   exist today are gold (Economic), faith (Religious), and population (Domain).
 
-### The tech tree — the victory structure (shipped: spine + Religious & Economic branches + HUD)
+### The tech tree — the victory structure (shipped: spine + Religious / Economic / Science branches + HUD)
 
 Per `tech.pdf`, **the tree *is* the victory structure**: the four paths are branches
 of one research web, and a branch's **capstone is what unlocks its HIGH goal**. The
@@ -115,6 +115,13 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   the **Grand Exchange** capstone floors the income and unlocks the 1M HIGH. Added
   to gold each realm tick; a **Tech HUD** (C key) lets a human spend research, node
   by node, across every branch.
+- **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
+  cheaper wonders | Scholarship = faster tree) → Printing Press → the **Academy**
+  capstone, which unlocks **Wonders** (`BuildingType.Wonder`) — a grand, expensive
+  buildable, gated on the Academy, whose cost **escalates** with each one raised
+  (`BuildCostFor`). The Science HIGH is **two wonders** (the MED is one); research
+  nodes along the way quicken `ResearchPace`. The Wonder sits in the build palette,
+  locked until the Academy stands.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -164,8 +171,8 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **T** | **Tech spine** — research economy, the web, capstone-gates-HIGH, cross-branch cost + **Religious branch** ported, AI climbs it | ✅ shipped |
 | **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | ✅ shipped |
 | **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the 1M HIGH | ✅ shipped |
-| **4** | **Science branch** — Library → University (fork) → Academy → **Wonders** (visible, sabotageable) | next (greenfield) |
-| **3** | **Domain branch** + **multi-territory** — Provincial Keeps → Sovereign's Court, on the conquest/annexation system (designed above) | biggest lift |
+| **4** | **Science branch** — Scholar's Hut → Library → University fork → Academy → **Wonders** (the new buildable); HIGH = 2 wonders, MED = 1, capstone-gated | ✅ shipped |
+| **3** | **Domain branch** + **multi-territory** — Provincial Keeps → Sovereign's Court, on the conquest/annexation system (designed above) | next (biggest lift) |
 | **5** | **War & espionage layer** — Warcamp → Field Army, Bodyguard, and the five spies | last — spies need live, announced metrics to bite |
 
 The tech HUD comes next so a human can actually spend research (the AI already
@@ -192,3 +199,6 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,
   `InterestDivisor`/`InterestCap`/`InterestCapGrand`, `GrandExchangeFloor`
   (`Tech.cs`), added to gold each realm tick in `ResolveRealm`.
+- Science: research-pace nodes `LibraryPace`/`ScholarshipPace`/`PrintingPace`
+  (`Tech.cs`); Wonder base cost in `BuildCost`, its escalation + Engineering
+  discount in `BuildCostFor`; `SciHighWonders`/`SciMedWonders` (`Victory.cs`).

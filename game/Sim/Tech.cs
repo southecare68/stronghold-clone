@@ -13,15 +13,49 @@ namespace Sim
     {
         const int BaseResearchPace = 3;      // research points per realm tick, before boosts
         const int RoadsPace = 3;             // Roads (trunk) speeds every realm's research
+        const int LibraryPace = 3;           // the Science branch is a research multiplier on itself
+        const int ScholarshipPace = 4;       // Scholarship fork: faster tree
+        const int PrintingPace = 4;          // Printing Press: speeds tech
         const int CrossBranchPenalty = 8;    // added per already-taken node outside a node's branch
         const int CapstoneLimit = 1;         // capstones you may hold — one branch's HIGH, no more
 
-        // How much research a realm banks each realm tick.
+        // How much research a realm banks each realm tick — the base, plus every
+        // research-speed node it has taken (Roads, then the Science branch, which is a
+        // research multiplier on itself).
         public int ResearchPace(int owner)
         {
             int pace = BaseResearchPace;
             if (IsTechResearched(owner, TechTree.Roads)) pace += RoadsPace;
+            if (IsTechResearched(owner, TechTree.Library)) pace += LibraryPace;
+            if (IsTechResearched(owner, TechTree.Scholarship)) pace += ScholarshipPace;
+            if (IsTechResearched(owner, TechTree.PrintingPress)) pace += PrintingPace;
             return pace;
+        }
+
+        // Live wonders an owner holds — the Science path's tangible metric.
+        public int WonderCount(int owner) => CountBuildings(owner, BuildingType.Wonder);
+
+        // How many nodes of a branch this owner has researched — the tree-progress a
+        // branch's HUD bar reads.
+        public int ResearchedCount(int owner, TechBranch branch)
+        {
+            int n = 0;
+            foreach (var node in TechTree.All())
+                if (node.Branch == branch && IsTechResearched(owner, node.Id)) n++;
+            return n;
+        }
+
+        // What a build costs THIS owner right now. Only wonders differ from the flat
+        // table: each one you already hold makes the next dearer (the design's
+        // escalating cost — #2 is the real commitment), and Engineering shaves a
+        // quarter off. Public so the palette shows the true next-wonder price.
+        public int[] BuildCostFor(int owner, BuildingType type)
+        {
+            var b = BuildCost[(int)type];
+            if (type != BuildingType.Wonder) return b;
+            int mult = 1 + WonderCount(owner);                 // 1st ×1, 2nd ×2 …
+            int num = IsTechResearched(owner, TechTree.Engineering) ? 3 : 4;   // Engineering: ×3/4
+            return new[] { b[0] * mult * num / 4, b[1] * mult * num / 4, b[2] * mult * num / 4 };
         }
 
         public int ResearchPoints(int owner) => _stock.TryGetValue(owner, out var s) ? s[ResearchIdx] : 0;
