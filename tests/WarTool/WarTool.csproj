@@ -1,0 +1,25 @@
+<!-- WarTool — "war feeds the attacker": the branches' ⚔ war-tool nodes.
+
+     A researched war-tool turns each enemy your soldiers cut down into fuel for that
+     path — Privateers pillage gold, War Loot strips materials for wonders, a Crusade
+     emboldens the faith (Domain's is Conquest, which takes a whole keep). Each test
+     runs the SAME one-sided battle twice — with the node and without — and confirms
+     the node alone accounts for the extra gold / materials / faith.
+
+     Sim-only, like the other economy suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>WarToolTests</RootNamespace>
+    <AssemblyName>WarToolTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

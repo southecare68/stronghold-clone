@@ -84,6 +84,29 @@ namespace Sim
         const int InterestCapGrand = 1400;   // ...unless the Grand Exchange raises the ceiling
         const int GrandExchangeFloor = 40;   // and it guarantees an income floor, to sustain the hold
 
+        // War-tool payoffs — "war feeds the attacker". A researched war-tool turns
+        // each enemy your soldiers cut down into fuel for that path (Domain's is
+        // Conquest, which takes a whole keep — see AnnexKeep). Zero unless researched,
+        // so a match with no war-tool tech plays exactly as before.
+        const int PrivateerLoot = 40;   // gold per kill (Economic)
+        const int WarLootMat = 12;      // wood AND stone per kill (Science)
+        const int CrusadeFaith = 2;     // faith per kill (Religious)
+
+        void WarPayoff(int owner)
+        {
+            if (IsTechResearched(owner, TechTree.Privateers)) AddGold(owner, PrivateerLoot);
+            if (IsTechResearched(owner, TechTree.WarLoot))
+            {
+                AddResource(owner, ResourceType.Wood, WarLootMat);
+                AddResource(owner, ResourceType.Stone, WarLootMat);
+            }
+            if (IsTechResearched(owner, TechTree.Crusade))
+            {
+                var s = StockOf(owner);
+                s[FaithIdx] = Math.Min(100, s[FaithIdx] + CrusadeFaith);
+            }
+        }
+
         int LiveBuildingCount(int owner)
         {
             int n = 0;

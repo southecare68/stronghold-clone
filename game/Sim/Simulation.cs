@@ -2088,7 +2088,9 @@ namespace Sim
 
                     if (u.AttackTimer == 0)
                     {
-                        target.Hp -= DamageTo(target, _rng.NextInt(d.Damage - 2, d.Damage + 3));
+                        int dmg = DamageTo(target, _rng.NextInt(d.Damage - 2, d.Damage + 3));
+                        if (target.Hp > 0 && target.Hp <= dmg) WarPayoff(u.Owner);   // this blow fells it → war-tool loot
+                        target.Hp -= dmg;
                         u.AttackTimer = d.Cooldown;
                         ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = target.X, ToY = target.Y });
                     }
@@ -2178,7 +2180,9 @@ namespace Sim
             u.TargetId = best?.Id ?? 0;
             if (best != null && u.AttackTimer == 0)
             {
-                best.Hp -= DamageTo(best, _rng.NextInt(d.Damage - 2, d.Damage + 3));
+                int dmg = DamageTo(best, _rng.NextInt(d.Damage - 2, d.Damage + 3));
+                if (best.Hp > 0 && best.Hp <= dmg) WarPayoff(u.Owner);   // a rampart kill loots too
+                best.Hp -= dmg;
                 u.AttackTimer = d.Cooldown;
                 ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = best.X, ToY = best.Y });
             }

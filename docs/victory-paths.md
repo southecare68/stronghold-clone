@@ -152,6 +152,12 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   House / Cathedral / Printing Press / Provincial Keeps), the Bodyguard blocking the
   Assassin outright. The War branch is a shared tool (no capstone, no cross-branch
   penalty). A **Spies HUD** (X key) fires them; cooldowns and gates show on each.
+- **War-tool payoffs** (`WarPayoff`) — "war feeds the attacker". Each branch's ⚔
+  node turns an enemy your soldiers cut down into fuel for that path: **Privateers**
+  (Economic) pillage gold into your hoard, **War Loot** (Science) strip wood & stone
+  to fund wonders, a **Crusade** (Religious) emboldens the faith. Hooked at both
+  combat kill-sites; zero unless researched, so a match with no war-tool tech plays
+  exactly as before. **Conquest** (Domain) is the fourth — it takes a whole keep 👇.
 - **Conquest/annexation** (`AnnexKeep`, Domain war-tool node `Conquest`): once
   Conquest is researched, a keep your army strikes down is **annexed, not razed** —
   it stands battered under its new lord, becomes a new **territory** (feeding
@@ -217,7 +223,7 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **3** | **Domain branch + multi-territory** — Farmstead → Husbandry → Settlement fork → Provincial Keeps → **★ Sovereign's Court**; **found new keeps** (each a territory), Homesteads multiplies housing, Husbandry/Colonists speed growth; HIGH = pop + 5 territories | ✅ shipped (peaceful expansion) |
 | **5** | **The spy counter-web** — Muster → Spy Guild → the five spies + Bodyguard; each dagger pushes one rival metric back, blunted by that branch's Tier-III counter | ✅ shipped |
 | **6** | **Conquest/annexation** — take a keep by force → its territory & population (Domain's ⚔ war-tool) | ✅ shipped |
-| **7** | **The rest of the war-tool payoffs** — Field Army mechanics + the other branches' ⚔ nodes (Privateers loot gold, Crusade seizes-and-converts, War Loot funds wonders) | remaining |
+| **7** | **The rest of the war-tool payoffs** — the other branches' ⚔ nodes (Privateers loot gold · War Loot funds wonders · Crusade emboldens the faith) | ✅ shipped |
 
 The tech HUD comes next so a human can actually spend research (the AI already
 does). Spies land last on purpose: an Embezzler with no announced hoard, or an
@@ -253,6 +259,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   note), the territory counts follow the design.
 - Conquest: `AnnexRadius` (`Simulation.cs`) — how much population a taken keep
   carries; the `Conquest` node cost in `TechTree.cs`.
+- War-tool payoffs: `PrivateerLoot` / `WarLootMat` / `CrusadeFaith` per kill
+  (`Tech.cs`); the `Privateers` / `WarLoot` / `Crusade` node costs (`TechTree.cs`).
 - Spies: `SpyCost`, `SpyCooldown`, and the per-effect sizes `EmbezzleCap` /
   `InquisitHit`+`InquisitSoft` / `SabotageHit`+`SabotageSoft` / `AgitateHit`+
   `AgitateSoft` (`Spy.cs`); the counters are the branches' own Tier-III nodes.

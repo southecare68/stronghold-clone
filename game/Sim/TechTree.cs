@@ -53,11 +53,11 @@ namespace Sim
         // Trunk 0..9
         public const int Roads = 0, Market = 1, Chapel = 2, ScholarsHut = 3, Farmstead = 4, Muster = 5;   // Muster → war & spies
         // Religious 10..19
-        public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14;
+        public const int Shrine = 10, Missionaries = 11, Zealotry = 12, Cathedral = 13, GrandTemple = 14, Crusade = 15;
         // Economic 20..29
-        public const int TradePost = 20, Monopoly = 21, Bourse = 22, BankingHouse = 23, GrandExchange = 24;
+        public const int TradePost = 20, Monopoly = 21, Bourse = 22, BankingHouse = 23, GrandExchange = 24, Privateers = 25;
         // Science 30..39
-        public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34;
+        public const int Library = 30, Engineering = 31, Scholarship = 32, PrintingPress = 33, Academy = 34, WarLoot = 35;
         // Domain 40..49
         public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44, Conquest = 45;
         // War & espionage 50..59 — the shared tool layer, not a scored path
@@ -92,6 +92,7 @@ namespace Sim
                 new TechNode(Zealotry,     "Zealotry",     TechBranch.Religious, 2, 22, new[] { Shrine }, forkGroup: ForkHolyOrder),
                 new TechNode(Cathedral,    "Cathedral",    TechBranch.Religious, 3, 34, new[] { Shrine }, requiresFork: ForkHolyOrder),
                 new TechNode(GrandTemple,  "Grand Temple", TechBranch.Religious, 4, 55, new[] { Cathedral }, capstone: true),
+                new TechNode(Crusade,      "Crusade",      TechBranch.Religious, 3, 40, new[] { Cathedral }),   // ⚔ war-tool: kills embolden the faith
 
                 // --- Economic branch: Market → Trade Post → (fork) → Banking → ★ ----
                 new TechNode(TradePost,    "Trade Post",    TechBranch.Economic, 1, 15, new[] { Market }),
@@ -99,6 +100,7 @@ namespace Sim
                 new TechNode(Bourse,       "Bourse",        TechBranch.Economic, 2, 24, new[] { TradePost }, forkGroup: ForkGuild),
                 new TechNode(BankingHouse, "Banking House", TechBranch.Economic, 3, 36, new[] { TradePost }, requiresFork: ForkGuild),
                 new TechNode(GrandExchange,"Grand Exchange",TechBranch.Economic, 4, 58, new[] { BankingHouse }, capstone: true),
+                new TechNode(Privateers,   "Privateers",   TechBranch.Economic, 3, 40, new[] { BankingHouse }),   // ⚔ war-tool: kills pillage gold into your hoard
 
                 // --- Science branch: Scholar's Hut → Library → (fork) → Press → ★ ---
                 new TechNode(Library,      "Library",       TechBranch.Science, 1, 15, new[] { ScholarsHut }),
@@ -106,6 +108,7 @@ namespace Sim
                 new TechNode(Scholarship,  "Scholarship",   TechBranch.Science, 2, 24, new[] { Library }, forkGroup: ForkUniversity),
                 new TechNode(PrintingPress,"Printing Press",TechBranch.Science, 3, 36, new[] { Library }, requiresFork: ForkUniversity),
                 new TechNode(Academy,      "Academy",       TechBranch.Science, 4, 58, new[] { PrintingPress }, capstone: true),   // unlocks Wonders
+                new TechNode(WarLoot,      "War Loot",     TechBranch.Science, 3, 40, new[] { PrintingPress }),   // ⚔ war-tool: kills strip materials to fund wonders
 
                 // --- Domain branch: Farmstead → Husbandry → (fork) → Keeps → ★ ------
                 new TechNode(Husbandry,      "Husbandry",       TechBranch.Domain, 1, 15, new[] { Farmstead }),   // food variety → faster growth
