@@ -132,6 +132,20 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   the **Grand Exchange** capstone floors the income and unlocks the gold HIGH. Added
   to gold each realm tick; a **Tech HUD** (C key) lets a human spend research, node
   by node, across every branch.
+- **The market** (`Market.cs`, `BuildingType.Market`): a freely-buildable trading
+  hall — the *manual* counterpart to the Economic branch's passive `EconomicIncome`.
+  It trades five goods (Wood, Stone, Food, Iron, and a market-only **Weapons**
+  commodity) for gold at a fixed ±25% spread with bottomless supply/demand. Two
+  modes: a **Trade** command for a one-shot lump (capped by gold/stock), and a
+  per-good **standing order** (`SetTradePolicy` — *Buy up to N* / *Sell above N*)
+  that `AutoTrade` settles every realm tick, so a set market runs the economy
+  hands-off. Weapons are meaningful, not just a commodity: a barracks **arms a
+  recruit from a stocked weapon in place of wood** (0 weapons ⇒ byte-identical to
+  the old wood-only recruit path, so frozen `SimParity` is untouched). Stock grew
+  by appending (`WeaponsIdx` + 5 policy slots, `StockWidth` 33→39), so no index
+  moved and the snapshot round-trips unchanged. HUD: a palette building + a trade
+  board on selecting your market. `tests/Market` (14 cases incl. twin-client
+  determinism over 600 ticks).
 - **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
   cheaper wonders | Scholarship = faster tree) → Printing Press → the **Academy**
   capstone, which unlocks **Wonders** (`BuildingType.Wonder`) — a grand, expensive
@@ -258,6 +272,9 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,
   `InterestDivisor`/`InterestCap`/`InterestCapGrand`, `GrandExchangeFloor`
   (`Tech.cs`), added to gold each realm tick in `ResolveRealm`.
+- Market: `GoodBasePrice` per good and the ±25% spread in `BuyPrice`/`SellPrice`
+  (`Market.cs`); `AutoTrade` runs inside `ResolveRealm`. Market build cost in
+  `BuildCost`; weapons-arm-recruit branch in the `Train` command (`Simulation.cs`).
 - Science: research-pace nodes `LibraryPace`/`ScholarshipPace`/`PrintingPace`
   (`Tech.cs`); Wonder base cost in `BuildCost`, its escalation + Engineering
   discount in `BuildCostFor`; `WonderBuildTime` (the rise + sabotage window,
