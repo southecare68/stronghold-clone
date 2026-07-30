@@ -1382,7 +1382,7 @@ namespace Sim
         // A click on rock or water IS refused, and the unit keeps its previous
         // orders; walking to the nearest reachable tile instead would be kinder
         // and is worth doing once there is a UI to explain it.
-        void Order(Unit u, int goalX, int goalY)
+        void Order(Unit u, int goalX, int goalY, int[] prebuiltDanger = null)
         {
             int gx = Clamp(goalX, 0, Map.Width - 1);
             int gy = Clamp(goalY, 0, Map.Height - 1);
@@ -1395,7 +1395,7 @@ namespace Sim
             // A cautious march weights tiles near known enemies, so A* curves around
             // them; a plain march passes null and routes straight, exactly as before
             // (so the parity scenario, which never marches cautiously, is untouched).
-            int[] danger = u.Cautious ? BuildDangerMap(u.Owner) : null;
+            int[] danger = u.Cautious ? (prebuiltDanger ?? BuildDangerMap(u.Owner)) : null;
             if (!_pathFinder.TryFindPath(sx, sy, gx, gy, _rawPath, danger)) return;
 
             Smooth(sx, sy, _rawPath, _smoothPath, danger);
@@ -1474,6 +1474,44 @@ namespace Sim
             u.Ty = Fixed.FromInt(w.Y);
         }
 
+        // Cautious marchers re-plan as they go: a route safe when it was ordered can
+        // lead into danger that only comes into view later (a patrol crests a hill, the
+        // fog lifts on an ambush). Every RerouteInterval, any cautious unit whose road
+        // ahead now crosses danger re-paths from where it stands to the same stop,
+        // curving around the newly-seen threat. Runs in the tick on the fog-updated
+        // world, in id order, off the shared danger field — so every machine reroutes
+        // identically. Plain (non-cautious) marches and the parity scenario never enter
+        // here, so nothing that did not opt in is touched.
+        const int RerouteInterval = 20;   // re-evaluate cautious marches ~1s
+        void ResolveCautiousReroute()
+        {
+            if (TickNumber == 0 || TickNumber % RerouteInterval != 0) return;
+            Dictionary<int, int[]> dangerByOwner = null;
+            foreach (var u in Units)      // id order — deterministic
+            {
+                if (!u.Alive || !u.Cautious || !u.HasPath) continue;
+                dangerByOwner ??= new Dictionary<int, int[]>();
+                if (!dangerByOwner.TryGetValue(u.Owner, out var danger))
+                    dangerByOwner[u.Owner] = danger = BuildDangerMap(u.Owner);
+                if (!PathAheadCrossesDanger(u, danger)) continue;
+                var dest = u.Path[u.Path.Count - 1];   // keep the same stop; just find a safer way to it
+                Order(u, dest.X, dest.Y, danger);
+            }
+        }
+
+        // Does the road a unit still has to walk — from where it stands, through the
+        // rest of its current route — cross any danger? The trigger for a reroute.
+        bool PathAheadCrossesDanger(Unit u, int[] danger)
+        {
+            int cx = Fixed.ToInt(u.X), cy = Fixed.ToInt(u.Y);
+            for (int i = u.PathIndex; i < u.Path.Count; i++)
+            {
+                if (LineCrossesDanger(cx, cy, u.Path[i].X, u.Path[i].Y, danger)) return true;
+                cx = u.Path[i].X; cy = u.Path[i].Y;
+            }
+            return false;
+        }
+
         // Pop queued stops until one yields a walkable route or the queue runs dry.
         // A stop that can't be pathed to (blocked, off-map) is simply skipped, so a
         // stale waypoint never strands the rest of the journey.
@@ -1538,6 +1576,10 @@ namespace Sim
             // identical on every machine and needs no network traffic. Empty unless
             // EnableAi was called, which is why the parity scenario is untouched.
             if (_aiOwners.Count > 0) StepAi();
+
+            // Cautious marchers re-plan against the just-updated sight before they
+            // step, so a threat that has only now come into view bends the route.
+            ResolveCautiousReroute();
 
             foreach (var u in Units)
             {

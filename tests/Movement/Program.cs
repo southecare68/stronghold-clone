@@ -34,6 +34,7 @@ static class Program
         AUnitWalksAChainOfWaypoints();
         AFreshOrderClearsTheQueue();
         ACautiousMarchGivesAnEnemyAWideBerth();
+        ACautiousMarchReroutesWhenDangerAppears();
         APlainMarchIgnoresEnemies();
         ASnapshotCarriesTheQueueAndCaution();
         TwoClientsAgreeOnAMarchWithWaypointsAndCaution();
@@ -101,6 +102,29 @@ static class Program
         sim.SpawnUnit(2, 20, 20);                      // an enemy soldier on the straight line
         Order(sim, Move(1, u.Id, 38, 20, cautious ? Cautious : 0));
         return (PathLen(2, 20, u.Path), NearestApproach(2, 20, u.Path, 20, 20));
+    }
+
+    // The dynamic part: a cautious unit re-plans as it marches. It is sent off on a
+    // clear road, an enemy then appears astride it, and the unit — long after that
+    // first click — bends away rather than walking through the new danger.
+    static void ACautiousMarchReroutesWhenDangerAppears()
+    {
+        Console.WriteLine("\na cautious march reroutes when danger appears en route:");
+        var sim = new Simulation(TileMap.Open(40));
+        var u = sim.SpawnUnit(1, 2, 20);
+        Order(sim, Move(1, u.Id, 38, 20, Cautious));       // ordered on a clear road (no enemy yet)
+        Check("its first route runs straight down the open lane", NearestApproach(2, 20, u.Path, 20, 20) < 1.0);
+
+        sim.SpawnUnit(2, 20, 20);                          // an enemy now stands across the road
+
+        double minDist = double.MaxValue;
+        for (int i = 0; i < 3000 && u.HasPath && Fixed.ToInt(u.X) < 30; i++)
+        {
+            sim.Tick(None);
+            double dx = Fixed.ToInt(u.X) - 20, dy = Fixed.ToInt(u.Y) - 20;
+            minDist = Math.Min(minDist, Math.Sqrt(dx * dx + dy * dy));
+        }
+        Check($"it reroutes around the enemy it met en route (nearest {minDist:0.0} tiles)", minDist > 2.5);
     }
 
     // The regression guard: a plain march is blind to enemies — it still cuts the

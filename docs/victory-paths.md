@@ -208,10 +208,14 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   route around known enemies). Caution builds a per-owner **danger field** from
   visible enemy soldiers (`BuildDangerMap`, `DangerRadius`/`DangerPeak`) that A*
   adds as extra enter-cost, and the string-puller is taught not to straighten a
-  detour back through danger (`LineCrossesDanger`). Both the queue and the flag are
-  hashed and snapshotted; the HUD draws beacons over each stop (blue direct, amber
-  cautious). `tests/Movement` covers the chain, the berth, the snapshot, and
-  twin-client determinism.
+  detour back through danger (`LineCrossesDanger`). Caution is **dynamic**: every
+  `RerouteInterval`, any cautious unit whose road ahead now crosses danger re-paths
+  from where it stands to the same stop (`ResolveCautiousReroute`), so a threat that
+  only comes into view mid-march — a patrol crests a hill, fog lifts on an ambush —
+  bends the route long after the first click. Both the queue and the flag are hashed
+  and snapshotted; the HUD draws beacons over each stop (blue direct, amber
+  cautious). `tests/Movement` covers the chain, the berth, the mid-march reroute,
+  the snapshot, and twin-client determinism.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -293,7 +297,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Population floor: `MinPopToWin` (200, `Victory.cs`) — the peasant count every
   crown requires; gates the hold accrual and the buzzer, not the metric itself.
 - Cautious march: `DangerRadius`/`DangerPeak` (`Simulation.cs`) — how far a known
-  enemy's avoidance bubble reaches and how strongly it repels the path.
+  enemy's avoidance bubble reaches and how strongly it repels the path;
+  `RerouteInterval` — how often a cautious unit re-plans against newly-seen danger.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,
