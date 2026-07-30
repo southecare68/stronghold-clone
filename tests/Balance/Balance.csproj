@@ -1,0 +1,23 @@
+<!-- Balance — a path-race harness. Pursues each of the four crowns under the same
+     granted economy (research the branch, build its structures, let its metric
+     evolve) and reports ticks-to-reach the HIGH goal, so the four paths can be
+     compared and the constants tuned until they land in a comparable band.
+
+     A measurement tool as much as a test: it prints a table, and asserts every path
+     reaches its crown and the spread stays within a factor. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>BalanceTests</RootNamespace>
+    <AssemblyName>BalanceTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

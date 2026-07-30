@@ -463,7 +463,7 @@ namespace Sim
             new[] { 30, 10, 0 },      // Iron Mine — timber and stone to sink the shaft, then pays back in iron
             new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
             new[] { 20, 10, 0 },      // Church — timber and stone; ministers to a flock, converting the realm (see ResolveRealm)
-            new[] { 60, 100, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
+            new[] { 80, 130, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,

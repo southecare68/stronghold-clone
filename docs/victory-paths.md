@@ -28,6 +28,9 @@ players filling two path-slots each, every path is contested roughly twice.
 | **Domain** | The Sovereign | **5,000 population** + hold **5 territories** | **2,500 pop** + **2 territories** |
 | **Science** | The Scholar | Complete the tech tree + **2 wonders** | 1 wonder + 75% of the tree |
 
+*(These are the design's numbers. The shipped targets are scaled to the prototype so
+the four races are comparable — see [Balance](#balance).)*
+
 ### The shared laws (what keeps it balanced)
 
 - **Dual goal** — high in one path + medium in another.
@@ -112,7 +115,7 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
 - **Economic branch** (`EconomicIncome`): a gold engine on top of tax — Trade Post
   pays a steady flow, the Guild Charter fork adds Monopoly's flat high margin *or*
   Bourse's per-building breadth, Banking House compounds interest on the hoard, and
-  the **Grand Exchange** capstone floors the income and unlocks the 1M HIGH. Added
+  the **Grand Exchange** capstone floors the income and unlocks the gold HIGH. Added
   to gold each realm tick; a **Tech HUD** (C key) lets a human spend research, node
   by node, across every branch.
 - **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
@@ -202,7 +205,7 @@ on the shipped tech spine. Each is a plug-in, not a rewrite.
 | **1** | Faith metric + the Church | ✅ shipped |
 | **T** | **Tech spine** — research economy, the web, capstone-gates-HIGH, cross-branch cost + **Religious branch** ported, AI climbs it | ✅ shipped |
 | **T-ui** | Tech-tree HUD — research readout, a node panel to spend it, capstone/branch progress | ✅ shipped |
-| **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the 1M HIGH | ✅ shipped |
+| **2** | **Economic branch** — Trade Post → Guild Charter fork → Banking House → **★ Grand Exchange**, paying a trade income (flow, margin, interest) on top of tax; capstone gates the gold HIGH | ✅ shipped |
 | **4** | **Science branch** — Scholar's Hut → Library → University fork → Academy → **Wonders** (the new buildable); HIGH = 2 wonders, MED = 1, capstone-gated | ✅ shipped |
 | **3** | **Domain branch + multi-territory** — Farmstead → Husbandry → Settlement fork → Provincial Keeps → **★ Sovereign's Court**; **found new keeps** (each a territory), Homesteads multiplies housing, Husbandry/Colonists speed growth; HIGH = pop + 5 territories | ✅ shipped (peaceful expansion) |
 | **5** | **The spy counter-web** — Muster → Spy Guild → the five spies + Bodyguard; each dagger pushes one rival metric back, blunted by that branch's Tier-III counter | ✅ shipped |
@@ -245,3 +248,30 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Spies: `SpyCost`, `SpyCooldown`, and the per-effect sizes `EmbezzleCap` /
   `InquisitHit`+`InquisitSoft` / `SabotageHit`+`SabotageSoft` / `AgitateHit`+
   `AgitateSoft` (`Spy.cs`); the counters are the branches' own Tier-III nodes.
+
+---
+
+## Balance
+
+`tests/Balance` is a **path-race harness**: it pursues each crown with a lone realm
+on the *same* granted build economy (gold and population are NOT granted — they must
+be earned and settled), and reports the tick at which each HIGH goal is first
+reached. It asserts every path reaches its crown and the spread stays within a
+factor, so a retune that breaks parity fails the suite.
+
+The design's headline numbers (a million gold, five thousand souls) assume a far
+larger-scale game; at this prototype's rates they'd make Economic and Domain
+multi-hour marathons next to a two-minute Religious rush. Scaled to level the field,
+the current reach times are:
+
+| Path | Target | Reach |
+|---|---|---|
+| Science | Academy + 2 wonders | ~1.6 min |
+| Religious | 75% faith | ~1.7 min |
+| Domain | 180 pop + 5 territories | ~5.8 min |
+| Economic | hold 70,000 gold | ~9.6 min |
+
+Spread ~5.9× (was ~395× before tuning). The fast pair (Religious, Science) *reach*
+quickly then defend a 10-minute hold against the Inquisitor / Saboteur; the slow
+pair (Domain, Economic) build up. Hold windows: Economic 15 min, the rest 10 min.
+Re-run `tests/Balance` after any change to a path's engine or target.

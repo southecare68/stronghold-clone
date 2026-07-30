@@ -49,8 +49,10 @@ namespace Sim
     public sealed partial class Simulation
     {
         // --- Goal thresholds (docs/victory-paths.md) --------------------------
-        // Economic — the merchant's hoard: hold a million, having once banked half.
-        const long EconHighGold = 1_000_000, EconMedGold = 500_000;
+        // Economic — the merchant's hoard. Like the census, the design's "million"
+        // assumes a larger-scale economy; at this prototype's gold rates the hoard is
+        // scaled down so the race is comparable to the others. Tunable (see docs).
+        const long EconHighGold = 70_000, EconMedGold = 35_000;
         // Religious — the flock: convert three-quarters of your people, then half.
         // (The design's "+ the faith of N other territories" clause reads through
         // TerritoryCount and is dormant until multi-territory ships — Phase 3.)
@@ -60,7 +62,7 @@ namespace Sim
         // real units per realm, thousands would not be performant) the population
         // targets are scaled down, while the territory counts (5 / 2 keeps) — the
         // path's identity — stand. Tunable; see docs/victory-paths.md.
-        const int DomHighPop = 250, DomMedPop = 120;
+        const int DomHighPop = 180, DomMedPop = 90;
         const int DomHighTerr = 5, DomMedTerr = 2;
         // Science — the tech tree + wonders. The Academy capstone completes the branch
         // and unlocks Wonders; the HIGH is two of them, the MEDIUM one. (The design's
@@ -80,8 +82,8 @@ namespace Sim
         // hoard is the longest vigil; the rest share ten minutes.
         public static int HoldTicksFor(VictoryPath path) => path switch
         {
-            VictoryPath.Economic => 30 * 60 * TickRate,   // a million held for 30 min
-            _                    => 10 * 60 * TickRate,    // the others, ~10 min
+            VictoryPath.Economic => 15 * 60 * TickRate,   // the hoard is the longest vigil, but not thrice the others'
+            _                    => 10 * 60 * TickRate,    // the rest, ~10 min
         };
 
         // Realm-wide announcements produced this match, oldest first. Transient (not

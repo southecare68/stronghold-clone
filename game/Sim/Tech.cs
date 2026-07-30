@@ -66,13 +66,13 @@ namespace Sim
         // --- Economic branch: gold that isn't taxed from peasants ----------------
         // The Economic branch is a gold engine — trade FLOW on top of tax, which is
         // what carries a realm to the half-million and then holds the million.
-        const int TradePostGold = 5;         // caravans: a steady flow each realm tick
-        const int MonopolyGold = 12;         // one good, high margin — a fat flat rate
-        const int BourseGoldPerBld = 1;      // diversified, resilient — scales with a broad economy
-        const int InterestDivisor = 200;     // Banking House: compound interest, ~0.5% of the hoard/tick
-        const int InterestCap = 300;         // capped so it can't run away...
-        const int InterestCapGrand = 600;    // ...unless the Grand Exchange raises the ceiling
-        const int GrandExchangeFloor = 25;   // and it guarantees an income floor, to sustain the hold
+        const int TradePostGold = 10;        // caravans: a steady flow each realm tick
+        const int MonopolyGold = 20;         // one good, high margin — a fat flat rate
+        const int BourseGoldPerBld = 2;      // diversified, resilient — scales with a broad economy
+        const int InterestDivisor = 80;      // Banking House: compound interest, ~1.25% of the hoard/tick
+        const int InterestCap = 500;         // capped so it can't run away...
+        const int InterestCapGrand = 1400;   // ...unless the Grand Exchange raises the ceiling
+        const int GrandExchangeFloor = 40;   // and it guarantees an income floor, to sustain the hold
 
         int LiveBuildingCount(int owner)
         {

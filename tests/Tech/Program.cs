@@ -153,12 +153,12 @@ static class Program
         sim.TryResearch(1, TechTree.Roads);
         sim.TryResearch(1, TechTree.Market);
         sim.TryResearch(1, TechTree.TradePost);
-        Check("Trade Post pays a steady flow", sim.EconomicIncome(1) == 5);
+        Check("Trade Post pays a steady flow", sim.EconomicIncome(1) == 10);
         sim.TryResearch(1, TechTree.Monopoly);
-        Check("Monopoly stacks its high margin", sim.EconomicIncome(1) == 5 + 12);
+        Check("Monopoly stacks its high margin", sim.EconomicIncome(1) == 10 + 20);
         sim.AddGold(1, 400);
         sim.TryResearch(1, TechTree.BankingHouse);
-        Check("Banking House adds interest on the hoard", sim.EconomicIncome(1) == 5 + 12 + 2);
+        Check("Banking House adds interest on the hoard", sim.EconomicIncome(1) == 10 + 20 + 5);
 
         int before = sim.Gold(1);
         Ticks(sim, 400);   // ten realm ticks

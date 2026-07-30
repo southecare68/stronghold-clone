@@ -3561,9 +3561,9 @@ public partial class World3D : Node3D
             var p = _sim.Progress(me, path);
             string metric = pi switch
             {
-                0 => $"{_sim.Gold(me):N0} / 1,000,000 gold",
+                0 => $"{_sim.Gold(me):N0} / 70,000 gold",
                 1 => $"{_sim.Faith(me)}% / 75% converted",
-                2 => $"{_sim.PeasantCount(me):N0} / 250 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
+                2 => $"{_sim.PeasantCount(me):N0} / 180 pop   ·   {_sim.TerritoryCount(me)} / 5 land",
                 _ => $"{_sim.ResearchedCount(me, TechBranch.Science)} / 4 tree   ·   {_sim.WonderCount(me)} / 2 wonders",
             };
             string mark = p.MediumBanked ? "   ✓ medium" : "";
