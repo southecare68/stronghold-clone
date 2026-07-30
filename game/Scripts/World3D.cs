@@ -82,6 +82,9 @@ public partial class World3D : Node3D
     readonly Dictionary<int, Node3D> _unitNodes = new();
     readonly Dictionary<int, MeshInstance3D> _carryProp = new();   // the load a peasant hauls, shown in front of it
     readonly Dictionary<int, Node3D> _buildingNodes = new();
+    // A floating "⚠ no worker" marker over each of your own work buildings that has
+    // no one staffing it (unhired, or a workshop no one can reach), keyed by id.
+    readonly Dictionary<int, Node3D> _workerWarn = new();
     readonly Dictionary<int, int> _turretMask = new();   // a turret's rampart-neighbour bits, to rebuild its spurs
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
     PackedScene _mTree, _mRock, _mWheat;
@@ -178,7 +181,7 @@ public partial class World3D : Node3D
         BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
-        BuildingType.Farm, BuildingType.Mill, BuildingType.Bakery, BuildingType.Granary,
+        BuildingType.Farm, BuildingType.Granary,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
     };
 
@@ -1308,6 +1311,10 @@ public partial class World3D : Node3D
             lab.AddThemeFontSizeOverride("font_size", 15);
             _stat[i] = lab;
             cell.AddChild(lab);
+
+            // Grain and Flour are retired — the farm reaps food straight off its field
+            // — so keep their slots out of the bar rather than pinning them at zero.
+            if (i == (int)ResourceType.Grain || i == (int)ResourceType.Flour) cell.Visible = false;
 
             row.AddChild(cell);
         }
@@ -2559,8 +2566,42 @@ public partial class World3D : Node3D
                 float prog = b.Complete ? 1f : 1f - (float)b.Construction / Simulation.WonderBuildTime;
                 node.Position = new Vector3(b.X + (b.W - 1) / 2f, -(1f - prog) * 2.4f, b.Y + (b.H - 1) / 2f);
             }
+
+            UpdateWorkerWarning(b);
         }
         Prune(_buildingNodes, live);
+        Prune(_workerWarn, live);
+    }
+
+    // Raise or clear the floating "no worker" marker over one of your buildings. Only
+    // your own, and only work buildings that currently lack a worker (see WantsWorker)
+    // — so an idle mill boxed in with no room for a miller, or a hut with no spare
+    // peasant, reads at a glance instead of failing silently.
+    void UpdateWorkerWarning(Building b)
+    {
+        bool wants = b.Owner == MyPlayer && _sim.WantsWorker(b);
+        if (wants && !_workerWarn.ContainsKey(b.Id))
+        {
+            var lbl = new Label3D
+            {
+                Text = "⚠",
+                Modulate = new Color(1f, 0.80f, 0.20f),
+                OutlineModulate = new Color(0.15f, 0.10f, 0f),
+                FontSize = 120, OutlineSize = 28,
+                Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                NoDepthTest = true,
+                FixedSize = true,
+                PixelSize = 0.007f,
+                Position = new Vector3(b.X + (b.W - 1) / 2f, 3.2f, b.Y + (b.H - 1) / 2f),
+            };
+            AddChild(lbl);
+            _workerWarn[b.Id] = lbl;
+        }
+        else if (!wants && _workerWarn.TryGetValue(b.Id, out var old))
+        {
+            old.QueueFree();
+            _workerWarn.Remove(b.Id);
+        }
     }
 
     // Resource nodes as trees (wood/grain) and rock (stone). Shown only on ground
@@ -2577,9 +2618,9 @@ public partial class World3D : Node3D
             if (!_nodeNodes.TryGetValue(n.Id, out var node))
             {
                 if (!seen) continue;
-                if (n.Type == ResourceType.Grain)
+                if (n.Type == ResourceType.Food)
                 {
-                    node = MakeGrainField(n);            // plowed soil + wheat, not a tree
+                    node = MakeGrainField(n);            // a farm's crop field: plowed soil + standing crop
                 }
                 else
                 {

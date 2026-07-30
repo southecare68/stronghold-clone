@@ -1,15 +1,14 @@
-// FoodChain — farm → grain → mill → flour → bakery → bread.
+// FoodChain — a farm reaps its field straight into food.
 //
-// The farm is a work building like the woodcutter's hut, pointed at a wheat
-// field it plants for itself; its farmer reaps grain and hauls it home. The mill
-// and bakery are workshops: each turns a batch of one banked good into another
-// every interval, but only while its input is on hand. Bread is the goal (Food).
+// The farm is a work building like the woodcutter's hut, pointed at a CROP FIELD it
+// plants for itself; its farmer reaps FOOD and hauls it home — the way a Stronghold
+// apple orchard or dairy feeds a castle, no mill-and-bakery chain to staff. Food is
+// the goal resource: it feeds the realm's rations and breeds population.
 //
-// As with the wood chain, the failures that bite are determinism ones — a farm
-// that sows its field on a different tile, or a workshop that fires a batch a
-// tick apart, desyncs two machines a moment later — so the two-client check is
-// the point. The rest pins down that the chain flows and that each step waits on
-// its supplier instead of minting goods from nothing.
+// As with the wood chain, the failures that bite are determinism ones — a farm that
+// sows its field on a different tile desyncs two machines a moment later — so the
+// two-client check is the point. The rest pins down that food flows off the field
+// and that a razed farm frees its farmer.
 
 using System;
 using System.Collections.Generic;
@@ -21,18 +20,15 @@ static class Program
 
     static void Main()
     {
-        Console.WriteLine("FoodChain — farm → mill → bakery\n");
+        Console.WriteLine("FoodChain — farm → food\n");
 
-        NoFarmMeansNoGrain();
-        AFarmPlantsAFieldAndGrainFlows();
+        NoFarmMeansNoFood();
+        AFarmPlantsAFieldAndFoodFlows();
         AFarmReplantsItsFieldSoItNeverRunsDry();
         AnInexhaustibleFieldStaysPutAndNeverEmpties();
         EveryPassableTileGrowsAField();
-        RicherSoilYieldsMoreGrain();
-        AMillGrindsGrainIntoFlour();
-        AMillWithNoGrainStaysIdle();
-        ABakeryBakesFlourIntoBread();
-        TheWholeChainTurnsAnEmptyLarderIntoFood();
+        RicherSoilYieldsMoreFood();
+        AFarmFeedsAndGrowsTheRealm();
         RazingTheFarmStopsItsFarmer();
         AGranaryIsACloserDropOffForTheHarvest();
         PopulationIsCappedByHousing();
@@ -45,112 +41,102 @@ static class Program
         Environment.Exit(_failures == 0 ? 0 : 1);
     }
 
-    // Opt-in: with no food buildings, grain and flour never leave zero and the
-    // world is exactly what it was before the chain existed.
-    static void NoFarmMeansNoGrain()
+    // Opt-in: with no farm, no crop field is sown and no food is reaped.
+    static void NoFarmMeansNoFood()
     {
-        Console.WriteLine("no farm, no grain:");
+        Console.WriteLine("no farm, no food from farming:");
         var sim = new Simulation(TileMap.Open(48));
-        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
-        sim.SpawnUnit(1, 6, 6);
+        sim.SetDropOff(1, 6, 6);
+        Seed(sim, 1, 2);
         for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
-        Check("no grain appeared from nowhere", sim.Stockpile(1, ResourceType.Grain) == 0);
-        Check("no flour either", sim.Stockpile(1, ResourceType.Flour) == 0);
-        Check("and no field was sown", NodesOfType(sim, ResourceType.Grain) == 0);
+        Check("no food appeared from nowhere", sim.Stockpile(1, ResourceType.Food) == 0);
+        Check("and no field was sown", NodesOfType(sim, ResourceType.Food) == 0);
     }
 
-    // Placing a farm alone breeds a farmer, sows a field, and grain begins banking
-    // with no orders given — the whole self-running cycle, on a bare grass map.
-    static void AFarmPlantsAFieldAndGrainFlows()
+    // Placing a farm alone breeds a farmer, sows a field, and food begins banking
+    // with no orders given — the whole self-running cycle, on a bare grass map. Uses
+    // a plain drop-off, no keep, so no rations eat the harvest as it lands.
+    static void AFarmPlantsAFieldAndFoodFlows()
     {
-        Console.WriteLine("\na farm sows a field and grain flows:");
+        Console.WriteLine("\na farm sows a field and food flows:");
         var sim = new Simulation(TileMap.Open(48));
-        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);            // the drop-off
-        Seed(sim, 1, 2);                                          // a couple of idle peasants
+        sim.SetDropOff(1, 4, 4);
+        Seed(sim, 1, 2);
 
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
-        Check("a wheat field was sown at once", NodesOfType(sim, ResourceType.Grain) >= 1);
+        Check("a crop field was sown at once", NodesOfType(sim, ResourceType.Food) >= 1);
         Check("empty farm has no worker yet", farm.WorkerId == 0);
 
-        Settle(sim);                                             // it hires a farmer
+        Settle(sim);
         Check("the farm took on a farmer", farm.WorkerId != 0);
         Check("its worker is a peasant on the job (Job.Working)",
               Find(sim, farm.WorkerId)?.Job == Job.Working);
 
-        Check("nothing banked yet", sim.Stockpile(1, ResourceType.Grain) == 0);
-        for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
-        Check($"grain is accumulating on its own ({sim.Stockpile(1, ResourceType.Grain)})",
-              sim.Stockpile(1, ResourceType.Grain) > 0);
+        for (int i = 0; i < 900; i++) sim.Tick(Array.Empty<Command>());
+        Check($"food is accumulating on its own ({sim.Stockpile(1, ResourceType.Food)})",
+              sim.Stockpile(1, ResourceType.Food) > 0);
     }
 
-    // A farm is renewable: reap far more grain than a single field holds, and it
-    // keeps coming — the farm sows a fresh field each time the last is cut down.
+    // A farm is renewable: reap far more food than a single field holds, and it keeps
+    // coming — the farm sows a fresh field each time the last is cut down.
     static void AFarmReplantsItsFieldSoItNeverRunsDry()
     {
         Console.WriteLine("\na farm replants its field and never runs dry:");
         var sim = new Simulation(TileMap.Open(48));
-        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        sim.SetDropOff(1, 4, 4);
         Seed(sim, 1, 2);
-        var store = sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);   // clear of the 3x3 farm
+        var store = sim.PlaceBuilding(BuildingType.Granary, 1, 15, 16);   // clear of the 3x3 farm
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
-        Check("farm and storehouse both fit", store != null && farm != null);
+        Check("farm and granary both fit", store != null && farm != null);
 
-        // One field holds 240 grain; run long enough to reap well past that. (No
-        // bakery here, so no food and no population growth — grain just banks.)
         for (int i = 0; i < 6000; i++) sim.Tick(Array.Empty<Command>());
-        int banked = sim.Stockpile(1, ResourceType.Grain);
+        int banked = sim.Stockpile(1, ResourceType.Food);
         Check($"reaped more than a single field's worth ({banked} > 240)", banked > 240);
         Check("and a field is still standing to be cut",
-              NodesOfType(sim, ResourceType.Grain) >= 1);
+              NodesOfType(sim, ResourceType.Food) >= 1);
     }
 
-    // With InfiniteResources on, a farm reaps its ONE field IN PLACE — it never
-    // draws down and never replants onto fresh ground, so the field stays a single
-    // tile and farms can pack tight, freeing land for other buildings. (Off, the
-    // farm replants across tiles as fields run out — proven directly above.)
+    // With InfiniteResources on, a farm reaps its ONE field IN PLACE — it never draws
+    // down and never replants onto fresh ground, so the field stays a single tile and
+    // farms can pack tight. (Off, the farm replants across tiles — proven above.)
     static void AnInexhaustibleFieldStaysPutAndNeverEmpties()
     {
         Console.WriteLine("\nwith infinite resources on, a field stays put and never empties:");
         var sim = new Simulation(TileMap.Open(48)) { InfiniteResources = true };
-        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        sim.SetDropOff(1, 4, 4);
         Seed(sim, 1, 1);
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
         Check("the farm fits", farm != null);
 
         Settle(sim, 80);                       // hire the farmer, sow the field
-        var field = GrainField(sim);
-        Check("a wheat field was sown", field != null);
+        var field = FoodField(sim);
+        Check("a crop field was sown", field != null);
         int full = field?.Amount ?? 0;
 
         for (int i = 0; i < 3000; i++) sim.Tick(Array.Empty<Command>());
         Check($"the field is still full, never drawn down ({field?.Amount}/{full})",
               field != null && field.Amount == full);
-        Check($"and it is still the only field, no replant onto fresh ground ({NodesOfType(sim, ResourceType.Grain)})",
-              NodesOfType(sim, ResourceType.Grain) == 1);
-        // Grain banked while the field held at full: a finite field would have been
-        // drawn down by exactly this haul, so the two together prove it gave freely.
-        Check($"yet grain kept flowing off that full field ({sim.Stockpile(1, ResourceType.Grain)} banked)",
-              sim.Stockpile(1, ResourceType.Grain) > 0);
+        Check($"and it is still the only field, no replant onto fresh ground ({NodesOfType(sim, ResourceType.Food)})",
+              NodesOfType(sim, ResourceType.Food) == 1);
+        Check($"yet food kept flowing off that full field ({sim.Stockpile(1, ResourceType.Food)} banked)",
+              sim.Stockpile(1, ResourceType.Food) > 0);
     }
 
     // Every passable tile grows at least a one-food field, so a farm on plain,
-    // un-improved ground still feeds you — the fallback that means running short of
-    // prime soil never boxes you out of food. Only a deposit tile (or water/rock)
-    // grows nothing: a field can't overlap a forest, quarry or mine.
+    // un-improved ground still feeds you. Only a deposit tile (or water/rock) grows
+    // nothing: a field can't overlap a forest, quarry or mine.
     static void EveryPassableTileGrowsAField()
     {
         Console.WriteLine("\nany passable tile grows a field; a deposit tile does not:");
 
-        // Plain ground, no fertile soil anywhere — the field still sows and banks.
         var plain = new Simulation(TileMap.Open(48)) { RequireFertileSoil = true };
-        plain.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+        plain.SetDropOff(1, 14, 14);
         Seed(plain, 1, 1);
         plain.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
         for (int i = 0; i < 1500; i++) plain.Tick(Array.Empty<Command>());
-        Check($"a farm on plain ground still banks grain ({plain.Stockpile(1, ResourceType.Grain)})",
-              plain.Stockpile(1, ResourceType.Grain) > 0);
+        Check($"a farm on plain ground still banks food ({plain.Stockpile(1, ResourceType.Food)})",
+              plain.Stockpile(1, ResourceType.Food) > 0);
 
-        // A tile with a deposit on it has no food value — the field skips it.
         var withOre = new Simulation(TileMap.Open(48));
         Check($"plain ground has food value 1 ({withOre.FoodYieldAt(20, 20)})", withOre.FoodYieldAt(20, 20) == 1);
         withOre.SpawnNode(ResourceType.Iron, 20, 20, 100);
@@ -159,102 +145,40 @@ static class Program
     }
 
     // Soil comes in grades, and a field reaps more per gather on richer ground — so
-    // the SAME farm, run the same time, banks far more grain on prime soil than thin.
-    static void RicherSoilYieldsMoreGrain()
+    // the SAME farm, run the same time, banks far more food on prime soil than thin.
+    static void RicherSoilYieldsMoreFood()
     {
-        Console.WriteLine("\nricher soil yields more grain:");
+        Console.WriteLine("\nricher soil yields more food:");
         int Bank(Terrain grade)
         {
             var map = TileMap.Open(48);
             for (int y = 18; y <= 26; y++) for (int x = 18; x <= 26; x++) map.Set(x, y, grade);
             var sim = new Simulation(map) { RequireFertileSoil = true };
-            sim.PlaceBuilding(BuildingType.Keep, 1, 14, 14);
+            sim.SetDropOff(1, 14, 14);
             Seed(sim, 1, 1);
             sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
             for (int i = 0; i < 1500; i++) sim.Tick(Array.Empty<Command>());
-            return sim.Stockpile(1, ResourceType.Grain);
+            return sim.Stockpile(1, ResourceType.Food);
         }
         int poor = Bank(Terrain.FertilePoor), rich = Bank(Terrain.FertileRich);
         Check($"thin soil still yields something ({poor})", poor > 0);
         Check($"and prime soil out-yields it ({rich} > {poor})", rich > poor);
     }
 
-    static ResourceNode GrainField(Simulation sim)
+    // End to end on an empty larder: a farm, staffed by a starting workforce, must
+    // reap food and — the whole point — turn it into new peasants, all by itself.
+    static void AFarmFeedsAndGrowsTheRealm()
     {
-        foreach (var n in sim.NodeList) if (n.Type == ResourceType.Grain) return n;
-        return null;
-    }
-
-    // A mill grinds banked grain into flour, one batch at a time, and takes only
-    // grain — it does not conjure flour where there was no grain to grind.
-    static void AMillGrindsGrainIntoFlour()
-    {
-        Console.WriteLine("\na mill grinds grain into flour:");
-        var sim = new Simulation(TileMap.Open(48));
-        sim.SetDropOff(1, 17, 17);          // miller spawns here; no keep => no population growth
-        sim.AddResource(1, ResourceType.Grain, 40);
-        Seed(sim, 1, 1);                    // a miller to man the mill
-        sim.PlaceBuilding(BuildingType.Mill, 1, 20, 20);
-
-        for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
-        int grain = sim.Stockpile(1, ResourceType.Grain);
-        int flour = sim.Stockpile(1, ResourceType.Flour);
-        Check($"flour was produced ({flour})", flour > 0);
-        Check($"grain was consumed to make it ({grain} left of 40)", grain < 40);
-        Check("grain in == flour out (1:1, nothing lost or minted)", (40 - grain) == flour);
-    }
-
-    // A mill with no grain grinds nothing — the step waits on its supplier rather
-    // than producing flour from an empty bin.
-    static void AMillWithNoGrainStaysIdle()
-    {
-        Console.WriteLine("\na manned mill with no grain stays idle:");
-        var sim = new Simulation(TileMap.Open(48));
-        sim.SetDropOff(1, 17, 17);
-        Seed(sim, 1, 1);                    // fully manned — but there is no grain
-        sim.PlaceBuilding(BuildingType.Mill, 1, 20, 20);
-        for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
-        Check("no flour from an empty bin", sim.Stockpile(1, ResourceType.Flour) == 0);
-    }
-
-    // A bakery bakes banked flour into bread (Food), consuming flour as it goes.
-    static void ABakeryBakesFlourIntoBread()
-    {
-        Console.WriteLine("\na bakery bakes flour into bread:");
-        var sim = new Simulation(TileMap.Open(48));
-        sim.SetDropOff(1, 17, 17);          // baker spawns here; no keep => food is not spent on population
-        sim.AddResource(1, ResourceType.Flour, 40);
-        Seed(sim, 1, 1);                    // a baker to man the bakery
-        sim.PlaceBuilding(BuildingType.Bakery, 1, 20, 20);
-
-        for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
-        int flour = sim.Stockpile(1, ResourceType.Flour);
-        int food = sim.Stockpile(1, ResourceType.Food);
-        Check($"bread (Food) was baked ({food})", food > 0);
-        Check($"flour was consumed to bake it ({flour} left of 40)", flour < 40);
-    }
-
-    // End to end on an empty larder: a farm, a mill, and a bakery, staffed by a
-    // starting workforce, must turn wheat into bread and — the whole point now —
-    // bread into new peasants, all by themselves.
-    static void TheWholeChainTurnsAnEmptyLarderIntoFood()
-    {
-        Console.WriteLine("\nthe whole chain turns wheat into bread into peasants:");
+        Console.WriteLine("\na farm feeds the realm and grows it:");
         var sim = new Simulation(TileMap.Open(64));
         sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
-        Seed(sim, 1, 3);                                                     // a farmer, a miller, a baker
+        Seed(sim, 1, 2);                                                     // a farmer, plus a spare
         int seeded = Peasants(sim, 1);
-        var store = sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);   // grain banks close to the field
         var farm = sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
-        var mill = sim.PlaceBuilding(BuildingType.Mill, 1, 30, 30);
-        var bakery = sim.PlaceBuilding(BuildingType.Bakery, 1, 34, 30);
-        Check("all four buildings fit", store != null && farm != null && mill != null && bakery != null);
+        Check("the farm fits", farm != null);
 
         Check("larder starts empty", sim.Stockpile(1, ResourceType.Food) == 0);
         for (int i = 0; i < 5000; i++) sim.Tick(Array.Empty<Command>());
-
-        // Food is now SPENT on population, so the payoff is more peasants, not a
-        // rising food pile — the chain fed and grew the workforce.
         Check($"the workforce grew past the {seeded} it started with ({Peasants(sim, 1)})",
               Peasants(sim, 1) > seeded);
     }
@@ -279,37 +203,33 @@ static class Program
               farmer.Job == Job.None && farmer.IsPeasant);
     }
 
-    // A granary is the storehouse's twin for the food chain: drop one beside a farm
-    // far from the keep and its grain banks FASTER, the round trip cut short — the
-    // same closer-drop-off logic the storehouse gives the woodcutter.
+    // A granary is a closer drop-off for the harvest: drop one beside a farm far from
+    // the keep and its food banks FASTER, the round trip cut short.
     static void AGranaryIsACloserDropOffForTheHarvest()
     {
         Console.WriteLine("\na granary is the closer drop-off for the harvest:");
         var near = new Simulation(TileMap.Open(64));
-        near.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        near.SetDropOff(1, 2, 2);
         Seed(near, 1, 1);
         var g = near.PlaceBuilding(BuildingType.Granary, 1, 34, 30);   // beside the field
         near.PlaceBuilding(BuildingType.Farm, 1, 30, 30);
         Check("the granary fits by the field", g != null);
 
         var far = new Simulation(TileMap.Open(64));
-        far.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        far.SetDropOff(1, 2, 2);
         Seed(far, 1, 1);
-        far.PlaceBuilding(BuildingType.Farm, 1, 30, 30);              // keep only, a long haul home
+        far.PlaceBuilding(BuildingType.Farm, 1, 30, 30);              // drop-off only, a long haul home
 
         for (int i = 0; i < 900; i++) { near.Tick(Array.Empty<Command>()); far.Tick(Array.Empty<Command>()); }
 
-        int withGranary = near.Stockpile(1, ResourceType.Grain);
-        int keepOnly = far.Stockpile(1, ResourceType.Grain);
-        Check($"a nearby granary banks grain faster ({withGranary} vs {keepOnly})",
+        int withGranary = near.Stockpile(1, ResourceType.Food);
+        int keepOnly = far.Stockpile(1, ResourceType.Food);
+        Check($"a nearby granary banks food faster ({withGranary} vs {keepOnly})",
               withGranary > keepOnly);
     }
 
     // Population cannot outgrow its housing: a well-fed, fairly-taxed realm draws
-    // newcomers until every bed is full, then stops; a house lifts the cap by ten
-    // and the immigrants keep coming to fill it. Rations feed that popularity, so
-    // the larder is kept brimming here — this test isolates HOUSING as the limit,
-    // not food. (That rations draw food continuously is proven separately below.)
+    // newcomers until every bed is full, then stops; a house lifts the cap by ten.
     static void PopulationIsCappedByHousing()
     {
         Console.WriteLine("\npopulation is capped by housing:");
@@ -325,7 +245,6 @@ static class Program
         Check($"population grew to the keep's cap and stopped ({sim.PeasantCount(1)}/{keepCap})",
               sim.PeasantCount(1) == keepCap);
 
-        // A house shelters ten more.
         sim.PlaceBuilding(BuildingType.House, 1, 20, 20);
         int withHouse = sim.PopulationCap(1);
         Check($"a house raised the cap by ten ({keepCap} -> {withHouse})", withHouse == keepCap + 10);
@@ -334,18 +253,14 @@ static class Program
         Check($"population grew to the new cap ({sim.PeasantCount(1)}/{withHouse})",
               sim.PeasantCount(1) == withHouse);
 
-        // Rations are a standing cost: even at the cap, a fed populace keeps eating,
-        // so the larder is still being drawn down (the opposite of the old model,
-        // where food was spent only at birth and idled once the court was full).
         int foodAtCap = sim.Stockpile(1, ResourceType.Food);
         for (int i = 0; i < 300; i++) sim.Tick(Array.Empty<Command>());
         Check($"rations still draw the larder at the cap ({foodAtCap} -> {sim.Stockpile(1, ResourceType.Food)})",
               sim.Stockpile(1, ResourceType.Food) < foodAtCap);
     }
 
-    // A standing army eats: each soldier draws food from the larder every meal,
-    // the draw is exactly the army size per interval, and an empty larder floors
-    // at zero rather than going negative.
+    // A standing army eats: each soldier draws food every meal, the draw is exactly
+    // the army size per interval, and an empty larder floors at zero.
     static void AStandingArmyEatsFood()
     {
         Console.WriteLine("\na standing army eats food as upkeep:");
@@ -357,10 +272,8 @@ static class Program
         int start = sim.Stockpile(1, ResourceType.Food);
         for (int i = 0; i < 600; i++) sim.Tick(Array.Empty<Command>());
         int eaten = start - sim.Stockpile(1, ResourceType.Food);
-        // 10 soldiers x 1 food, ten meals over 600 ticks (one every 60) = 100.
         Check($"it ate its keep ({eaten} of 200 over 600 ticks)", eaten == 100);
 
-        // Run the larder dry: it floors at zero, never negative.
         for (int i = 0; i < 3000; i++) sim.Tick(Array.Empty<Command>());
         Check($"a drained larder floors at zero ({sim.Stockpile(1, ResourceType.Food)})",
               sim.Stockpile(1, ResourceType.Food) == 0);
@@ -380,8 +293,8 @@ static class Program
               sim.Stockpile(1, ResourceType.Food) == 100);
     }
 
-    // Upkeep is pure integer bookkeeping, so two machines must draw the larder
-    // down in lockstep.
+    // Upkeep is pure integer bookkeeping, so two machines must draw the larder down
+    // in lockstep.
     static void TwoClientsAgreeOnUpkeep()
     {
         Console.WriteLine("\ntwo clients agree on army upkeep:");
@@ -408,8 +321,8 @@ static class Program
               a.Sim.Stockpile(1, ResourceType.Food) < 300);
     }
 
-    // The one that matters most: the whole chain, computed twice, must agree on
-    // every tick — the field tiles, the haul, and each workshop batch.
+    // The one that matters most: the whole food economy, computed twice, must agree
+    // on every tick — the field tiles and the haul home.
     static void TwoClientsAgreeOnTheFoodChain()
     {
         Console.WriteLine("\ntwo clients agree on the food chain:");
@@ -421,13 +334,11 @@ static class Program
         foreach (var c in new[] { a, b })
         {
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
-            Seed(c.Sim, 1, 5);                                           // workforce for two farms + mill + bakery, plus growth
-            c.Sim.AddResource(1, ResourceType.Food, 120);                // an opening larder, like a real start, so the ramp doesn't starve
-            c.Sim.PlaceBuilding(BuildingType.Storehouse, 1, 15, 16);
+            Seed(c.Sim, 1, 4);                                           // farmers for two farms, plus growth
+            c.Sim.AddResource(1, ResourceType.Food, 120);                // an opening larder so the ramp doesn't starve
+            c.Sim.PlaceBuilding(BuildingType.Granary, 1, 15, 16);
             var f1 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 20, 20);
             var f2 = c.Sim.PlaceBuilding(BuildingType.Farm, 1, 26, 26);   // two farms, well clear of each other
-            c.Sim.PlaceBuilding(BuildingType.Mill, 1, 40, 30);
-            c.Sim.PlaceBuilding(BuildingType.Bakery, 1, 44, 30);
             if (f1 == null || f2 == null) Check("both farms fit", false);
         }
 
@@ -440,10 +351,8 @@ static class Program
         }
         Check($"StateChecksum identical on all 2200 ticks" +
               (desyncs > 0 ? $" (diverged {desyncs}x, first at {first})" : ""), desyncs == 0);
-        // The chain ran end to end: bread bred peasants past the 5 each started
-        // with. (Both agree by the checksum above, so checking one is enough.)
-        Check($"and the workforce grew from the chain ({Peasants(a.Sim, 1)} on A)",
-              Peasants(a.Sim, 1) > 5);
+        Check($"and the workforce grew from the harvest ({Peasants(a.Sim, 1)} on A)",
+              Peasants(a.Sim, 1) > 4);
     }
 
     // ---- helpers -----------------------------------------------------------
@@ -455,8 +364,12 @@ static class Program
         return n;
     }
 
-    // Work buildings hire from population now, so tests seed a workforce and give
-    // it a beat to be taken on. Peasants spawn at the owner's drop-off.
+    static ResourceNode FoodField(Simulation sim)
+    {
+        foreach (var n in sim.NodeList) if (n.Type == ResourceType.Food) return n;
+        return null;
+    }
+
     static void Seed(Simulation sim, int owner, int n)
     {
         for (int i = 0; i < n; i++) sim.SpawnPeasant(owner);

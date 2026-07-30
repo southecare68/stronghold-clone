@@ -433,11 +433,11 @@ namespace Sim
             BuildingType.Quarry => ResourceType.Stone,
             BuildingType.IronMine => ResourceType.Iron,   // digs ore from an iron deposit, hauls it home
             // A farm is a work building like any other — its farmer harvests the
-            // wheat field the farm plants for itself (see PlantField) and hauls
-            // the grain home, reusing the whole gather/haul cycle. The mill and
-            // bakery are NOT work buildings: they are workshops that transform one
-            // stockpile good into another (see ResolveProcessors), no worker.
-            BuildingType.Farm => ResourceType.Grain,
+            // CROP FIELD the farm plants for itself (see PlantField) and hauls the
+            // FOOD home, reusing the whole gather/haul cycle. Food comes straight off
+            // the field now, the way a Stronghold apple orchard or dairy feeds a
+            // castle — no mill-and-bakery chain to staff (those buildings are retired).
+            BuildingType.Farm => ResourceType.Food,
             _ => (ResourceType?)null,
         };
 
@@ -1560,11 +1560,11 @@ namespace Sim
                         {
                             u.GatherTimer = 0;
                             u.CarryType = node.Type;
-                            // A grain field's take per reap is the soil's yield — prime
+                            // A crop field's take per reap is the soil's yield — prime
                             // ground brings three where thin brings one — so a farm on
-                            // richer soil fills up and banks grain faster. Every other
+                            // richer soil fills up and banks food faster. Every other
                             // deposit gives one at a time as before.
-                            int gain = node.Type == ResourceType.Grain
+                            int gain = node.Type == ResourceType.Food
                                 ? Math.Max(1, Map.FieldYield(node.X, node.Y)) : 1;
                             u.CarryAmount += gain;
                             // Inexhaustible deposits give without ever drawing down — a
@@ -1640,10 +1640,10 @@ namespace Sim
             {
                 if (!wb.Alive || !NeedsWorker(wb.Type)) continue;
 
-                // A farm keeps a wheat field standing beside it: if the last one has
+                // A farm keeps a crop field standing beside it: if the last one has
                 // been cut down to nothing, sow a fresh one. This is what makes the
-                // farm renewable — its farmer never runs out of grain to reap.
-                if (wb.Type == BuildingType.Farm && NearestResource(wb, ResourceType.Grain) == null)
+                // farm renewable — its farmer never runs out of food to reap.
+                if (wb.Type == BuildingType.Farm && NearestResource(wb, ResourceType.Food) == null)
                     PlantField(wb);
 
                 var worker = wb.WorkerId != 0 ? Units.Find(u => u.Id == wb.WorkerId) : null;
@@ -1915,7 +1915,7 @@ namespace Sim
             if (!spot.HasValue) return;               // hemmed in entirely; retry next tick
             Nodes.Add(new ResourceNode
             {
-                Id = _nextNodeId++, Type = ResourceType.Grain,
+                Id = _nextNodeId++, Type = ResourceType.Food,   // the field IS the food — reaped straight into the larder
                 X = spot.Value.X, Y = spot.Value.Y, Amount = FieldGrain,
             });
         }
@@ -1994,6 +1994,18 @@ namespace Sim
             if (b.WorkerId == 0) return false;
             var w = Units.Find(u => u.Id == b.WorkerId);
             return w != null && w.Alive && DistToBuilding(w, b) <= ManningRange;
+        }
+
+        // Does this building need a worker it hasn't got — the "no worker" state the
+        // HUD flags over it? A harvester wants one whenever its post is empty; a
+        // workshop whenever no one is standing in it (unreachable or unhired). A
+        // building that needs no worker never wants one.
+        public bool WantsWorker(Building b)
+        {
+            if (!b.Alive || !NeedsWorker(b.Type)) return false;
+            if (IsWorkshop(b.Type)) return !Manned(b);
+            var w = b.WorkerId != 0 ? Units.Find(u => u.Id == b.WorkerId) : null;
+            return w == null || !w.Alive;
         }
 
         // One workshop step. The timer counts up to the interval and then HOLDS

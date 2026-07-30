@@ -112,8 +112,6 @@ namespace Sim
             if (AiCount(owner, BuildingType.WoodcutterHut) < 1 &&
                 AiBuildHarvester(owner, keep, BuildingType.WoodcutterHut, ResourceType.Wood)) return;
             if (AiCount(owner, BuildingType.Farm) < 1 && AiBuildWork(owner, keep, BuildingType.Farm)) return;
-            if (AiCount(owner, BuildingType.Mill) < 1) { AiBuildWork(owner, keep, BuildingType.Mill); return; }
-            if (AiCount(owner, BuildingType.Bakery) < 1) { AiBuildWork(owner, keep, BuildingType.Bakery); return; }
 
             // 2) With bread flowing, a barracks and housing — neither needs a worker,
             //    so they never starve the economy. House up to the level's cap to
@@ -129,8 +127,6 @@ namespace Sim
             //    link is only raised when there is a peasant to run it), more
             //    woodcutters, and a quarry.
             if (AiCount(owner, BuildingType.Farm) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Farm)) return;
-            if (AiCount(owner, BuildingType.Mill) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Mill)) return;
-            if (AiCount(owner, BuildingType.Bakery) < t.FoodChains && AiBuildWork(owner, keep, BuildingType.Bakery)) return;
             if (AiCount(owner, BuildingType.WoodcutterHut) < t.Woodcutters &&
                 AiBuildHarvester(owner, keep, BuildingType.WoodcutterHut, ResourceType.Wood)) return;
             if (AiCount(owner, BuildingType.Quarry) < 1 &&
