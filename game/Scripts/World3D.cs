@@ -158,12 +158,12 @@ public partial class World3D : Node3D
     Mesh _ringMesh;
     Material _ringMine, _ringEnemy;
 
-    // Beacons over the queued stops (and the current destination) of the selected
-    // units — blue for a direct march, amber for a cautious one. Pooled: reused
-    // frame to frame, spare ones simply hidden.
-    readonly List<MeshInstance3D> _wpMarkers = new();
-    Mesh _wpMesh;
-    Material _wpMatDirect, _wpMatCautious;
+    // Flag poles over the destination and any queued stops of the selected units —
+    // a blue banner for a direct march, amber for a cautious one. Pooled: each is a
+    // pole + banner reused frame to frame, spare ones simply hidden.
+    readonly List<(Node3D Node, MeshInstance3D Flag)> _wpMarkers = new();
+    Mesh _poleMesh, _flagMesh;
+    Material _poleMat, _flagMatDirect, _flagMatCautious;
 
     bool _boxing;
     Vector2 _boxStart, _boxEnd;
@@ -1256,9 +1256,11 @@ public partial class World3D : Node3D
         _ringMine = Unshaded(new Color(0.35f, 0.75f, 1f));
         _ringEnemy = Unshaded(new Color(1f, 0.45f, 0.35f));
 
-        _wpMesh = new CylinderMesh { TopRadius = 0.05f, BottomRadius = 0.05f, Height = 1.4f, RadialSegments = 6 };
-        _wpMatDirect = Unshaded(new Color(0.40f, 0.78f, 1f));
-        _wpMatCautious = Unshaded(new Color(1f, 0.72f, 0.28f));
+        _poleMesh = new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.05f, Height = 1.8f, RadialSegments = 6 };
+        _flagMesh = new BoxMesh { Size = new Vector3(0.55f, 0.36f, 0.03f) };
+        _poleMat = Unshaded(new Color(0.20f, 0.16f, 0.12f));   // dark timber
+        _flagMatDirect = Unshaded(new Color(0.40f, 0.78f, 1f));
+        _flagMatCautious = Unshaded(new Color(1f, 0.72f, 0.28f));
 
         // A 2D marquee for box-select, on its own layer above the 3D view.
         var layer = new CanvasLayer();
@@ -4272,9 +4274,9 @@ public partial class World3D : Node3D
         foreach (var id in stale) { _rings[id].QueueFree(); _rings.Remove(id); if (!_unitNodes.ContainsKey(id)) _selected.Remove(id); }
     }
 
-    // Beacons over each selected unit's destination and every queued stop beyond it,
-    // so a multi-stop or cautious march is legible at a glance. Rebuilt each frame
-    // from the pool; leftover markers are hidden, not freed.
+    // A flag pole over each selected unit's destination and every queued stop beyond
+    // it, so a multi-stop or cautious march is legible at a glance. Rebuilt each
+    // frame from the pool; leftover poles are hidden, not freed.
     void UpdateWaypointMarkers()
     {
         int used = 0;
@@ -4285,18 +4287,31 @@ public partial class World3D : Node3D
             if (u.HasPath) PlaceWaypointMarker(ref used, u.Path[u.Path.Count - 1], u.Cautious);
             foreach (var w in u.Waypoints) PlaceWaypointMarker(ref used, w, u.Cautious);
         }
-        for (int i = used; i < _wpMarkers.Count; i++) _wpMarkers[i].Visible = false;
+        for (int i = used; i < _wpMarkers.Count; i++) _wpMarkers[i].Node.Visible = false;
     }
 
     void PlaceWaypointMarker(ref int used, Tile t, bool cautious)
     {
-        MeshInstance3D m;
+        (Node3D Node, MeshInstance3D Flag) m;
         if (used < _wpMarkers.Count) m = _wpMarkers[used];
-        else { m = new MeshInstance3D { Mesh = _wpMesh }; AddChild(m); _wpMarkers.Add(m); }
-        m.MaterialOverride = cautious ? _wpMatCautious : _wpMatDirect;
-        m.Position = new Vector3(t.X, 0.7f, t.Y);
-        m.Visible = true;
+        else { m = MakeFlagPole(); _wpMarkers.Add(m); }
+        m.Flag.MaterialOverride = cautious ? _flagMatCautious : _flagMatDirect;
+        m.Node.Position = new Vector3(t.X, 0f, t.Y);
+        m.Node.Visible = true;
         used++;
+    }
+
+    // A pole with a banner flying from its top — the pole plants on the ground, the
+    // banner sits near the head and off to one side so it reads as a flag, not a bar.
+    (Node3D Node, MeshInstance3D Flag) MakeFlagPole()
+    {
+        var node = new Node3D();
+        var pole = new MeshInstance3D { Mesh = _poleMesh, MaterialOverride = _poleMat, Position = new Vector3(0, 0.9f, 0) };
+        node.AddChild(pole);
+        var flag = new MeshInstance3D { Mesh = _flagMesh, Position = new Vector3(0.30f, 1.55f, 0) };
+        node.AddChild(flag);
+        AddChild(node);
+        return (node, flag);
     }
 
     // Zoom sets the tilt too: at the default distance the angle is unchanged;
