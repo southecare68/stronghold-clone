@@ -32,8 +32,16 @@ namespace Sim
             return pace;
         }
 
-        // Live wonders an owner holds — the Science path's tangible metric.
-        public int WonderCount(int owner) => CountBuildings(owner, BuildingType.Wonder);
+        // Finished wonders an owner holds — the Science path's tangible metric. One
+        // still under construction stands on the map (and can be sabotaged) but does
+        // not count yet.
+        public int WonderCount(int owner)
+        {
+            int n = 0;
+            foreach (var b in Buildings)
+                if (b.Alive && b.Complete && b.Owner == owner && b.Type == BuildingType.Wonder) n++;
+            return n;
+        }
 
         // How many nodes of a branch this owner has researched — the tree-progress a
         // branch's HUD bar reads.
@@ -53,7 +61,9 @@ namespace Sim
         {
             var b = BuildCost[(int)type];
             if (type != BuildingType.Wonder) return b;
-            int mult = 1 + WonderCount(owner);                 // 1st ×1, 2nd ×2 …
+            // Escalate by wonders STANDING (built or still rising), not just finished —
+            // otherwise you could lay two cheap wonders before either counts.
+            int mult = 1 + CountBuildings(owner, BuildingType.Wonder);   // 1st ×1, 2nd ×2 …
             int num = IsTechResearched(owner, TechTree.Engineering) ? 3 : 4;   // Engineering: ×3/4
             return new[] { b[0] * mult * num / 4, b[1] * mult * num / 4, b[2] * mult * num / 4 };
         }

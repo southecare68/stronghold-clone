@@ -126,10 +126,12 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
 - **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
   cheaper wonders | Scholarship = faster tree) → Printing Press → the **Academy**
   capstone, which unlocks **Wonders** (`BuildingType.Wonder`) — a grand, expensive
-  buildable, gated on the Academy, whose cost **escalates** with each one raised
-  (`BuildCostFor`). The Science HIGH is **two wonders** (the MED is one); research
-  nodes along the way quicken `ResearchPace`. The Wonder sits in the build palette,
-  locked until the Academy stands.
+  buildable, gated on the Academy, whose cost **escalates** with each one standing
+  (`BuildCostFor`). A wonder **rises over `WonderBuildTime`** (`Construction` on the
+  building): it stands visible — and **sabotageable** — while it builds, and only
+  counts toward the crown once finished (`WonderCount` = complete only). It visibly
+  emerges from the ground as it nears done. The Science HIGH is **two finished
+  wonders** (the MED is one); research nodes along the way quicken `ResearchPace`.
 - **Domain branch + multi-territory**: Farmstead → Husbandry → the Settlement fork
   (Homesteads = ×4 housing | Colonists = faster growth) → **Provincial Keeps** →
   the **Sovereign's Court** capstone. Provincial Keeps lets you **found a new keep**
@@ -243,7 +245,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   (`Tech.cs`), added to gold each realm tick in `ResolveRealm`.
 - Science: research-pace nodes `LibraryPace`/`ScholarshipPace`/`PrintingPace`
   (`Tech.cs`); Wonder base cost in `BuildCost`, its escalation + Engineering
-  discount in `BuildCostFor`; `SciHighWonders`/`SciMedWonders` (`Victory.cs`).
+  discount in `BuildCostFor`; `WonderBuildTime` (the rise + sabotage window,
+  `Simulation.cs`); `SciHighWonders`/`SciMedWonders` (`Victory.cs`).
 - Domain: `HomesteadMult`, `KeepSpacing`, Keep build cost in `BuildCost`
   (`Simulation.cs`); `DomHighPop`/`DomMedPop`/`DomHighTerr`/`DomMedTerr`
   (`Victory.cs`) — the pop targets are scaled to the prototype (see the census

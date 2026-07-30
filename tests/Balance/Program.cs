@@ -105,9 +105,10 @@ static class Program
                 break;
 
             case VictoryPath.Science:
-                // Once the Academy stands, raise the two wonders as stone allows.
-                if (sim.IsTechResearched(1, TechTree.Academy) && sim.WonderCount(1) < 2)
-                    TryBuild(sim, BuildingType.Wonder, WonderSpot(sim.WonderCount(1)));
+                // Once the Academy stands, raise the two wonders as stone allows — by
+                // wonders STANDING (they take time to finish), not just those counting.
+                if (sim.IsTechResearched(1, TechTree.Academy) && sim.CountBuildings(1, BuildingType.Wonder) < 2)
+                    TryBuild(sim, BuildingType.Wonder, WonderSpot(sim.CountBuildings(1, BuildingType.Wonder)));
                 break;
 
             case VictoryPath.Domain:

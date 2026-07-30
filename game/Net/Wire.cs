@@ -187,6 +187,7 @@ namespace Netcode
                 PutInt(buf, b.TrainQueue.Count);
                 foreach (int did in b.TrainQueue) PutInt(buf, did);
                 PutInt(buf, b.BuildTimer);
+                PutInt(buf, b.Construction);
                 PutInt(buf, b.Open ? 1 : 0);
                 PutInt(buf, b.WorkerId);
             }
@@ -356,6 +357,7 @@ namespace Netcode
                     if (qn < 0 || qn > MaxUnits) return null;
                     for (int j = 0; j < qn; j++) buildings[i].TrainQueue.Add(GetInt(data, ref p));
                     buildings[i].BuildTimer = GetInt(data, ref p);
+                    buildings[i].Construction = GetInt(data, ref p);
                     buildings[i].Open = GetInt(data, ref p) != 0;
                     buildings[i].WorkerId = GetInt(data, ref p);
                 }

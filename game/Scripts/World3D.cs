@@ -2550,6 +2550,15 @@ public partial class World3D : Node3D
             // remember a keep is there even after your scout leaves. Ours always show.
             if (b.Owner != MyPlayer && _sim.FogEnabled)
                 node.Visible = _sim.HasExplored(MyPlayer, b.X + (b.W - 1) / 2, b.Y + (b.H - 1) / 2);
+
+            // A wonder rises out of the ground as it is raised — sunk while under
+            // construction, at full height once finished — so a rival can see it near
+            // done and reach for a Saboteur before it counts.
+            if (b.Type == BuildingType.Wonder)
+            {
+                float prog = b.Complete ? 1f : 1f - (float)b.Construction / Simulation.WonderBuildTime;
+                node.Position = new Vector3(b.X + (b.W - 1) / 2f, -(1f - prog) * 2.4f, b.Y + (b.H - 1) / 2f);
+            }
         }
         Prune(_buildingNodes, live);
     }

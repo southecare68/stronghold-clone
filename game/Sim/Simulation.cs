@@ -119,6 +119,11 @@ namespace Sim
         public List<int> TrainQueue = new();
         public int BuildTimer;
 
+        // Ticks left before a WONDER finishes raising. It stands visible (and
+        // sabotageable) while > 0, but does not count toward the Science crown until
+        // it completes. Zero for a finished wonder and for every other building type.
+        public int Construction;
+
         // A gatehouse's gate. Open lets units cross its tile; closed blocks it
         // like a wall. Ignored by every other building type.
         public bool Open;
@@ -129,6 +134,7 @@ namespace Sim
         public int WorkerId;
 
         public bool Alive => Hp > 0;
+        public bool Complete => Construction <= 0;   // a finished (counting) building
         public int CenterX => X + W / 2;
         public int CenterY => Y + H / 2;
 
@@ -136,7 +142,7 @@ namespace Sim
         {
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
             Hp = Hp, MaxHp = MaxHp, TrainQueue = new List<int>(TrainQueue),
-            BuildTimer = BuildTimer, Open = Open, WorkerId = WorkerId,
+            BuildTimer = BuildTimer, Construction = Construction, Open = Open, WorkerId = WorkerId,
         };
     }
 
@@ -437,6 +443,7 @@ namespace Sim
 
         // --- Buildings --------------------------------------------------------
         const int TrainTime = 60;                               // ticks to produce one unit (3s)
+        public const int WonderBuildTime = 600;                 // ticks a wonder spends rising (30s) — the window it is visible & sabotageable before it counts
         const int TrainCostWood = 15;                           // per unit trained at a Barracks
                                                                 // (flat: the point budget balances power)
 
@@ -922,6 +929,11 @@ namespace Sim
             // A farm still sows its field at once, so grain is standing the moment
             // a farmer is assigned rather than a tick later.
             if (type == BuildingType.Farm) PlantField(b);
+
+            // A wonder rises over time rather than the instant it is placed: it stands
+            // visible and sabotageable through its construction, and only counts toward
+            // the Science crown once finished (see ResolveConstruction / WonderCount).
+            if (type == BuildingType.Wonder) b.Construction = WonderBuildTime;
 
             return b;
         }
@@ -1451,6 +1463,7 @@ namespace Sim
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
+            ResolveConstruction();  // wonders rise tick by tick until they count
             ResolveRealm();         // taxes, rations, popularity, faith — and who comes or goes by it
             ResolveVictory();       // scores each path, announces at 80%, decides a crown (Victory.cs)
             RemoveDead();           // sweep out any peasant that just emigrated
@@ -1716,6 +1729,15 @@ namespace Sim
         // and let peasants come or go by it. Pure integer state in owner order, no
         // RNG — and a scenario with no keep runs no realm at all, so the frozen
         // units-only parity constant never sees it.
+        // Wonders under construction count down each tick; when the timer runs out the
+        // wonder is finished and starts counting toward the Science crown. Cheap — it
+        // only touches buildings that are still rising.
+        void ResolveConstruction()
+        {
+            foreach (var b in Buildings)
+                if (b.Alive && b.Construction > 0) b.Construction--;
+        }
+
         void ResolveRealm()
         {
             if (TickNumber == 0 || TickNumber % RealmInterval != 0) return;
@@ -2472,6 +2494,7 @@ namespace Sim
                 Mix(b.TrainQueue.Count);
                 foreach (int did in b.TrainQueue) Mix(did);
                 Mix(b.BuildTimer);
+                Mix(b.Construction);
                 Mix(b.Open ? 1 : 0);
                 Mix(b.WorkerId);
             }

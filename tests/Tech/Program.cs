@@ -236,10 +236,13 @@ static class Program
 
         Check("full tree, no wonder — HIGH unmet", !sim.Progress(1, VictoryPath.Science).HighMet);
         BuildAt(sim, BuildingType.Wonder, 20, 20);
-        Check("one wonder banks the Science MEDIUM", sim.Progress(1, VictoryPath.Science).MediumMet);
+        Check("a wonder still rising does not count yet", !sim.Progress(1, VictoryPath.Science).MediumMet);
+        Ticks(sim, Simulation.WonderBuildTime);
+        Check("finished, one wonder banks the Science MEDIUM", sim.Progress(1, VictoryPath.Science).MediumMet);
         Check("but one wonder is not the HIGH", !sim.Progress(1, VictoryPath.Science).HighMet);
         BuildAt(sim, BuildingType.Wonder, 26, 20);
-        Check("two wonders + the Academy take the HIGH", sim.Progress(1, VictoryPath.Science).HighMet);
+        Ticks(sim, Simulation.WonderBuildTime);
+        Check("two finished wonders + the Academy take the HIGH", sim.Progress(1, VictoryPath.Science).HighMet);
     }
 
     // The Domain branch: Farmstead → Husbandry → the Settlement fork → Provincial
