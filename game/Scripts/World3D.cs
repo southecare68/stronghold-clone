@@ -2587,11 +2587,11 @@ public partial class World3D : Node3D
                 Text = "⚠",
                 Modulate = new Color(1f, 0.80f, 0.20f),
                 OutlineModulate = new Color(0.15f, 0.10f, 0f),
-                FontSize = 120, OutlineSize = 28,
+                FontSize = 48, OutlineSize = 10,
                 Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
                 NoDepthTest = true,
                 FixedSize = true,
-                PixelSize = 0.007f,
+                PixelSize = 0.006f,
                 Position = new Vector3(b.X + (b.W - 1) / 2f, 3.2f, b.Y + (b.H - 1) / 2f),
             };
             AddChild(lbl);
