@@ -80,7 +80,19 @@ namespace Sim
             // playing a plain economy-and-army game.
             var path = AiPathOf(owner);
             bool pursues = level != AiLevel.Easy;
-            if (pursues) AiResearch(owner, PlanFor(path));
+            if (pursues)
+            {
+                int rival = FirstRival(owner);
+                // Espionage is a Hard-bot craft: only a realm with the food to feast its
+                // people (offsetting the funding tax) runs the spy ring. Normal and its
+                // war-tool alone; Easy neither.
+                bool spymaster = level == AiLevel.Hard;
+                // Its own branch first; once that has nothing affordable, a spymaster
+                // climbs the Spy Guild toward the dagger that answers its rival's crown.
+                if (!AiResearch(owner, PlanFor(path)) && spymaster) AiResearchEspionage(owner, rival);
+                // Fund and run espionage (its own currencies — no build slot taken).
+                if (spymaster) AiRunEspionage(owner, rival);
+            }
 
             // One considered step per cadence — helpers return true once they have
             // spent on a build, so the bot never empties its purse at once.
@@ -149,10 +161,12 @@ namespace Sim
         // Each branch from the trunk to its capstone, in dependency order (taking the
         // first fork option). The bot researches the first node it can afford each
         // cadence, climbing steadily toward the crown-unlocking capstone.
-        static readonly int[] AiEconomicPlan  = { TechTree.Roads, TechTree.Market, TechTree.TradePost, TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange };
-        static readonly int[] AiReligiousPlan = { TechTree.Roads, TechTree.Chapel, TechTree.Shrine, TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple };
-        static readonly int[] AiSciencePlan   = { TechTree.Roads, TechTree.ScholarsHut, TechTree.Library, TechTree.Scholarship, TechTree.PrintingPress, TechTree.Academy };
-        static readonly int[] AiDomainPlan    = { TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry, TechTree.Homesteads, TechTree.ProvincialKeeps, TechTree.SovereignsCourt };
+        // ...to the capstone, then the branch's ⚔ war-tool, so every fight the bot
+        // picks feeds its crown (Conquest even annexes the keeps it takes).
+        static readonly int[] AiEconomicPlan  = { TechTree.Roads, TechTree.Market, TechTree.TradePost, TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange, TechTree.Privateers };
+        static readonly int[] AiReligiousPlan = { TechTree.Roads, TechTree.Chapel, TechTree.Shrine, TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple, TechTree.Crusade };
+        static readonly int[] AiSciencePlan   = { TechTree.Roads, TechTree.ScholarsHut, TechTree.Library, TechTree.Scholarship, TechTree.PrintingPress, TechTree.Academy, TechTree.WarLoot };
+        static readonly int[] AiDomainPlan    = { TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry, TechTree.Homesteads, TechTree.ProvincialKeeps, TechTree.SovereignsCourt, TechTree.Conquest };
 
         static int[] PlanFor(VictoryPath path) => path switch
         {
@@ -167,6 +181,47 @@ namespace Sim
             foreach (int id in plan)
                 if (TryResearch(owner, id)) return true;
             return false;
+        }
+
+        // The dagger that answers a rival's leading crown (its highest HIGH-progress
+        // path). A shared tool, so this rides no cross-branch penalty.
+        static int AiSpyForPath(VictoryPath p) => p switch
+        {
+            VictoryPath.Economic => TechTree.Embezzler,
+            VictoryPath.Religious => TechTree.Inquisitor,
+            VictoryPath.Science => TechTree.Saboteur,
+            _ => TechTree.Agitator,
+        };
+
+        int AiRivalSpy(int rival)
+        {
+            VictoryPath lead = VictoryPath.Economic;
+            int best = -1;
+            for (int p = 0; p < PathCount; p++)
+            {
+                int pct = Progress(rival, (VictoryPath)p).HighPercent;
+                if (pct > best) { best = pct; lead = (VictoryPath)p; }
+            }
+            return AiSpyForPath(lead);
+        }
+
+        // Climb the spy branch: Muster, the Spy Guild, then the rival's dagger.
+        void AiResearchEspionage(int owner, int rival)
+        {
+            if (TryResearch(owner, TechTree.Muster)) return;
+            if (TryResearch(owner, TechTree.SpyGuild)) return;
+            if (rival >= 0) TryResearch(owner, AiRivalSpy(rival));
+        }
+
+        // Fund espionage with a fair tax the bot keeps level by feasting its people
+        // (set once), then loose a ready dagger at the rival whenever it can pay.
+        void AiRunEspionage(int owner, int rival)
+        {
+            var s = StockOf(owner);
+            if (s[TaxIdx] < 4) { s[TaxIdx] = 4; s[RationIdx] = 4; }   // Fair tax (+gold), Hearty table (offsets the approval)
+            if (rival < 0) return;
+            int spy = AiRivalSpy(rival);
+            if (IsTechResearched(owner, spy) && CanSpy(owner, spy, rival)) TrySpy(owner, spy, rival);
         }
 
         // The path-specific investment, once the economy stands. Returns true when it

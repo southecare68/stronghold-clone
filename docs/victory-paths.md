@@ -113,10 +113,12 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   validated path; the **AI is path-aware** — `EnableAi(owner, level, path)` assigns
   a crown (default Religious, so `AiSim` is unchanged), and the bot climbs *that*
   branch to its capstone and raises its structures: churches, wonders, or new keeps.
-  A match with several bots spreads them across the crowns (by owner id). Proven in
-  `tests/AiPaths` — a Hard bot reaches every capstone and drives every metric
-  (churches/faith, a wonder, trade gold, a founded territory), each within a few
-  thousand ticks.
+  A match with several bots spreads them across the crowns (by owner id). It also
+  researches its branch's **⚔ war-tool**, so its fights feed its crown; a **Hard**
+  bot additionally climbs the **Spy Guild**, funds espionage with an offsetting tax,
+  and looses the dagger that answers its rival's leading path. Proven in
+  `tests/AiPaths` — a Hard bot reaches every capstone and drives every metric, and
+  climbs the Spy Guild to fire a dagger at its rival.
 - **Economic branch** (`EconomicIncome`): a gold engine on top of tax — Trade Post
   pays a steady flow, the Guild Charter fork adds Monopoly's flat high margin *or*
   Bourse's per-building breadth, Banking House compounds interest on the hoard, and

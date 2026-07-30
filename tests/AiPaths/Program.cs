@@ -25,6 +25,7 @@ static class Program
         Contest(VictoryPath.Economic, TechTree.GrandExchange);
         Contest(VictoryPath.Science, TechTree.Academy);
         Contest(VictoryPath.Domain, TechTree.SovereignsCourt);
+        HardBotRunsTheSpyRing();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -49,6 +50,30 @@ static class Program
 
         Check($"{path}: the bot reaches its capstone", reached);
         Check($"{path}: and drives the crown's metric", Progressed(sim, path));
+    }
+
+    // A Hard bot also climbs the shared Spy Guild and looses a dagger at its rival —
+    // once its own branch is in hand, it trains the spy that answers the rival's crown
+    // and, funded by a fair tax, fires it. (Normal keeps to its war-tool; see AiSim.)
+    static void HardBotRunsTheSpyRing()
+    {
+        var sim = new Simulation(TileMap.Skirmish(Skirmish.DefaultSize));
+        Skirmish.Setup(sim, Skirmish.DefaultSize);
+        sim.FogEnabled = false;
+        sim.EnableAi(2, AiLevel.Hard, VictoryPath.Economic);   // trade gold funds the ring fastest
+        sim.AddGold(1, 5000);                                   // a rival hoard worth skimming
+
+        for (int t = 0; t < 60_000; t++)
+        {
+            sim.Tick(Array.Empty<Command>());
+            if (t % 200 == 0 && sim.IsTechResearched(2, TechTree.Embezzler)
+                && sim.SpyReadyAt(2, TechTree.Embezzler) > 0) break;
+        }
+
+        Console.WriteLine($"  spy ring    guild {(sim.IsTechResearched(2, TechTree.SpyGuild) ? "✓" : "✗")}   " +
+                          $"embezzler {(sim.IsTechResearched(2, TechTree.Embezzler) ? "✓" : "✗")}   fired {(sim.SpyReadyAt(2, TechTree.Embezzler) > 0 ? "✓" : "✗")}");
+        Check("Hard: the bot climbs the Spy Guild and trains the rival's dagger", sim.IsTechResearched(2, TechTree.Embezzler));
+        Check("Hard: and looses it at the rival", sim.SpyReadyAt(2, TechTree.Embezzler) > 0);
     }
 
     // Real progress on the crown's own metric — not merely the capstone research.
