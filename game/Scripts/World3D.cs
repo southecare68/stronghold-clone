@@ -385,7 +385,10 @@ public partial class World3D : Node3D
         {
             Skirmish.Setup(c.Sim, MapSize);
             if (noFog) c.Sim.FogEnabled = false;
-            if (ai) c.Sim.EnableAi(aiOwner, aiLevel);
+            // Give the bot a victory path to chase — by owner id, so a match with
+            // several bots spreads them across the crowns (Economic 0 / Religious 1 /
+            // Domain 2 / Science 3) instead of all racing the same one.
+            if (ai) c.Sim.EnableAi(aiOwner, aiLevel, (VictoryPath)(aiOwner % 4));
         }
 
         LoadModels();

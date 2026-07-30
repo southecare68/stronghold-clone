@@ -110,8 +110,13 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   on its own — you must research the Grand Temple.** Branches with no capstone yet
   (Economic/Domain/Science) stay metric-only until ported.
 - **Research command** (`CommandType.Research`) takes through the normal charged,
-  validated path; the **AI** climbs its Religious branch to the capstone, so a bot
-  is a genuine crown threat (Normal & Hard reach Grand Temple in `AiSim`).
+  validated path; the **AI is path-aware** — `EnableAi(owner, level, path)` assigns
+  a crown (default Religious, so `AiSim` is unchanged), and the bot climbs *that*
+  branch to its capstone and raises its structures: churches, wonders, or new keeps.
+  A match with several bots spreads them across the crowns (by owner id). Proven in
+  `tests/AiPaths` — a Hard bot reaches every capstone and drives every metric
+  (churches/faith, a wonder, trade gold, a founded territory), each within a few
+  thousand ticks.
 - **Economic branch** (`EconomicIncome`): a gold engine on top of tax — Trade Post
   pays a steady flow, the Guild Charter fork adds Monopoly's flat high margin *or*
   Bourse's per-building breadth, Banking House compounds interest on the hoard, and

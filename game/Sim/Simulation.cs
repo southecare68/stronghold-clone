@@ -490,9 +490,15 @@ namespace Sim
         // it is a match setting, not evolving state, and each machine is told who is
         // a bot, and how tough, at setup.
         readonly SortedDictionary<int, AiLevel> _aiOwners = new();
-        public void EnableAi(int owner, AiLevel level = AiLevel.Normal)
+        // The victory path each bot pursues (default Religious, so every existing
+        // caller and the AiSim gradient are unchanged). A match setting like the
+        // level, not evolving state — not hashed, agreed at setup on every machine.
+        readonly SortedDictionary<int, VictoryPath> _aiPath = new();
+        VictoryPath AiPathOf(int owner) => _aiPath.TryGetValue(owner, out var p) ? p : VictoryPath.Religious;
+        public void EnableAi(int owner, AiLevel level = AiLevel.Normal, VictoryPath path = VictoryPath.Religious)
         {
             _aiOwners[owner] = level;
+            _aiPath[owner] = path;
             // Apply the difficulty handicap once, at setup. Deterministic: every
             // machine calls this at the same point with the same level, so the bonus
             // hands and timber are identical everywhere and travel in a snapshot.

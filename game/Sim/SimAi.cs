@@ -73,12 +73,14 @@ namespace Sim
             var keep = AiKeep(owner);
             if (keep == null) return;    // no keep — the bot has been beaten, nothing to do
 
-            // Research runs alongside the build ladder — it spends banked RESEARCH,
-            // its own currency, so it never takes a build slot or starves the economy.
-            // A bot that contests the faith (builds churches) also climbs the Religious
-            // branch to its Grand Temple capstone, which is what actually unlocks the
-            // 75% crown; Easy abstains from both.
-            if (t.Churches > 0) AiResearch(owner);
+            // Which crown this bot is chasing (default Religious). Research runs
+            // alongside the build ladder — it spends banked RESEARCH, its own currency,
+            // so it never takes a build slot or starves the economy. A pursuing bot
+            // climbs its branch to the capstone that unlocks its crown; Easy abstains,
+            // playing a plain economy-and-army game.
+            var path = AiPathOf(owner);
+            bool pursues = level != AiLevel.Easy;
+            if (pursues) AiResearch(owner, PlanFor(path));
 
             // One considered step per cadence — helpers return true once they have
             // spent on a build, so the bot never empties its purse at once.
@@ -118,15 +120,11 @@ namespace Sim
             if (AiCount(owner, BuildingType.Quarry) < 1 &&
                 AiBuildHarvester(owner, keep, BuildingType.Quarry, ResourceType.Stone)) return;
 
-            // 3b) Churches win hearts, not bread. Workerless like a house, so they
-            //     never starve the economy; they raise the realm's FAITH toward the
-            //     religious crown. Raised out here, once a quarry is feeding stone, so
-            //     the bot contests the faith path in earnest — more churches on a
-            //     tougher bot (sized to cover more of its people), none on Easy. When
-            //     stone is still short the buy simply fails and the ladder falls
-            //     through to the army, so this never deadlocks.
-            if (AiCount(owner, BuildingType.Church) < t.Churches &&
-                AiBuildByKeep(owner, keep, BuildingType.Church)) return;
+            // 3b) The victory-path investment, out here once the economy stands: the
+            //     churches, wonders, or new keeps its crown wants (Easy builds none).
+            //     Whatever it cannot yet afford simply falls through to the army below,
+            //     so this never deadlocks — a working army is always the fallback.
+            if (pursues && AiBuildForPath(owner, keep, path, t)) return;
 
             // 4) Arm the surplus peasants up to the cap, then send the army out.
             if (AiTryTrain(owner, t.ArmyCap)) return;
@@ -148,20 +146,84 @@ namespace Sim
             return n;
         }
 
-        // The bot's path up the Religious branch, in order — the trunk toward it, then
-        // the branch to its capstone (it takes Missionaries at the fork). Each realm
-        // it researches the first node it can afford, so it climbs steadily toward the
-        // Grand Temple that unlocks the 75% crown.
-        static readonly int[] AiReligiousPlan =
+        // Each branch from the trunk to its capstone, in dependency order (taking the
+        // first fork option). The bot researches the first node it can afford each
+        // cadence, climbing steadily toward the crown-unlocking capstone.
+        static readonly int[] AiEconomicPlan  = { TechTree.Roads, TechTree.Market, TechTree.TradePost, TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange };
+        static readonly int[] AiReligiousPlan = { TechTree.Roads, TechTree.Chapel, TechTree.Shrine, TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple };
+        static readonly int[] AiSciencePlan   = { TechTree.Roads, TechTree.ScholarsHut, TechTree.Library, TechTree.Scholarship, TechTree.PrintingPress, TechTree.Academy };
+        static readonly int[] AiDomainPlan    = { TechTree.Roads, TechTree.Farmstead, TechTree.Husbandry, TechTree.Homesteads, TechTree.ProvincialKeeps, TechTree.SovereignsCourt };
+
+        static int[] PlanFor(VictoryPath path) => path switch
         {
-            TechTree.Roads, TechTree.Chapel, TechTree.Shrine,
-            TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple,
+            VictoryPath.Economic => AiEconomicPlan,
+            VictoryPath.Science => AiSciencePlan,
+            VictoryPath.Domain => AiDomainPlan,
+            _ => AiReligiousPlan,
         };
 
-        bool AiResearch(int owner)
+        bool AiResearch(int owner, int[] plan)
         {
-            foreach (int id in AiReligiousPlan)
+            foreach (int id in plan)
                 if (TryResearch(owner, id)) return true;
+            return false;
+        }
+
+        // The path-specific investment, once the economy stands. Returns true when it
+        // spends a build. Religious raises churches; Science raises wonders (once the
+        // Academy stands, and only when it can afford the escalating cost); Domain
+        // houses its census and founds new keeps; Economic hoards the trade income and
+        // builds nothing extra.
+        bool AiBuildForPath(int owner, Building keep, VictoryPath path, AiTuning t)
+        {
+            switch (path)
+            {
+                case VictoryPath.Religious:
+                    if (AiCount(owner, BuildingType.Church) < t.Churches)
+                        return AiBuildByKeep(owner, keep, BuildingType.Church);
+                    return false;
+
+                case VictoryPath.Science:
+                    if (IsTechResearched(owner, TechTree.Academy) && AiCount(owner, BuildingType.Wonder) < 2
+                        && CanAfford(owner, BuildCostFor(owner, BuildingType.Wonder)))
+                        return AiTryBuild(owner, BuildingType.Wonder, keep.CenterX, keep.CenterY, 16);
+                    return false;
+
+                case VictoryPath.Domain:
+                    // Room for the census first — houses past the base cap while the
+                    // population presses against it — then found new territories.
+                    if (AiCount(owner, BuildingType.House) < t.MaxHouses + 6
+                        && PeasantCount(owner) >= PopulationCap(owner) - 4)
+                        return AiBuildByKeep(owner, keep, BuildingType.House);
+                    if (TerritoryCount(owner) < 5) return AiFoundKeep(owner, keep);
+                    return false;
+
+                default:   // Economic — the branch's trade income is the whole engine
+                    return false;
+            }
+        }
+
+        // Found a new keep — a new territory — spaced clear of the bot's other keeps,
+        // once Provincial Keeps is researched and the stone is in hand. Scans outward
+        // from the home keep starting beyond the spacing radius, so the first hit is
+        // the nearest legal site; the Build command re-checks everything.
+        bool AiFoundKeep(int owner, Building home)
+        {
+            if (!IsTechResearched(owner, TechTree.ProvincialKeeps)) return false;
+            if (!CanAfford(owner, BuildCost[(int)BuildingType.Keep])) return false;
+            for (int r = KeepSpacing; r <= KeepSpacing + 24; r++)
+                for (int dy = -r; dy <= r; dy++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r) continue;
+                        int x = home.CenterX + dx, y = home.CenterY + dy;
+                        if (!CanPlace(BuildingType.Keep, x, y)) continue;
+                        if (!KeepFarEnough(owner, x, y)) continue;
+                        if (!BuildableFootprint(owner, BuildingType.Keep, x, y)) continue;
+                        if (AiFootprintHasNode(BuildingType.Keep, x, y)) continue;
+                        Apply(new Command { Owner = owner, Type = CommandType.Build, TargetId = (int)BuildingType.Keep, X = x, Y = y });
+                        return true;
+                    }
             return false;
         }
 

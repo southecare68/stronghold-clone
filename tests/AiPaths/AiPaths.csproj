@@ -1,0 +1,23 @@
+<!-- AiPaths — the bot can chase ANY crown, not just the Religious one.
+
+     Each path is handed to a Hard bot on a skirmish map against a passive rival; we
+     run the match out and confirm the bot climbs that branch to its capstone and
+     makes real progress on the crown's own metric (churches/faith, wonders, gold,
+     or population/territory). Determinism is covered by AiSim; this is the liveness
+     of the four pursuits. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>AiPathsTests</RootNamespace>
+    <AssemblyName>AiPathsTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>
