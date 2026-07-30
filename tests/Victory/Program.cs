@@ -32,6 +32,13 @@ static class Program
         TechTree.Missionaries, TechTree.Cathedral, TechTree.GrandTemple,
     };
 
+    // The Economic branch (Monopoly fork) from the trunk up to its capstone.
+    static readonly int[] EconomicToCapstone =
+    {
+        TechTree.Roads, TechTree.Market, TechTree.TradePost,
+        TechTree.Monopoly, TechTree.BankingHouse, TechTree.GrandExchange,
+    };
+
     static void Main()
     {
         Console.WriteLine("Victory — faith, the four paths, and the crown\n");
@@ -40,6 +47,7 @@ static class Program
         AChurchConvertsTheRealm();
         TheRealmIsToldAtEightyPercent();
         ADualGoalTakesTheCrown();
+        APopulationFloorGatesTheCrown();
         TheTerritoryAndScienceSeams();
         TwoClientsAgreeOnTheCrown();
 
@@ -100,9 +108,8 @@ static class Program
     {
         Console.WriteLine("a dual goal, held to term, takes the crown:");
         var sim = Realm();
-        Seed(sim, 1, 4);
+        GrowFaithfulRealm(sim);                           // 200 pop (over the win floor) + churches for that flock
         sim.AddGold(1, 500_000);                          // banks the Economic MEDIUM (a once-goal)
-        sim.PlaceBuilding(BuildingType.Church, 1, 20, 20);
 
         TickUntil(sim, () => sim.Faith(1) >= 75, 6000);
         Check("the half-million banks the Economic MEDIUM", sim.Progress(1, VictoryPath.Economic).MediumBanked);
@@ -121,6 +128,42 @@ static class Program
         Check("the dual goal takes the crown", sim.VictoryOwner == 1);
         Check("won by the path whose HIGH was held (Religious)", sim.VictoryPathIdx == (int)VictoryPath.Religious);
         Check("and only after a sustained hold, not on the first touch", used >= need - RealmIntervalGuess);
+    }
+
+    // The population floor: no crown counts until the realm is a real kingdom (200
+    // pop). A tiny settlement can meet a HIGH goal and bank a MEDIUM on paper, but
+    // the crown's hold never even starts until it grows — then the very same
+    // standing begins to count. Uses the Economic hoard as the HIGH because its
+    // metric does not depend on population, so growing the realm doesn't disturb it.
+    static void APopulationFloorGatesTheCrown()
+    {
+        Console.WriteLine("the population floor gates the crown:");
+        var sim = Realm();
+        Seed(sim, 1, 20);                                  // a hamlet, far under the floor
+
+        // Bank a MEDIUM on one path while still small — it sticks forever after.
+        sim.PlaceBuilding(BuildingType.Church, 1, 20, 20);
+        sim.PlaceBuilding(BuildingType.Church, 1, 24, 20);  // reach 24 vs 20 souls → the flock converts fast
+        TickUntil(sim, () => sim.Progress(1, VictoryPath.Religious).MediumBanked, 6000);
+        Check("banks a MEDIUM while still a hamlet", sim.Progress(1, VictoryPath.Religious).MediumBanked);
+
+        // Meet a pop-independent HIGH: the hoard, its branch climbed to the capstone.
+        sim.AddGold(1, 100_000);
+        sim.AddResearch(1, 2000);
+        foreach (int id in EconomicToCapstone) sim.TryResearch(1, id);
+        Check("the Economic HIGH is met (hoard + capstone)", sim.Progress(1, VictoryPath.Economic).HighMet);
+        Check("but the realm is under the floor", !sim.PopulationFloorMet(1));
+
+        // Under the floor the crown is held back — the hold never even starts.
+        Ticks(sim, 10 * RealmIntervalGuess);
+        Check("under the floor, no crown", sim.VictoryOwner == -1);
+        Check("and the hold does not even begin", sim.Progress(1, VictoryPath.Economic).HoldTicks == 0);
+
+        // Grow past the floor and the same standing starts to count.
+        Seed(sim, 1, 200);                                 // now 220 pop, over the floor
+        Check("now over the floor", sim.PopulationFloorMet(1));
+        Ticks(sim, 4 * RealmIntervalGuess);
+        Check("over the floor, the hold begins to accrue", sim.Progress(1, VictoryPath.Economic).HoldTicks > 0);
     }
 
     // The two clauses that wait on later phases: territory (Phase 3) and science
@@ -148,9 +191,8 @@ static class Program
         var b = Realm();
         foreach (var sim in new[] { a, b })
         {
-            Seed(sim, 1, 4);
+            GrowFaithfulRealm(sim);                                          // identical on both — deterministic seed & placement
             sim.AddGold(1, 500_000);
-            sim.PlaceBuilding(BuildingType.Church, 1, 20, 20);
             sim.AddResearch(1, 1000);
             foreach (int id in ReligiousToCapstone) sim.TryResearch(1, id);   // unlock the Religious HIGH on both clients
         }
@@ -185,6 +227,20 @@ static class Program
     // hold accrues one realm-interval at a time, so the win can land at most one
     // interval early relative to the exact term).
     const int RealmIntervalGuess = 40;
+
+    // A realm grown past the population win-floor (200) and faithful enough to still
+    // take the Religious crown at that larger scale. No housing is built on purpose:
+    // a full larder keeps approval high so the 200 seeded peasants neither breed
+    // beyond the keep's cap nor emigrate, pinning the population for the long hold.
+    // Faith is a share of the WHOLE flock, so a bigger realm needs more churches —
+    // fourteen minister to ~168 souls, three-quarters of two hundred and then some.
+    static void GrowFaithfulRealm(Simulation sim)
+    {
+        Seed(sim, 1, 200);
+        sim.AddResource(1, ResourceType.Food, 5_000_000);      // a deep larder for the ~12-minute vigil
+        for (int i = 0; i < 14; i++)
+            sim.PlaceBuilding(BuildingType.Church, 1, 8 + (i % 7) * 3, 20 + (i / 7) * 3);
+    }
 
     static int Announces(Simulation sim)
     {

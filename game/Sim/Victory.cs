@@ -74,6 +74,16 @@ namespace Sim
         // which spies and raids can still bite. A single dial for every path.
         public const int AnnounceAt = 80;
 
+        // A realm must be a real kingdom before ANY crown counts: a population floor
+        // gates every path, so you cannot snap a quick win with a tiny settlement.
+        // It sits just above Domain's own "great population" HIGH (180 pop), so a
+        // winner on any path has grown a substantial, well-housed realm — the metric
+        // (bar, 80% announce) still fills below it; only the crown is held back.
+        // Tunable; see docs/victory-paths.md.
+        const int MinPopToWin = 200;
+        public int MinPopulationToWin => MinPopToWin;
+        public bool PopulationFloorMet(int owner) => PeasantCount(owner) >= MinPopToWin;
+
         // Sim tick rate: RealmInterval (40 ticks) is "2s", so 20 ticks a second.
         const int TickRate = 20;
         // How long a HIGH goal must be HELD, not merely touched, before it counts —
@@ -186,6 +196,7 @@ namespace Sim
             foreach (int owner in realms)          // owner order — deterministic
             {
                 var s = StockOf(owner);
+                bool popFloorMet = PopulationFloorMet(owner);
                 for (int pi = 0; pi < PathCount; pi++)
                 {
                     var prog = Progress(owner, (VictoryPath)pi);
@@ -201,9 +212,11 @@ namespace Sim
                         _victoryEvents.Add(new VictoryEvent(VictoryEventKind.Approaching, owner, (VictoryPath)pi));
                     }
 
-                    // The hold accrues while the HIGH goal holds and resets the instant
-                    // it lapses — a goal must be SUSTAINED, never merely snapped shut.
-                    s[VicHoldBase + pi] = prog.HighMet
+                    // The hold accrues while the HIGH goal holds AND the realm clears
+                    // the population floor — the crown counts only for a real kingdom.
+                    // It resets the instant either lapses: a goal must be SUSTAINED,
+                    // and the realm kept large, never merely snapped shut.
+                    s[VicHoldBase + pi] = prog.HighMet && popFloorMet
                         ? Math.Min(prog.HoldNeeded, s[VicHoldBase + pi] + RealmInterval)
                         : 0;
                 }
@@ -230,6 +243,7 @@ namespace Sim
                 int best = -1, bestScore = -1, bestPath = 0;
                 foreach (int owner in realms)
                 {
+                    if (!PopulationFloorMet(owner)) continue;   // the floor gates the buzzer too
                     int score = 0, top = -1, topPath = 0;
                     for (int pi = 0; pi < PathCount; pi++)
                     {
@@ -239,7 +253,7 @@ namespace Sim
                     }
                     if (score > bestScore) { bestScore = score; best = owner; bestPath = topPath; }
                 }
-                if (best >= 0) DeclareVictory(best, bestPath);
+                if (best >= 0) DeclareVictory(best, bestPath);   // no qualifying realm → the match plays on
             }
         }
 

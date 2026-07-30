@@ -3745,6 +3745,8 @@ public partial class World3D : Node3D
         if (!_showGoals) return;
 
         int me = MyPlayer;
+        int pop = _sim.PeasantCount(me), floor = _sim.MinPopulationToWin;
+        bool floorMet = pop >= floor;
         for (int pi = 0; pi < 4; pi++)
         {
             var path = (VictoryPath)pi;
@@ -3757,7 +3759,11 @@ public partial class World3D : Node3D
                 _ => $"{_sim.ResearchedCount(me, TechBranch.Science)} / 4 tree   ·   {_sim.WonderCount(me)} / 2 wonders",
             };
             string mark = p.MediumBanked ? "   ✓ medium" : "";
-            string hold = p.HoldTicks > 0 ? $"   ·   held {FmtClock(p.HoldTicks)} / {FmtClock(p.HoldNeeded)}" : "";
+            // The hold, or — if the HIGH is met but the realm is too small to crown —
+            // why it isn't counting: the population floor gates every path.
+            string hold = p.HoldTicks > 0 ? $"   ·   held {FmtClock(p.HoldTicks)} / {FmtClock(p.HoldNeeded)}"
+                        : (p.HighMet && !floorMet) ? $"   ·   ⚠ needs {floor} pop (have {pop})"
+                        : "";
             _goalLabel[pi].Text = $"{PathName(path)}   {p.HighPercent}%{mark}{hold}\n{metric}";
             _goalBar[pi].Value = p.HighPercent;
         }

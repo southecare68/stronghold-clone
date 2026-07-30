@@ -34,6 +34,13 @@ the four races are comparable — see [Balance](#balance).)*
 ### The shared laws (what keeps it balanced)
 
 - **Dual goal** — high in one path + medium in another.
+- **Population floor** — no crown counts until the realm holds at least **200
+  people** (`MinPopToWin`, `Victory.cs`), a floor under *every* path so a tiny
+  settlement can't snap a quick win. The metric (bar, 80% announce) still fills
+  below it; only the crown's hold is gated — the hold accrues, and the buzzer
+  fires, solely for a realm over the floor. It sits just above Domain's own "great
+  population" HIGH (180), and the goals HUD shows `⚠ needs 200 pop` on any path met
+  while under it.
 - **Everything is announced** — cross ~80% of any HIGH goal and the whole realm
   is told, opening the counterplay window.
 - **Sustained-hold windows** — every HIGH goal must be *held* for a set time, not
@@ -267,6 +274,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Windows: `AnnounceAt` (80%), `HoldTicksFor(path)`, `MatchClockTicks`
   (`Victory.cs`). Hold windows are in ticks (`TickRate` = 20/s) so they express
   the design's ~10–30 real minutes and tests can drive them exactly.
+- Population floor: `MinPopToWin` (200, `Victory.cs`) — the peasant count every
+  crown requires; gates the hold accrual and the buzzer, not the metric itself.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,
