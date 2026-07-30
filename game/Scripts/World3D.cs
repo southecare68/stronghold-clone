@@ -158,6 +158,13 @@ public partial class World3D : Node3D
     Mesh _ringMesh;
     Material _ringMine, _ringEnemy;
 
+    // Beacons over the queued stops (and the current destination) of the selected
+    // units — blue for a direct march, amber for a cautious one. Pooled: reused
+    // frame to frame, spare ones simply hidden.
+    readonly List<MeshInstance3D> _wpMarkers = new();
+    Mesh _wpMesh;
+    Material _wpMatDirect, _wpMatCautious;
+
     bool _boxing;
     Vector2 _boxStart, _boxEnd;
     ColorRect _box;
@@ -1249,6 +1256,10 @@ public partial class World3D : Node3D
         _ringMine = Unshaded(new Color(0.35f, 0.75f, 1f));
         _ringEnemy = Unshaded(new Color(1f, 0.45f, 0.35f));
 
+        _wpMesh = new CylinderMesh { TopRadius = 0.05f, BottomRadius = 0.05f, Height = 1.4f, RadialSegments = 6 };
+        _wpMatDirect = Unshaded(new Color(0.40f, 0.78f, 1f));
+        _wpMatCautious = Unshaded(new Color(1f, 0.72f, 0.28f));
+
         // A 2D marquee for box-select, on its own layer above the 3D view.
         var layer = new CanvasLayer();
         AddChild(layer);
@@ -1880,6 +1891,7 @@ public partial class World3D : Node3D
         SyncNodes();
         UpdateFog();
         UpdateRings();
+        UpdateWaypointMarkers();
         UpdateHud();
         UpdateRealmToast(delta);
         UpdateFx(delta);
@@ -3286,7 +3298,13 @@ public partial class World3D : Node3D
 
         if (GroundTile(screen, out int tx, out int ty))
         {
-            _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty });
+            // Move modifiers (see the Move command): Shift appends a waypoint after
+            // the current journey, Alt marches cautiously — routing around known
+            // enemies. They combine, and default (no modifier) is the direct march.
+            bool append   = Input.IsKeyPressed(Key.Shift);
+            bool cautious = Input.IsKeyPressed(Key.Alt);
+            int flags = (append ? 1 : 0) | (cautious ? 2 : 0);
+            _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty, TargetId = flags });
             _sound.PlayUi(Sfx.MoveOrder);
         }
         else _sound.PlayUi(Sfx.Denied);
@@ -4252,6 +4270,33 @@ public partial class World3D : Node3D
         foreach (var kv in _rings)
             if (!_selected.Contains(kv.Key) || !_unitNodes.ContainsKey(kv.Key)) stale.Add(kv.Key);
         foreach (var id in stale) { _rings[id].QueueFree(); _rings.Remove(id); if (!_unitNodes.ContainsKey(id)) _selected.Remove(id); }
+    }
+
+    // Beacons over each selected unit's destination and every queued stop beyond it,
+    // so a multi-stop or cautious march is legible at a glance. Rebuilt each frame
+    // from the pool; leftover markers are hidden, not freed.
+    void UpdateWaypointMarkers()
+    {
+        int used = 0;
+        foreach (var id in _selected)
+        {
+            var u = FindUnit(id);
+            if (u == null || u.Owner != MyPlayer) continue;
+            if (u.HasPath) PlaceWaypointMarker(ref used, u.Path[u.Path.Count - 1], u.Cautious);
+            foreach (var w in u.Waypoints) PlaceWaypointMarker(ref used, w, u.Cautious);
+        }
+        for (int i = used; i < _wpMarkers.Count; i++) _wpMarkers[i].Visible = false;
+    }
+
+    void PlaceWaypointMarker(ref int used, Tile t, bool cautious)
+    {
+        MeshInstance3D m;
+        if (used < _wpMarkers.Count) m = _wpMarkers[used];
+        else { m = new MeshInstance3D { Mesh = _wpMesh }; AddChild(m); _wpMarkers.Add(m); }
+        m.MaterialOverride = cautious ? _wpMatCautious : _wpMatDirect;
+        m.Position = new Vector3(t.X, 0.7f, t.Y);
+        m.Visible = true;
+        used++;
     }
 
     // Zoom sets the tilt too: at the default distance the angle is unchanged;

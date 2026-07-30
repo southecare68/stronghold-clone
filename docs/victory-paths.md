@@ -200,6 +200,18 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   keep falls as before, so existing sieges are untouched. Units stop battering a
   keep the moment it turns friendly; an "⚔ seized a territory" toast fires. This is
   Domain's "or taken by force" — the aggressive player's road to the census crown.
+- **Movement options** (`Simulation` Move command, `PathFinder`): a plain move is
+  one direct, string-pulled route (the Stronghold default, and what keeps the frozen
+  parity scenario bit-identical). Two flags ride the Move command's `TargetId`:
+  **append** (shift — queue a waypoint after the current route; the unit pops the
+  next stop on arrival, `Waypoints` + `AdvanceToNextStop`) and **cautious** (alt —
+  route around known enemies). Caution builds a per-owner **danger field** from
+  visible enemy soldiers (`BuildDangerMap`, `DangerRadius`/`DangerPeak`) that A*
+  adds as extra enter-cost, and the string-puller is taught not to straighten a
+  detour back through danger (`LineCrossesDanger`). Both the queue and the flag are
+  hashed and snapshotted; the HUD draws beacons over each stop (blue direct, amber
+  cautious). `tests/Movement` covers the chain, the berth, the snapshot, and
+  twin-client determinism.
 
 ### Wired but dormant (waiting on later phases)
 
@@ -280,6 +292,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   the design's ~10–30 real minutes and tests can drive them exactly.
 - Population floor: `MinPopToWin` (200, `Victory.cs`) — the peasant count every
   crown requires; gates the hold accrual and the buzzer, not the metric itself.
+- Cautious march: `DangerRadius`/`DangerPeak` (`Simulation.cs`) — how far a known
+  enemy's avoidance bubble reaches and how strongly it repels the path.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,

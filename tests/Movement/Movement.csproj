@@ -1,0 +1,26 @@
+<!-- Movement — waypoint chains and the cautious (enemy-avoiding) march.
+
+     On top of the plain direct Move sit two flagged options: SHIFT appends a
+     queued waypoint, ALT marks the journey cautious (routing around known
+     enemies via a danger-weighted A*). These tests pin the queue mechanics, the
+     detour-and-berth of a cautious march, the snapshot round-trip of both, and —
+     the one that matters — that two machines agree tick for tick.
+
+     Sim-only, like the other suites. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>MovementTests</RootNamespace>
+    <AssemblyName>MovementTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+    <Compile Include="../../game/Net/*.cs" LinkBase="Net" />
+  </ItemGroup>
+
+</Project>

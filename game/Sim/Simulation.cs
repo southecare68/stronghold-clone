@@ -221,6 +221,16 @@ namespace Sim
 
         public bool HasPath => Path != null && PathIndex < Path.Count;
 
+        // Queued destinations AFTER the current route — shift-click appends a stop,
+        // and the unit paths to the next each time it finishes the route it is on.
+        // Empty for a plain single move (and for every unit in the parity scenario,
+        // so the frozen units-only Checksum never sees it). A "cautious" journey
+        // routes AROUND known enemies instead of straight through — set by an
+        // Alt-move and carried to each queued leg. Post-freeze state: hashed in
+        // StateChecksum and carried in the snapshot.
+        public List<Tile> Waypoints = new();
+        public bool Cautious;
+
         public Unit Clone()
         {
             var copy = new Unit
@@ -232,8 +242,10 @@ namespace Sim
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant,
                 PathIndex = PathIndex,
+                Cautious = Cautious,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
+            copy.Waypoints = new List<Tile>(Waypoints);
             return copy;
         }
     }
@@ -1009,13 +1021,29 @@ namespace Sim
             switch (cmd.Type)
             {
                 case CommandType.Move:
+                    // TargetId packs two move modifiers: bit 0 = APPEND (shift — add a
+                    // waypoint after the current journey rather than replace it); bit 1
+                    // = CAUTIOUS (alt — route around known enemies, not straight through).
+                    bool append = (cmd.TargetId & 1) != 0;
+                    bool cautious = (cmd.TargetId & 2) != 0;
                     foreach (var id in cmd.UnitIds)
                     {
                         var u = Units.Find(v => v.Id == id);
-                        if (u != null && u.Owner == cmd.Owner)
+                        if (u == null || u.Owner != cmd.Owner) continue;
+                        if (u.GarrisonId != 0) Ungarrison(u);   // climb down off the wall first
+                        StopWork(u);             // a plain move breaks off fighting AND gathering
+
+                        if (append && (u.HasPath || u.Waypoints.Count > 0))
                         {
-                            if (u.GarrisonId != 0) Ungarrison(u);   // climb down off the wall first
-                            StopWork(u);             // a plain move breaks off fighting AND gathering
+                            // Queue a stop after everything already planned. A cautious
+                            // append upgrades the whole journey to cautious.
+                            if (cautious) u.Cautious = true;
+                            u.Waypoints.Add(new Tile(cmd.X, cmd.Y));
+                        }
+                        else
+                        {
+                            u.Waypoints.Clear();
+                            u.Cautious = cautious;
                             Order(u, cmd.X, cmd.Y);
                         }
                     }
@@ -1364,9 +1392,13 @@ namespace Sim
             int sy = Fixed.ToInt(u.Y);
 
             _rawPath.Clear();
-            if (!_pathFinder.TryFindPath(sx, sy, gx, gy, _rawPath)) return;
+            // A cautious march weights tiles near known enemies, so A* curves around
+            // them; a plain march passes null and routes straight, exactly as before
+            // (so the parity scenario, which never marches cautiously, is untouched).
+            int[] danger = u.Cautious ? BuildDangerMap(u.Owner) : null;
+            if (!_pathFinder.TryFindPath(sx, sy, gx, gy, _rawPath, danger)) return;
 
-            Smooth(sx, sy, _rawPath, _smoothPath);
+            Smooth(sx, sy, _rawPath, _smoothPath, danger);
 
             // Standing on the goal tile already: the route is empty, but the unit
             // may still need to cross the tile to the exact spot asked for.
@@ -1389,7 +1421,7 @@ namespace Sim
         // first check sees the destination directly, so the whole route collapses
         // to one waypoint and the movement maths is bit-identical to what the
         // simulation did before it could path at all.
-        void Smooth(int fromX, int fromY, List<Tile> raw, List<Tile> smoothed)
+        void Smooth(int fromX, int fromY, List<Tile> raw, List<Tile> smoothed, int[] danger = null)
         {
             smoothed.Clear();
             int cx = fromX, cy = fromY;
@@ -1397,8 +1429,13 @@ namespace Sim
 
             while (i < raw.Count)
             {
+                // Farthest tile still reachable by a clear run — and, on a cautious
+                // march, one that does not cut back through a danger tile A* went out
+                // of its way to avoid. Without that second test the string-puller
+                // would straighten the whole detour right back over the enemy.
                 int j = raw.Count - 1;
-                while (j > i && !Map.HasClearRun(cx, cy, raw[j].X, raw[j].Y)) j--;
+                while (j > i && (!Map.HasClearRun(cx, cy, raw[j].X, raw[j].Y)
+                                 || (danger != null && LineCrossesDanger(cx, cy, raw[j].X, raw[j].Y, danger)))) j--;
 
                 smoothed.Add(raw[j]);
                 cx = raw[j].X;
@@ -1407,12 +1444,76 @@ namespace Sim
             }
         }
 
+        // Does the straight line between two tiles pass over any danger? Walks the
+        // same integer Bresenham as the map's clear-run trace, so the tiles it tests
+        // are exactly the ones a straightened run would cross. Used only to stop
+        // smoothing from undoing a cautious detour.
+        bool LineCrossesDanger(int x0, int y0, int x1, int y1, int[] danger)
+        {
+            int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
+            int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+            int err = dx - dy, x = x0, y = y0;
+            if (danger[y * Map.Width + x] > 0) return true;
+            while (x != x1 || y != y1)
+            {
+                int e2 = 2 * err;
+                bool stepX = e2 > -dy, stepY = e2 < dx;
+                if (stepX && stepY) { err += dx - dy; x += sx; y += sy; }
+                else if (stepX) { err -= dy; x += sx; }
+                else { err += dx; y += sy; }
+                if (danger[y * Map.Width + x] > 0) return true;
+            }
+            return false;
+        }
+
         void AimAtWaypoint(Unit u)
         {
             if (!u.HasPath) return;
             var w = u.Path[u.PathIndex];
             u.Tx = Fixed.FromInt(w.X);
             u.Ty = Fixed.FromInt(w.Y);
+        }
+
+        // Pop queued stops until one yields a walkable route or the queue runs dry.
+        // A stop that can't be pathed to (blocked, off-map) is simply skipped, so a
+        // stale waypoint never strands the rest of the journey.
+        void AdvanceToNextStop(Unit u)
+        {
+            while (u.Waypoints.Count > 0)
+            {
+                var next = u.Waypoints[0];
+                u.Waypoints.RemoveAt(0);
+                Order(u, next.X, next.Y);
+                if (u.HasPath) return;
+            }
+        }
+
+        // The danger field a cautious march avoids: every enemy the owner can SEE
+        // stamps a cost bubble on the tiles around it, stacking where threats overlap.
+        // The cost falls off with distance (Chebyshev), so A* prefers to skirt wide
+        // but will still thread a gap if the only alternative is a huge detour. Built
+        // fresh per cautious order from the shared unit state, so both machines get an
+        // identical field — the whole thing stays deterministic. Enemies out of sight
+        // (fog) cast no danger: you only route around what you know is there.
+        const int DangerRadius = 5;       // tiles a threat's influence reaches
+        const int DangerPeak = 60;        // extra enter-cost right beside an enemy (vs StepCost 10)
+        int[] BuildDangerMap(int owner)
+        {
+            var d = new int[Map.Width * Map.Height];
+            foreach (var e in Units)      // id order — deterministic
+            {
+                if (!e.Alive || e.Owner == owner || e.IsPeasant) continue;   // soldiers threaten, peasants don't
+                if (!CanSeeUnit(owner, e)) continue;
+                int ex = Fixed.ToInt(e.X), ey = Fixed.ToInt(e.Y);
+                for (int yy = Math.Max(0, ey - DangerRadius); yy <= Math.Min(Map.Height - 1, ey + DangerRadius); yy++)
+                for (int xx = Math.Max(0, ex - DangerRadius); xx <= Math.Min(Map.Width - 1, ex + DangerRadius); xx++)
+                {
+                    int dist = Math.Max(Math.Abs(xx - ex), Math.Abs(yy - ey));
+                    int cost = DangerPeak * (DangerRadius - dist + 1) / (DangerRadius + 1);
+                    if (cost > 0) d[yy * Map.Width + xx] += cost;
+                }
+            }
+            return d;
         }
 
         static int Clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
@@ -1467,8 +1568,11 @@ namespace Sim
                     }
                     else
                     {
+                        // The route is walked. If more stops are queued, march to the
+                        // next; otherwise the journey is over.
                         u.Path = null;
                         u.PathIndex = 0;
+                        AdvanceToNextStop(u);
                     }
                 }
             }
@@ -2508,6 +2612,13 @@ namespace Sim
                     Mix(u.Path[i].X);
                     Mix(u.Path[i].Y);
                 }
+
+                // Queued stops beyond the current route, and whether this is a
+                // cautious march — both are orders, so both must agree machine to
+                // machine or two units with the same position have different futures.
+                Mix(u.Waypoints.Count);
+                foreach (var w in u.Waypoints) { Mix(w.X); Mix(w.Y); }
+                Mix(u.Cautious ? 1 : 0);
             }
 
             foreach (var n in Nodes)                 // id order

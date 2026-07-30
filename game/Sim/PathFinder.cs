@@ -83,7 +83,11 @@ namespace Sim
         // exists, if the goal is unreachable, or if the search hit MaxExpansions.
         //
         // Start == goal is success with an empty path: already there.
-        public bool TryFindPath(int startX, int startY, int goalX, int goalY, List<Tile> path)
+        // `danger`, when given, is a per-tile extra ENTER cost (indexed like the map:
+        // y*Width + x) added on top of terrain — a cautious march passes the field
+        // built from nearby enemies so A* routes wide of them. Null (the default) is
+        // the plain shortest path, bit-identical to before.
+        public bool TryFindPath(int startX, int startY, int goalX, int goalY, List<Tile> path, int[] danger = null)
         {
             if (path == null) throw new ArgumentNullException(nameof(path));
             path.Clear();
@@ -144,6 +148,7 @@ namespace Sim
                     // surcharge scales it so marsh stays proportionally awkward.
                     int stepCost = _map.EnterCost(nx, ny);
                     if (diagonal) stepCost = stepCost * TileMap.DiagonalCost / TileMap.StepCost;
+                    if (danger != null) stepCost += danger[neighbour];   // steer wide of known enemies
 
                     int tentative = _g[current] + stepCost;
                     bool seen = _seenStamp[neighbour] == _stamp;

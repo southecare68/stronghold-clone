@@ -160,6 +160,13 @@ namespace Netcode
                     PutInt(buf, u.Path[i].X);
                     PutInt(buf, u.Path[i].Y);
                 }
+
+                // Queued stops beyond the current route, and the cautious flag —
+                // StateChecksum hashes both, so a snapshot that dropped them would
+                // fail its own verification and the rejoiner would lose the orders.
+                PutInt(buf, u.Waypoints.Count);
+                foreach (var w in u.Waypoints) { PutInt(buf, w.X); PutInt(buf, w.Y); }
+                PutInt(buf, u.Cautious ? 1 : 0);
             }
 
             PutInt(buf, snap.Nodes.Length);
@@ -316,6 +323,12 @@ namespace Netcode
                         u.Path = path;
                         u.PathIndex = 0;
                     }
+
+                    int stops = GetInt(data, ref p);
+                    if (stops < 0 || stops > MaxUnits) return null;
+                    for (int j = 0; j < stops; j++)
+                        u.Waypoints.Add(new Tile(GetInt(data, ref p), GetInt(data, ref p)));
+                    u.Cautious = GetInt(data, ref p) != 0;
                     units[i] = u;
                 }
                 snap.Units = units;
