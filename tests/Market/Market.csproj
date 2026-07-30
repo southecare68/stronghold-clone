@@ -1,0 +1,26 @@
+<!-- Market — buying and selling goods for gold, by hand and on standing orders.
+
+     A realm with a trading hall trades five goods for gold at a posted price
+     with a ±25% spread; a per-good standing order (Buy up to N / Sell above N)
+     lets the realm tick run the economy hands-off. Weapons are a market-only
+     good that arms recruits in place of wood. These tests pin the prices, the
+     caps, the spread, the auto-trader, the weapons coupling, and — the one that
+     matters — that two machines agree on all of it tick for tick.
+
+     Sim-only, like the other economy tests. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>MarketTests</RootNamespace>
+    <AssemblyName>MarketTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+  </ItemGroup>
+
+</Project>

@@ -97,6 +97,15 @@ public partial class World3D : Node3D
     Control _trainPanel;
     Label _trainInfo;
 
+    // The market panel: click your trading hall to open the buy/sell board, with
+    // a standing-order (auto-trade) toggle per good. Rows are built once and
+    // refreshed each frame — one row per market good.
+    Control _marketPanel;
+    Label _marketHeader;
+    Label[] _mkStock;
+    Button[] _mkAuto;
+    Label[] _mkThresh;
+
     // Clicking your keep opens the realm panel: the same tax/ration dials as the
     // keyboard shortcuts, but with their effects spelled out and +/- buttons.
     Control _realmPanel;
@@ -181,7 +190,7 @@ public partial class World3D : Node3D
         BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
         BuildingType.House, BuildingType.Barracks,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
-        BuildingType.Farm, BuildingType.Granary,
+        BuildingType.Farm, BuildingType.Granary, BuildingType.Market,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
     };
 
@@ -404,6 +413,7 @@ public partial class World3D : Node3D
         SetupHud();
         SetupBuild();
         SetupTrainPanel();
+        SetupMarketPanel();
         SetupRealmPanel();
         SetupGoalsPanel();
         SetupTechPanel();
@@ -583,6 +593,7 @@ public partial class World3D : Node3D
         B(BuildingType.Church,        "Buildings/Preset_Houses/SM_Bld_Preset_Church_01_A_Optimized", 0.5f);  // ministers to the flock — raises faith
         B(BuildingType.Wonder,        "Bonus/SM_Prop_Statue_King_01", 0.5f);   // a grand monument — the Science path's crown
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
+        B(BuildingType.Market,        "Props/SM_Prop_Market_Stall_01", 0.7f);   // a trading stall — buy & sell goods for gold
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
 
@@ -1599,7 +1610,8 @@ public partial class World3D : Node3D
         BuildingType.Mill => "Mill", BuildingType.Bakery => "Bakery",
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
         BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
-        BuildingType.Church => "Church", BuildingType.Wonder => "Wonder", _ => t.ToString(),
+        BuildingType.Church => "Church", BuildingType.Wonder => "Wonder",
+        BuildingType.Market => "Market", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
@@ -1863,6 +1875,7 @@ public partial class World3D : Node3D
         UpdateMusic(delta);
         UpdateGhost();
         UpdateTrainPanel();
+        UpdateMarketPanel();
         UpdateRealmPanel();
         UpdateGoalsPanel();
         UpdateTechPanel();
@@ -2587,11 +2600,11 @@ public partial class World3D : Node3D
                 Text = "⚠",
                 Modulate = new Color(1f, 0.80f, 0.20f),
                 OutlineModulate = new Color(0.15f, 0.10f, 0f),
-                FontSize = 48, OutlineSize = 10,
+                FontSize = 16, OutlineSize = 3,
                 Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
                 NoDepthTest = true,
                 FixedSize = true,
-                PixelSize = 0.006f,
+                PixelSize = 0.0025f,
                 Position = new Vector3(b.X + (b.W - 1) / 2f, 3.2f, b.Y + (b.H - 1) / 2f),
             };
             AddChild(lbl);
@@ -3358,6 +3371,130 @@ public partial class World3D : Node3D
             int design = i;
             b.Pressed += () => TrainAt(design);
             row.AddChild(b);
+        }
+    }
+
+    // ---- the market's trade board -----------------------------------------
+
+    // Click your trading hall and this opens: one row per good — your stock, a
+    // Buy and a Sell button at the posted prices, and an auto-trade toggle that
+    // cycles Off → Buy up to N → Sell above N, with ◀ ▶ to move the threshold.
+    // The standing orders it sets are what let the market run the economy on its
+    // own each realm tick. Like the other panels it never pauses the game.
+    void SetupMarketPanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        // Centre-left, the same berth as the train and realm panels — a market is
+        // a different building from a barracks or keep, so only one is ever up.
+        _marketPanel = new PanelContainer
+        {
+            AnchorLeft = 0, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            OffsetLeft = 12, OffsetTop = -120, Visible = false,
+        };
+        ((PanelContainer)_marketPanel).AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.93f)));
+        layer.AddChild(_marketPanel);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 14);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 11);
+        _marketPanel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 5);
+        margin.AddChild(col);
+
+        _marketHeader = RealmLabel(col, "Market", 15, new Color(0.95f, 0.90f, 0.70f));
+        RealmLabel(col, "buy & sell for gold  ·  auto-trade runs each turn", 11, new Color(0.60f, 0.64f, 0.70f));
+
+        int goods = _sim.MarketGoodTypes;
+        _mkStock = new Label[goods];
+        _mkAuto = new Button[goods];
+        _mkThresh = new Label[goods];
+        for (int g = 0; g < goods; g++)
+        {
+            int good = g;
+            var row = new HBoxContainer();
+            row.AddThemeConstantOverride("separation", 5);
+            col.AddChild(row);
+
+            _mkStock[g] = new Label { Text = "", CustomMinimumSize = new Vector2(96, 0) };
+            _mkStock[g].AddThemeColorOverride("font_color", new Color(0.94f, 0.95f, 0.98f));
+            _mkStock[g].AddThemeFontSizeOverride("font_size", 13);
+            _mkStock[g].SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(_mkStock[g]);
+
+            row.AddChild(TradeButton($"Buy 10\n{_sim.BuyPrice(g) * 10}g", () => MarketTrade(good, 10)));
+            row.AddChild(TradeButton($"Sell 10\n{_sim.SellPrice(g) * 10}g", () => MarketTrade(good, -10)));
+
+            // Auto-trade: the mode toggle, then a threshold dialled by ◀ ▶.
+            _mkAuto[g] = new Button { Text = "auto: off", CustomMinimumSize = new Vector2(96, 0), FocusMode = Control.FocusModeEnum.None };
+            _mkAuto[g].AddThemeFontSizeOverride("font_size", 12);
+            _mkAuto[g].Pressed += () => CycleTradeMode(good);
+            row.AddChild(_mkAuto[g]);
+
+            row.AddChild(DialButton("◀", () => AdjustThreshold(good, -10)));
+            _mkThresh[g] = new Label { Text = "—", HorizontalAlignment = HorizontalAlignment.Center, CustomMinimumSize = new Vector2(38, 0) };
+            _mkThresh[g].AddThemeColorOverride("font_color", new Color(0.97f, 0.95f, 0.86f));
+            _mkThresh[g].AddThemeFontSizeOverride("font_size", 13);
+            _mkThresh[g].SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            row.AddChild(_mkThresh[g]);
+            row.AddChild(DialButton("▶", () => AdjustThreshold(good, 10)));
+        }
+    }
+
+    Button TradeButton(string text, Action onPressed)
+    {
+        var b = new Button { Text = text, CustomMinimumSize = new Vector2(58, 0), FocusMode = Control.FocusModeEnum.None };
+        b.AddThemeFontSizeOverride("font_size", 11);
+        b.Pressed += () => onPressed();
+        return b;
+    }
+
+    // A hand trade of `qty` (positive buys, negative sells) of a good.
+    void MarketTrade(int good, int qty) =>
+        _me.Issue(new Command { Type = CommandType.Trade, X = good, Y = qty });
+
+    // Cycle a good's standing order Off → Buy → Sell, keeping the threshold.
+    void CycleTradeMode(int good)
+    {
+        var (mode, th) = _sim.TradePolicy(MyPlayer, good);
+        int next = (mode + 1) % 3;
+        if (th == 0 && next != Simulation.TradeOff) th = 50;   // a sensible opening target
+        _me.Issue(new Command { Type = CommandType.SetTradePolicy, X = good, Y = (th << 2) | next });
+    }
+
+    // Move a good's auto-trade threshold, keeping the mode.
+    void AdjustThreshold(int good, int delta)
+    {
+        var (mode, th) = _sim.TradePolicy(MyPlayer, good);
+        th = Mathf.Max(0, th + delta);
+        _me.Issue(new Command { Type = CommandType.SetTradePolicy, X = good, Y = (th << 2) | mode });
+    }
+
+    void UpdateMarketPanel()
+    {
+        bool show = _selectedBuilding != null && _selectedBuilding.Alive
+                    && _selectedBuilding.Type == BuildingType.Market
+                    && _selectedBuilding.Owner == MyPlayer;
+        _marketPanel.Visible = show;
+        if (!show) return;
+
+        int me = MyPlayer;
+        _marketHeader.Text = $"Market   ·   Gold {_sim.Gold(me)}";
+        for (int g = 0; g < _mkStock.Length; g++)
+        {
+            _mkStock[g].Text = $"{_sim.GoodName(g)}  {_sim.GoodStock(me, g)}";
+            var (mode, th) = _sim.TradePolicy(me, g);
+            _mkAuto[g].Text = mode == Simulation.TradeBuy ? "auto ▲ buy ≤"
+                            : mode == Simulation.TradeSell ? "auto ▼ sell ≥"
+                            : "auto: off";
+            _mkAuto[g].AddThemeColorOverride("font_color",
+                mode == Simulation.TradeBuy ? new Color(0.60f, 0.86f, 0.62f)
+                : mode == Simulation.TradeSell ? new Color(0.92f, 0.74f, 0.52f)
+                : new Color(0.62f, 0.65f, 0.70f));
+            _mkThresh[g].Text = mode == Simulation.TradeOff ? "—" : th.ToString();
         }
     }
 

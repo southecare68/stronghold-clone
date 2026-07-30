@@ -18,10 +18,10 @@ namespace Sim
     public enum CommandType
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
-        SetTax = 9, SetRations = 10, Research = 11, Spy = 12,
+        SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -363,7 +363,10 @@ namespace Sim
         const int ResearchIdx = 23;
         const int TechBase = 24, TechWords = 4;                // 24..27 — up to 128 node Ids
         const int SpyReadyBase = 28, SpyCount = 5;             // 28..32 — the tick each spy is next usable (per owner)
-        const int StockWidth = 33;                             // ... + research + 4 tech words + 5 spy cooldowns
+        const int WeaponsIdx = 33;                             // arms — a market-only commodity; a barracks arms a recruit from it instead of spending wood
+        const int MarketGoodCount = 5;                         // goods the market trades: Wood, Stone, Food, Iron, Weapons
+        const int MarketPolicyBase = 34;                       // 34..38 — per-good auto-trade policy, (threshold<<2 | mode) packed per slot
+        const int StockWidth = 39;                             // ... + research + 4 tech words + 5 spy cooldowns + weapons + 5 trade policies
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
@@ -450,8 +453,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3 };  // ...Granary, Church, Wonder
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3 };  // ...Granary, Church, Wonder, Market
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3 };
         static readonly int[][] BuildCost =
         {
             new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
@@ -471,6 +474,7 @@ namespace Sim
             new[] { 20, 5, 0 },       // Granary — a food drop-off by the fields, like the storehouse is for timber
             new[] { 20, 10, 0 },      // Church — timber and stone; ministers to a flock, converting the realm (see ResolveRealm)
             new[] { 80, 130, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
+            new[] { 30, 20, 0 },      // Market — a trading hall; owning one lets you buy & sell goods for gold (see Market.cs)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -481,7 +485,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1129,13 +1133,19 @@ namespace Sim
                     if (barracks == null || barracks.Owner != cmd.Owner ||
                         barracks.Type != BuildingType.Barracks) break;
                     int designId = cmd.X >= 0 && cmd.X < _designs.Count ? cmd.X : 0;
+                    // A recruit is an armed peasant. Arm them from a stocked weapon if
+                    // you have one (bought at a market), otherwise whittle the arms from
+                    // wood as before. With no weapons in stock this is identical to the
+                    // old wood-only path — which is every match that never trades.
+                    bool armFromStock = Weapons(cmd.Owner) > 0;
                     var trainCost = new[] { TrainCostWood, 0, 0 };
-                    if (!CanAfford(cmd.Owner, trainCost)) break;
-                    // Every soldier is an armed peasant. You need a spare one to
-                    // recruit, and the queue may not outrun your idle population —
-                    // so army size is ultimately gated by food and housing.
+                    if (!armFromStock && !CanAfford(cmd.Owner, trainCost)) break;
+                    // You need a spare peasant to recruit, and the queue may not outrun
+                    // your idle population — so army size is ultimately gated by food
+                    // and housing.
                     if (IdlePeasantCount(cmd.Owner) <= barracks.TrainQueue.Count) break;
-                    Pay(cmd.Owner, trainCost);
+                    if (armFromStock) StockOf(cmd.Owner)[WeaponsIdx] -= 1;
+                    else Pay(cmd.Owner, trainCost);
                     barracks.TrainQueue.Add(designId);
                     break;
 
@@ -1202,6 +1212,14 @@ namespace Sim
 
                 case CommandType.Spy:          // TargetId = spy node Id, X = target owner
                     TrySpy(cmd.Owner, cmd.TargetId, cmd.X);   // validates tech/cooldown/cost (Spy.cs)
+                    break;
+
+                case CommandType.Trade:        // X = good index (0..4), Y = signed quantity (>0 buy, <0 sell)
+                    TryTrade(cmd.Owner, cmd.X, cmd.Y);        // validates the market & the price (Market.cs)
+                    break;
+
+                case CommandType.SetTradePolicy:  // X = good index, Y = packed (threshold<<2 | mode)
+                    SetTradePolicy(cmd.Owner, cmd.X, cmd.Y);  // the auto-trader's per-good rule (Market.cs)
                     break;
             }
         }
@@ -1756,6 +1774,12 @@ namespace Sim
                 // that carries the merchant path to its hoard.
                 int gold = s[GoldIdx] + TaxGold[tax] * peasants + EconomicIncome(owner);
                 s[GoldIdx] = gold < 0 ? 0 : gold;
+
+                // The market's standing orders: with a trading hall up, each good with a
+                // Buy/Sell policy closes the gap to its threshold this tick, spending the
+                // gold just settled above (Market.cs). Runs before research so an
+                // auto-economy can turn tax into arms or a war-chest each turn.
+                AutoTrade(owner, s);
 
                 // Research accrues every realm tick at the realm's pace (Tech.cs), the
                 // currency that climbs the tech web toward a capstone.
