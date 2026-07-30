@@ -116,9 +116,13 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   A match with several bots spreads them across the crowns (by owner id). It also
   researches its branch's **⚔ war-tool**, so its fights feed its crown; a **Hard**
   bot additionally climbs the **Spy Guild**, funds espionage with an offsetting tax,
-  and looses the dagger that answers its rival's leading path. Proven in
-  `tests/AiPaths` — a Hard bot reaches every capstone and drives every metric, and
-  climbs the Spy Guild to fire a dagger at its rival.
+  and looses the dagger that answers its rival's leading path. It also **defends**:
+  each path's own counter (Cathedral / Banking House / Printing Press / Provincial
+  Keeps) already rides the climb to that capstone, so the one shield it reaches for
+  specially is the **Bodyguard**, rushed the moment a rival trains the Assassin.
+  Proven in `tests/AiPaths` — a Hard bot reaches every capstone and drives every
+  metric, climbs the Spy Guild to fire a dagger, and a threatened bot rushes the
+  Bodyguard.
 - **Economic branch** (`EconomicIncome`): a gold engine on top of tax — Trade Post
   pays a steady flow, the Guild Charter fork adds Monopoly's flat high margin *or*
   Bourse's per-building breadth, Banking House compounds interest on the hoard, and

@@ -87,9 +87,13 @@ namespace Sim
                 // people (offsetting the funding tax) runs the spy ring. Normal and its
                 // war-tool alone; Easy neither.
                 bool spymaster = level == AiLevel.Hard;
-                // Its own branch first; once that has nothing affordable, a spymaster
-                // climbs the Spy Guild toward the dagger that answers its rival's crown.
-                if (!AiResearch(owner, PlanFor(path)) && spymaster) AiResearchEspionage(owner, rival);
+                // Defence first: each path's own counter to the dagger meant for its
+                // crown (Cathedral / Banking House / Printing Press / Provincial Keeps)
+                // already rides the climb to that capstone, so the shield worth reaching
+                // for specially is the Bodyguard — rushed the moment a rival can wield
+                // the Assassin. Then its own branch; then (Hard) the offensive ring.
+                if (!AiDefend(owner, rival)
+                    && !AiResearch(owner, PlanFor(path)) && spymaster) AiResearchEspionage(owner, rival);
                 // Fund and run espionage (its own currencies — no build slot taken).
                 if (spymaster) AiRunEspionage(owner, rival);
             }
@@ -203,6 +207,23 @@ namespace Sim
                 if (pct > best) { best = pct; lead = (VictoryPath)p; }
             }
             return AiSpyForPath(lead);
+        }
+
+        // Defensive counter-tech. A rival who has trained the Assassin can leaderless
+        // an army mid-attack, and the Bodyguard — cheap, off any scored branch, so no
+        // cross-branch penalty — is the only shield against it that a bot does not
+        // already pick up on the way to its own capstone. Rush it (through Muster) the
+        // moment that blade appears in a rival's hand; return true while still doing so
+        // to take priority over other research.
+        bool AiDefend(int owner, int rival)
+        {
+            if (rival < 0) return false;
+            if (IsTechResearched(rival, TechTree.Assassin) && !IsTechResearched(owner, TechTree.Bodyguard))
+            {
+                if (TryResearch(owner, TechTree.Muster)) return true;
+                if (TryResearch(owner, TechTree.Bodyguard)) return true;
+            }
+            return false;
         }
 
         // Climb the spy branch: Muster, the Spy Guild, then the rival's dagger.

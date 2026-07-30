@@ -26,6 +26,7 @@ static class Program
         Contest(VictoryPath.Science, TechTree.Academy);
         Contest(VictoryPath.Domain, TechTree.SovereignsCourt);
         HardBotRunsTheSpyRing();
+        BotShieldsAgainstTheAssassin();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -74,6 +75,28 @@ static class Program
                           $"embezzler {(sim.IsTechResearched(2, TechTree.Embezzler) ? "✓" : "✗")}   fired {(sim.SpyReadyAt(2, TechTree.Embezzler) > 0 ? "✓" : "✗")}");
         Check("Hard: the bot climbs the Spy Guild and trains the rival's dagger", sim.IsTechResearched(2, TechTree.Embezzler));
         Check("Hard: and looses it at the rival", sim.SpyReadyAt(2, TechTree.Embezzler) > 0);
+    }
+
+    // Defensive counter-tech: a bot whose rival has trained the Assassin rushes the
+    // Bodyguard — the one counter it does not already pick up climbing its own branch.
+    static void BotShieldsAgainstTheAssassin()
+    {
+        var sim = new Simulation(TileMap.Skirmish(Skirmish.DefaultSize));
+        Skirmish.Setup(sim, Skirmish.DefaultSize);
+        sim.FogEnabled = false;
+        // The rival (owner 1) trains the Assassin; the bot (owner 2) should react.
+        sim.AddResearch(1, 1000);
+        foreach (int id in new[] { TechTree.Roads, TechTree.Muster, TechTree.SpyGuild, TechTree.Assassin }) sim.TryResearch(1, id);
+        sim.EnableAi(2, AiLevel.Normal, VictoryPath.Religious);
+
+        int finish = -1;
+        for (int t = 0; t < 40_000; t++)
+        {
+            sim.Tick(Array.Empty<Command>());
+            if (t % 200 == 0 && sim.IsTechResearched(2, TechTree.Bodyguard)) { finish = t; break; }
+        }
+        Console.WriteLine($"  defence     rival has Assassin ✓   bot Bodyguard {(sim.IsTechResearched(2, TechTree.Bodyguard) ? $"✓ @ {finish}" : "✗")}");
+        Check("a threatened bot rushes the Bodyguard", sim.IsTechResearched(2, TechTree.Bodyguard));
     }
 
     // Real progress on the crown's own metric — not merely the capstone research.
