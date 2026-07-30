@@ -27,6 +27,7 @@ static class Program
         Contest(VictoryPath.Domain, TechTree.SovereignsCourt);
         HardBotRunsTheSpyRing();
         BotShieldsAgainstTheAssassin();
+        BotFocusesTheAnnouncedThreat();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -97,6 +98,51 @@ static class Program
         }
         Console.WriteLine($"  defence     rival has Assassin ✓   bot Bodyguard {(sim.IsTechResearched(2, TechTree.Bodyguard) ? $"✓ @ {finish}" : "✗")}");
         Check("a threatened bot rushes the Bodyguard", sim.IsTechResearched(2, TechTree.Bodyguard));
+    }
+
+    // Reacting to the announcement: a rival crosses 80% of the Religious crown
+    // (announced realm-wide); the bot locks its dagger onto Religious — the Inquisitor
+    // — rather than any other path.
+    static void BotFocusesTheAnnouncedThreat()
+    {
+        var sim = new Simulation(TileMap.Skirmish(Skirmish.DefaultSize));
+        Skirmish.Setup(sim, Skirmish.DefaultSize);
+        sim.FogEnabled = false;
+
+        // The rival (owner 1, passive) converts a small dense flock past 80% of the
+        // faith crown, tripping the announcement long before the bot can spy.
+        var keep1 = FindKeep(sim, 1);
+        sim.AddResource(1, ResourceType.Food, 200_000);   // fed, so the flock stays and converts
+        sim.PlaceBuilding(BuildingType.Church, 1, keep1.X + 6, keep1.Y);
+        sim.PlaceBuilding(BuildingType.Church, 1, keep1.X + 6, keep1.Y + 4);
+        for (int i = 0; i < 4; i++) sim.SpawnPeasant(1);
+
+        // First let the rival convert past 80% with no bot in play, so the realm is
+        // told before espionage can suppress it — then the announcement is standing.
+        for (int t = 0; t < 5000 && !sim.Progress(1, VictoryPath.Religious).Announced; t++)
+            sim.Tick(Array.Empty<Command>());
+        Check("the rival is announced on Religious", sim.Progress(1, VictoryPath.Religious).Announced);
+
+        // Now the bot enters: it must lock its dagger onto the announced crown.
+        sim.EnableAi(2, AiLevel.Hard, VictoryPath.Economic);
+        for (int t = 0; t < 60_000; t++)
+        {
+            sim.Tick(Array.Empty<Command>());
+            if (t % 200 == 0 && sim.IsTechResearched(2, TechTree.Inquisitor)
+                && sim.SpyReadyAt(2, TechTree.Inquisitor) > 0) break;
+        }
+
+        Console.WriteLine($"  announce    rival announced Religious ✓   " +
+                          $"bot Inquisitor {(sim.IsTechResearched(2, TechTree.Inquisitor) ? "✓" : "✗")}   fired {(sim.SpyReadyAt(2, TechTree.Inquisitor) > 0 ? "✓" : "✗")}");
+        Check("the bot locks the Inquisitor onto the announced threat", sim.IsTechResearched(2, TechTree.Inquisitor));
+        Check("and looses it", sim.SpyReadyAt(2, TechTree.Inquisitor) > 0);
+    }
+
+    static Building FindKeep(Simulation sim, int owner)
+    {
+        foreach (var b in sim.Buildings)
+            if (b.Alive && b.Owner == owner && b.Type == BuildingType.Keep) return b;
+        return null;
     }
 
     // Real progress on the crown's own metric — not merely the capstone research.

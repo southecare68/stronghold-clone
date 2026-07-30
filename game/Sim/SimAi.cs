@@ -199,14 +199,19 @@ namespace Sim
 
         int AiRivalSpy(int rival)
         {
-            VictoryPath lead = VictoryPath.Economic;
-            int best = -1;
+            // A crown the rival has already been ANNOUNCED on (crossed 80%, latched
+            // realm-wide) is the urgent threat — the bot locks its dagger onto that
+            // path and keeps it suppressed, even if a spy has since knocked it back
+            // below 80%. Absent any announcement, it answers the rival's leading path.
+            VictoryPath announced = VictoryPath.Economic, lead = VictoryPath.Economic;
+            int bestAnn = -1, best = -1;
             for (int p = 0; p < PathCount; p++)
             {
-                int pct = Progress(rival, (VictoryPath)p).HighPercent;
-                if (pct > best) { best = pct; lead = (VictoryPath)p; }
+                var prog = Progress(rival, (VictoryPath)p);
+                if (prog.HighPercent > best) { best = prog.HighPercent; lead = (VictoryPath)p; }
+                if (prog.Announced && prog.HighPercent > bestAnn) { bestAnn = prog.HighPercent; announced = (VictoryPath)p; }
             }
-            return AiSpyForPath(lead);
+            return AiSpyForPath(bestAnn >= 0 ? announced : lead);
         }
 
         // Defensive counter-tech. A rival who has trained the Assassin can leaderless
