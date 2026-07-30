@@ -200,6 +200,14 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   keep falls as before, so existing sieges are untouched. Units stop battering a
   keep the moment it turns friendly; an "⚔ seized a territory" toast fires. This is
   Domain's "or taken by force" — the aggressive player's road to the census crown.
+- **The Scout** (`Skirmish` design 4, `UnitDesign.Sight`): a recon unit — the
+  fastest legs on the field (`SpeedStat` 14) and a far-wider eye (`Sight` 13 vs the
+  usual 7), but frail and weak (40 hp, 4 damage). Sight became a per-design stat:
+  `Vision` takes a `sightOf` resolver so each unit lights its own radius, and it is
+  deliberately kept OUT of the point-buy budget (a role, not a stat traded against
+  muscle). The field rides the design roster's hash and snapshot. The scout's reach
+  compounds with the cautious march — enemies it reveals feed the danger field every
+  friendly unit routes around, so scouting ahead literally makes your armies detour.
 - **Movement options** (`Simulation` Move command, `PathFinder`): a plain move is
   one direct, string-pulled route (the Stronghold default, and what keeps the frozen
   parity scenario bit-identical). Two flags ride the Move command's `TargetId`:
@@ -299,6 +307,9 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Cautious march: `DangerRadius`/`DangerPeak` (`Simulation.cs`) — how far a known
   enemy's avoidance bubble reaches and how strongly it repels the path;
   `RerouteInterval` — how often a cautious unit re-plans against newly-seen danger.
+- Units: per-design stats in `Skirmish.Designs()` (Hp/Damage/Speed/Range/Cooldown
+  under the `MaxDesignPoints` budget) plus `Sight` (free); `Vision.UnitSight` is the
+  default radius. The Scout is design 4 — bump its `Sight`/`SpeedStat` to taste.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,

@@ -21,6 +21,7 @@ static class Program
 
         FogOffChangesNothing();
         AUnitLightsItsSurroundings();
+        AScoutSeesFurtherThanASoldier();
         TheExploredFrontierHasNoHoles();
         RockBlocksSightButWaterDoesNot();
         ExploredRemembersWhatVisibleForgets();
@@ -101,6 +102,27 @@ static class Program
     // itself remembered. Here we assert that invariant directly, near the ridge so
     // rock actually casts the shadows that used to dither. Rock-hiding is untouched
     // (a shadowed tile has no lit inner neighbour, so it stays dark).
+    // The scout's whole point: a far-wider eye. Its per-design Sight (13) lights a
+    // disc a plain soldier's 7-tile reach never touches, and it stays within the
+    // design budget despite that — sight is a role, not a point-bought stat.
+    static void AScoutSeesFurtherThanASoldier()
+    {
+        Console.WriteLine("\na scout sees further than a soldier:");
+        var scoutDesign = new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13 };
+        Check("the scout fits the design budget", scoutDesign.PointCost <= Simulation.MaxDesignPoints);
+
+        var sim = Fogged(TileMap.Open(64));
+        int scout = sim.RegisterDesign(scoutDesign);
+        sim.SpawnUnit(1, 30, 30, scout);           // a scout
+        sim.SpawnUnit(1, 30, 55, 0);               // a plain soldier (design 0, sight 7)
+        sim.Tick(Array.Empty<Command>());          // vision settles at the top of a tick
+
+        int far = Vision.UnitSight + 3;            // 10 tiles — past a soldier, inside a scout
+        Check($"the scout lights a tile {far} tiles off", sim.Fog.IsVisible(1, 30 + far, 30));
+        Check($"a soldier does not reach {far} tiles", !sim.Fog.IsVisible(1, 30 + far, 55));
+        Check("and the scout still cannot see the whole map", !sim.Fog.IsVisible(1, 63, 0));
+    }
+
     static void TheExploredFrontierHasNoHoles()
     {
         Console.WriteLine("\nthe explored frontier is filled, not dithered:");

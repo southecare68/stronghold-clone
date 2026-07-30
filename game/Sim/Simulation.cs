@@ -78,12 +78,15 @@ namespace Sim
         public int SpeedStat;   // 5 == the classic 1/8-tile-per-tick; speed = One*Stat/40
         public int RangeStat;   // reach in half-tiles; 3 == 1.5 tiles; range = One*Stat/2
         public int Cooldown;    // ticks between blows
+        public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
 
         public int SpeedFixed => Fixed.One * SpeedStat / 40;
         public int RangeFixed => Fixed.One * RangeStat / 2;
 
         // What this design spends of the budget. A defensible, tunable weighting:
-        // hp is cheap per point, damage and a short cooldown are dear.
+        // hp is cheap per point, damage and a short cooldown are dear. Sight is
+        // deliberately left OUT — like the fog radius it scales, it is a role, not a
+        // stat traded against combat power (a scout buys reach, not muscle).
         public int PointCost =>
             Hp / 10 + Damage * 2 + SpeedStat + RangeStat + Max0(15 - Cooldown);
 
@@ -91,7 +94,7 @@ namespace Sim
 
         public UnitDesign Clone() => new UnitDesign
         {
-            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown,
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight,
         };
 
         // The classic soldier, and the ceiling every custom design is measured
@@ -619,6 +622,10 @@ namespace Sim
         public UnitDesign DesignOf(int designId) =>
             designId >= 0 && designId < _designs.Count ? _designs[designId] : _designs[0];
 
+        // A unit's vision radius, from its design — how the fog reads a scout's long
+        // reach. Passed to Vision so a scout lights a far wider disc than a soldier.
+        int SightOf(Unit u) => DesignOf(u.DesignId).Sight;
+
         // Register a custom design and return its id, or -1 if it busts the point
         // budget. For match setup — call it identically on every machine before the
         // match runs, like SpawnUnit. Designs don't change once the match is live.
@@ -702,7 +709,7 @@ namespace Sim
             InfiniteResources = infiniteResources;
             RequireFertileSoil = requireFertileSoil;
             Fog.RestoreExplored(explored);
-            if (FogEnabled) Fog.RecomputeVisible(Units, Buildings);
+            if (FogEnabled) Fog.RecomputeVisible(Units, Buildings, SightOf);
         }
 
         // Restore straight from a snapshot object — the same unpacking every
@@ -1565,7 +1572,7 @@ namespace Sim
             // could last have seen it — and at the same point in the sequence on
             // every machine. Doing it after the commands would mean an order was
             // legal or not depending on where the move it triggered ended up.
-            if (FogEnabled) Fog.Update(Units, Buildings);
+            if (FogEnabled) Fog.Update(Units, Buildings, SightOf);
 
             var ordered = new List<Command>(commands);
             ordered.Sort(CanonicalOrder); // same order on every machine
@@ -2631,7 +2638,7 @@ namespace Sim
             Mix(_designs.Count);
             foreach (var d in _designs)
             {
-                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown);
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight);
             }
 
             foreach (var u in Units)

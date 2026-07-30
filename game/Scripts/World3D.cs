@@ -145,7 +145,7 @@ public partial class World3D : Node3D
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
-    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher;
+    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout;
 
     // Camera orbit around a target on the ground.
     Vector3 _camTarget;
@@ -586,6 +586,7 @@ public partial class World3D : Node3D
         _mRunner  = Load("Characters/SM_Chr_Soldier_Female_01");
         _mBrute   = Load("Characters/SM_Chr_Rider_01");
         _mArcher  = Load("Characters/SM_Chr_King_01");
+        _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
 
         void B(BuildingType t, string rel, float s) { _bldModel[t] = Load(rel); _bldScale[t] = s; }
         B(BuildingType.Keep,          "Castle/SM_Bld_Castle_Wall_Tower_L_01", 0.5f);
@@ -3037,7 +3038,7 @@ public partial class World3D : Node3D
     PackedScene ModelFor(Unit u)
     {
         if (u.IsPeasant) return _mPeasant;
-        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, _ => _mSoldier };
+        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, _ => _mSoldier };
     }
 
     // ---- camera ------------------------------------------------------------

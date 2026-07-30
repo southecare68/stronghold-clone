@@ -85,8 +85,8 @@ namespace Sim
         // start of every Tick, so a command is judged against the world as it
         // stood when the player could last have seen it — and, crucially, at the
         // same point in the sequence on every machine.
-        public void Update(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings) =>
-            Recompute(units, buildings, accumulate: true);
+        public void Update(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings, Func<Unit, int> sightOf = null) =>
+            Recompute(units, buildings, accumulate: true, sightOf);
 
         // Rebuild Visible WITHOUT adding anything to Explored. This is what a
         // rejoiner needs, and the distinction is not cosmetic: exploration is
@@ -95,17 +95,20 @@ namespace Sim
         // would leave the rejoiner knowing a sliver more of the map than the
         // player who sent it — a real desync, and one that would only show up
         // later as an order one machine allowed and the other refused.
-        public void RecomputeVisible(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings) =>
-            Recompute(units, buildings, accumulate: false);
+        public void RecomputeVisible(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings, Func<Unit, int> sightOf = null) =>
+            Recompute(units, buildings, accumulate: false, sightOf);
 
-        void Recompute(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings, bool accumulate)
+        void Recompute(IReadOnlyList<Unit> units, IReadOnlyList<Building> buildings, bool accumulate, Func<Unit, int> sightOf)
         {
             foreach (var kv in _visible) Array.Clear(kv.Value, 0, kv.Value.Length);
 
             foreach (var u in units)                 // id order
             {
                 if (!u.Alive) continue;
-                Reveal(u.Owner, Fixed.ToInt(u.X), Fixed.ToInt(u.Y), UnitSight, accumulate);
+                // Per-unit sight (a scout sees far); default to the classic radius
+                // when no resolver is supplied, so every existing caller is unchanged.
+                int r = sightOf != null ? sightOf(u) : UnitSight;
+                Reveal(u.Owner, Fixed.ToInt(u.X), Fixed.ToInt(u.Y), r, accumulate);
             }
 
             foreach (var b in buildings)             // id order
