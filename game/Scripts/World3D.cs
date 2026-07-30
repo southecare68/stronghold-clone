@@ -3213,7 +3213,9 @@ public partial class World3D : Node3D
             }
             else if (mb.ButtonIndex == MouseButton.Right && mb.Pressed)
             {
-                RightClick(mb.Position);
+                // Read the modifiers off the click event itself — the reliable,
+                // cross-platform source (Input.IsKeyPressed misses Option on macOS).
+                RightClick(mb.Position, mb.ShiftPressed, mb.AltPressed);
             }
         }
         else if (e is InputEventMouseMotion mm && _boxing)
@@ -3258,7 +3260,7 @@ public partial class World3D : Node3D
 
     // Right-click: attack an enemy under the cursor, else march the selection to
     // the ground point.
-    void RightClick(Vector2 screen)
+    void RightClick(Vector2 screen, bool append = false, bool cautious = false)
     {
         if (_selected.Count == 0) return;
         var ids = new List<int>(_selected).ToArray();
@@ -3299,10 +3301,8 @@ public partial class World3D : Node3D
         if (GroundTile(screen, out int tx, out int ty))
         {
             // Move modifiers (see the Move command): Shift appends a waypoint after
-            // the current journey, Alt marches cautiously — routing around known
-            // enemies. They combine, and default (no modifier) is the direct march.
-            bool append   = Input.IsKeyPressed(Key.Shift);
-            bool cautious = Input.IsKeyPressed(Key.Alt);
+            // the current journey, Alt (Option on macOS) marches cautiously — routing
+            // around known enemies. They combine; no modifier is the direct march.
             int flags = (append ? 1 : 0) | (cautious ? 2 : 0);
             _me.Issue(new Command { Type = CommandType.Move, UnitIds = ids, X = tx, Y = ty, TargetId = flags });
             _sound.PlayUi(Sfx.MoveOrder);
