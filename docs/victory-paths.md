@@ -47,6 +47,10 @@ the four races are comparable — see [Balance](#balance).)*
   snapped shut, so spies and raids have something to bite.
 - **One clock** — a single match timer decides the winner at the buzzer; its
   length is the master dial (short favors tempo, long favors scaling).
+- **Game calendar** — a cosmetic Year/Month clock (`TicksPerMonth`, `GameYear`/
+  `GameMonth`/`GameMonthName` in `Victory.cs`), shown top-right. A month is 20s of
+  play, a year twelve of them; purely derived from the shared tick, so it never
+  desyncs and adds nothing to the checksum. Opens on Year 1, Month 1 (January).
 - **Diminishing returns** — over-investing one track has a falling ceiling, so
   hybrids stay attractive.
 - **War feeds the attacker** — every act of war advances your own path (loot /

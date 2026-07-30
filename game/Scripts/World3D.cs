@@ -199,6 +199,7 @@ public partial class World3D : Node3D
     readonly Label[] _stat = new Label[StatCount];
     Label _selInfo;
     Label _netInfo;
+    Label _clockInfo;
     const int StatCount = 12;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith, research
 
     // A brief, prominent confirmation flashed when you turn a realm dial (tax or
@@ -1347,8 +1348,9 @@ public partial class World3D : Node3D
         _selInfo.AddThemeFontSizeOverride("font_size", 14);
         selMargin.AddChild(_selInfo);
 
-        // Net status, top-right: the match mode and whether lockstep is healthy —
-        // in sync, stalled waiting on a peer, or desynced.
+        // Top-right: the game date (a cosmetic calendar off the shared tick), and
+        // below it the net status — the match mode and whether lockstep is healthy
+        // (in sync, stalled waiting on a peer, or desynced).
         var netPanel = new PanelContainer { AnchorLeft = 1, AnchorRight = 1, AnchorTop = 0, OffsetLeft = -220, OffsetRight = -12, OffsetTop = 10 };
         netPanel.AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.86f)));
         layer.AddChild(netPanel);
@@ -1356,9 +1358,18 @@ public partial class World3D : Node3D
         foreach (var s in new[] { "left", "right" }) netMargin.AddThemeConstantOverride("margin_" + s, 12);
         foreach (var s in new[] { "top", "bottom" }) netMargin.AddThemeConstantOverride("margin_" + s, 8);
         netPanel.AddChild(netMargin);
+        var netCol = new VBoxContainer();
+        netCol.AddThemeConstantOverride("separation", 2);
+        netMargin.AddChild(netCol);
+        _clockInfo = new Label { HorizontalAlignment = HorizontalAlignment.Right };
+        _clockInfo.AddThemeFontSizeOverride("font_size", 15);
+        _clockInfo.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.70f));
+        _clockInfo.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        netCol.AddChild(_clockInfo);
         _netInfo = new Label { HorizontalAlignment = HorizontalAlignment.Right };
-        _netInfo.AddThemeFontSizeOverride("font_size", 14);
-        netMargin.AddChild(_netInfo);
+        _netInfo.AddThemeFontSizeOverride("font_size", 13);
+        _netInfo.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        netCol.AddChild(_netInfo);
 
         // A survey toggle, bottom-right — the same thing the V key does, for anyone
         // who would rather click. Its tint tracks whether the overlay is on.
@@ -1514,6 +1525,7 @@ public partial class World3D : Node3D
         if (_me.Desync != null)     { state = $"DESYNC @ {_me.Desync.Tick}"; tint = new Color(0.95f, 0.4f, 0.35f); }
         else if (_me.Stalled)       { state = "waiting for peer…";           tint = new Color(0.92f, 0.78f, 0.35f); }
         else                        { state = "in sync";                     tint = new Color(0.5f, 0.8f, 0.55f); }
+        _clockInfo.Text = $"Year {_sim.GameYear}  ·  Month {_sim.GameMonth}  ·  {_sim.GameMonthName}";
         _netInfo.Text = $"{_mode}  ·  tick {_sim.TickNumber}  ·  {state}";
         _netInfo.AddThemeColorOverride("font_color", tint);
     }

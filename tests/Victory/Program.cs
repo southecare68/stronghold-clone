@@ -48,6 +48,7 @@ static class Program
         TheRealmIsToldAtEightyPercent();
         ADualGoalTakesTheCrown();
         APopulationFloorGatesTheCrown();
+        TheGameCalendarAdvances();
         TheTerritoryAndScienceSeams();
         TwoClientsAgreeOnTheCrown();
 
@@ -164,6 +165,25 @@ static class Program
         Check("now over the floor", sim.PopulationFloorMet(1));
         Ticks(sim, 4 * RealmIntervalGuess);
         Check("over the floor, the hold begins to accrue", sim.Progress(1, VictoryPath.Economic).HoldTicks > 0);
+    }
+
+    // The game calendar — a cosmetic clock off the shared tick count. A match opens
+    // on Year 1, Month 1; a month is one TicksPerMonth, a year twelve of them. Purely
+    // derived, so it never desyncs and never touches the checksum.
+    static void TheGameCalendarAdvances()
+    {
+        Console.WriteLine("the game calendar advances with the tick:");
+        var sim = new Simulation(TileMap.Open(32));
+        Check("a match opens on Year 1, Month 1", sim.GameYear == 1 && sim.GameMonth == 1);
+
+        int month = Simulation.TicksPerMonth;
+        Ticks(sim, month);
+        Check("one month on, it reads Month 2", sim.GameYear == 1 && sim.GameMonth == 2);
+
+        Ticks(sim, month * 11);                       // eleven more months → the new year
+        Check("twelve months on, it rolls to Year 2, Month 1", sim.GameYear == 2 && sim.GameMonth == 1);
+
+        Check("and the month has a name", sim.GameMonthName == "January");
     }
 
     // The two clauses that wait on later phases: territory (Phase 3) and science

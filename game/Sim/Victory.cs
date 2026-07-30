@@ -86,6 +86,20 @@ namespace Sim
 
         // Sim tick rate: RealmInterval (40 ticks) is "2s", so 20 ticks a second.
         const int TickRate = 20;
+
+        // The game calendar — a purely cosmetic clock read off the shared tick count,
+        // so every client shows the same date with no state to sync and nothing to
+        // hash. A month is 20 seconds of play (ten realm ticks); twelve make a year.
+        // Both are 1-based: a match opens on Year 1, Month 1.
+        public const int TicksPerMonth = 20 * TickRate;
+        public int GameMonth => TickNumber / TicksPerMonth % 12 + 1;   // 1..12
+        public int GameYear  => TickNumber / TicksPerMonth / 12 + 1;   // 1..
+        static readonly string[] MonthNames =
+        {
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        };
+        public string GameMonthName => MonthNames[(GameMonth - 1) % 12];
         // How long a HIGH goal must be HELD, not merely touched, before it counts —
         // the design's sustained-hold windows (~10-30 real minutes), in ticks. Public
         // so the render layer can show a countdown and tests can drive it exactly. The
