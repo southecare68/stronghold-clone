@@ -3476,7 +3476,23 @@ public partial class World3D : Node3D
             row.AddChild(_mkThresh[g]);
             row.AddChild(DialButton("▶", () => AdjustThreshold(good, 10)));
         }
+
+        // Mercenaries: hire trained soldiers for gold, no peasant needed.
+        RealmLabel(col, "hire mercenaries  ·  gold for trained troops, no peasant", 11, new Color(0.60f, 0.64f, 0.70f));
+        var hireRow = new HBoxContainer();
+        hireRow.AddThemeConstantOverride("separation", 5);
+        col.AddChild(hireRow);
+        for (int i = 0; i < _sim.MercTypes; i++)
+        {
+            int design = _sim.MercDesign(i);
+            string name = design < Skirmish.DesignNames.Length ? Skirmish.DesignNames[design] : $"Unit {design}";
+            hireRow.AddChild(TradeButton($"{name}\n{_sim.MercPrice(i)}g", () => HireMercenary(design)));
+        }
     }
+
+    // Hire one mercenary of a design for gold (validated in the sim — market & gold).
+    void HireMercenary(int design) =>
+        _me.Issue(new Command { Type = CommandType.HireMercenary, X = design });
 
     Button TradeButton(string text, Action onPressed)
     {

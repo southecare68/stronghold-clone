@@ -18,7 +18,7 @@ namespace Sim
     public enum CommandType
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
-        SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14,
+        SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14, HireMercenary = 15,
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17 }
@@ -1291,6 +1291,10 @@ namespace Sim
 
                 case CommandType.SetTradePolicy:  // X = good index, Y = packed (threshold<<2 | mode)
                     SetTradePolicy(cmd.Owner, cmd.X, cmd.Y);  // the auto-trader's per-good rule (Market.cs)
+                    break;
+
+                case CommandType.HireMercenary:   // X = design id to hire
+                    TryHireMercenary(cmd.Owner, cmd.X);       // gold for a trained soldier, no peasant (Market.cs)
                     break;
             }
         }

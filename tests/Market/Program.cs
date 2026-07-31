@@ -38,7 +38,12 @@ static class Program
         AutoSellDumpsTheSurplus();
         AutoTradeNeedsAMarket();
         AnAutoBoughtArmouryRefillsItself();
+        HiringAMercenaryMustersASoldierForGold();
+        HiringNeedsAMarketAndEnoughGold();
+        OnlyRosteredDesignsCanBeHired();
+        AnAutoEconomyCanFieldAnArmyOfMercenaries();
         TwoClientsAgreeOnTrading();
+        TwoClientsAgreeOnHiring();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -245,6 +250,67 @@ static class Program
         Check("the standing order refilled the armoury", sim.Weapons(1) == 10);
     }
 
+    // Mercenaries: gold buys a trained soldier outright — no peasant, no barracks,
+    // no muster — the whole point being it bypasses the population gate.
+    static void HiringAMercenaryMustersASoldierForGold()
+    {
+        Console.WriteLine("\nhiring a mercenary musters a soldier for gold:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        sim.AddGold(1, 500);
+        int price = sim.MercPrice(0);                       // the first merc on the roster
+        int design = sim.MercDesign(0);
+        int before = sim.Units.Count;
+
+        Order(sim, Hire(1, design));
+        Check($"gold paid the hire price ({price})", sim.Gold(1) == 500 - price);
+        Check("a unit mustered", sim.Units.Count == before + 1);
+        var merc = sim.Units[sim.Units.Count - 1];
+        Check("the merc is a fighting soldier, not a peasant", !merc.IsPeasant && merc.Owner == 1);
+        Check("and no peasant was spent (none even existed)", sim.PeasantCount(1) == 0);
+    }
+
+    // The two gates on hiring: you need a trading hall, and you need the gold.
+    static void HiringNeedsAMarketAndEnoughGold()
+    {
+        Console.WriteLine("\nhiring needs a market and enough gold:");
+        var noMarket = new Simulation(TileMap.Open(48));
+        noMarket.AddGold(1, 500);
+        Order(noMarket, Hire(1, noMarket.MercDesign(0)));
+        Check("no market → no mercenary, gold untouched", noMarket.Units.Count == 0 && noMarket.Gold(1) == 500);
+
+        var poor = new Simulation(TileMap.Open(48));
+        poor.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        poor.AddGold(1, poor.MercPrice(0) - 1);            // a coin short
+        Order(poor, Hire(1, poor.MercDesign(0)));
+        Check("too little gold → no mercenary", poor.Units.Count == 0);
+    }
+
+    // Only the rostered combat designs are for hire — not, say, the stealth Scout.
+    static void OnlyRosteredDesignsCanBeHired()
+    {
+        Console.WriteLine("\nonly rostered designs can be hired:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        sim.AddGold(1, 5000);
+        Order(sim, Hire(1, 99));                            // a design that isn't on the roster
+        Check("an off-roster design hires nothing", sim.Units.Count == 0 && sim.Gold(1) == 5000);
+    }
+
+    // The showcase: a rich, hands-off market economy turns gold straight into an
+    // army the population could never have raised in the time.
+    static void AnAutoEconomyCanFieldAnArmyOfMercenaries()
+    {
+        Console.WriteLine("\nan auto economy fields an army of mercenaries:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        sim.AddGold(1, 2000);
+        int hired = 0;
+        for (int i = 0; i < 6; i++) { Order(sim, Hire(1, sim.MercDesign(0))); if (sim.Units.Count == hired + 1) hired++; }
+        Check("gold raised a whole company with no peasants", hired >= 6 && sim.PeasantCount(1) == 0);
+        Check("and the treasury was drawn down for it", sim.Gold(1) == 2000 - 6 * sim.MercPrice(0));
+    }
+
     // The one that matters most: two clients issuing the same trades and standing
     // orders must agree on every tick — the goods, the gold, the auto-trader.
     static void TwoClientsAgreeOnTrading()
@@ -284,6 +350,36 @@ static class Program
         Check($"and the armoury actually filled ({a.Sim.Weapons(1)} weapons on A)", a.Sim.Weapons(1) > 0);
     }
 
+    // Hiring spawns units, so two machines must agree on the roster mustered and
+    // where each merc lands — the sternest determinism test of the feature.
+    static void TwoClientsAgreeOnHiring()
+    {
+        Console.WriteLine("\ntwo clients agree on hiring mercenaries:");
+        var net = new LoopbackTransport();
+        var a = new Client(1, net, TileMap.Open(64));
+        var b = new Client(2, net, TileMap.Open(64));
+        net.Connect(a);
+        net.Connect(b);
+        foreach (var c in new[] { a, b })
+        {
+            c.Sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+            c.Sim.AddGold(1, 3000);
+        }
+
+        int desyncs = 0, first = -1;
+        for (int t = 0; t < 400; t++)
+        {
+            if (t == 10) { a.Issue(Hire(1, a.Sim.MercDesign(0))); b.Issue(Hire(1, b.Sim.MercDesign(0))); }
+            if (t == 20) { a.Issue(Hire(1, a.Sim.MercDesign(2))); b.Issue(Hire(1, b.Sim.MercDesign(2))); }
+            if (t == 30) { a.Issue(Hire(1, a.Sim.MercDesign(1))); b.Issue(Hire(1, b.Sim.MercDesign(1))); }
+            a.SendInput(); b.SendInput();
+            a.TryStep();   b.TryStep();
+            if (a.Sim.StateChecksum() != b.Sim.StateChecksum()) { if (first < 0) first = t; desyncs++; }
+        }
+        Check($"StateChecksum identical on all 400 ticks" + (desyncs > 0 ? $" (diverged {desyncs}x, first at {first})" : ""), desyncs == 0);
+        Check($"and the company mustered on both ({a.Sim.Units.Count} units)", a.Sim.Units.Count == 3 && b.Sim.Units.Count == 3);
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     static int BarracksId(Simulation sim)
@@ -305,6 +401,8 @@ static class Program
         new Command { Owner = owner, Type = CommandType.SetTradePolicy, X = good, Y = (threshold << 2) | mode };
     static Command Train(int owner, int barracksId) =>
         new Command { Owner = owner, Type = CommandType.Train, TargetId = barracksId, X = 0 };
+    static Command Hire(int owner, int design) =>
+        new Command { Owner = owner, Type = CommandType.HireMercenary, X = design };
 
     static void Check(string what, bool ok)
     {

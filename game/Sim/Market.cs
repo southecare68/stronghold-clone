@@ -50,6 +50,48 @@ namespace Sim
         // A realm can trade once it has raised at least one trading hall.
         public bool HasMarket(int owner) => CountBuildings(owner, BuildingType.Market) > 0;
 
+        // --- Mercenaries ------------------------------------------------------
+        // The market hires trained soldiers for gold — no peasant, no housing, no
+        // muster. That is the point: a rich realm turns its hoard straight into an
+        // army, bypassing the population/food gate that bounds a trained one (they
+        // still eat their rations once fielded, like any soldier). A premium price
+        // over training keeps it a gold SINK, not a shortcut around the economy.
+        // The roster maps a barracks design to its hire price; scouts are not for
+        // sale (stealth is your own edge to keep).
+        static readonly (int Design, int Price)[] MercRoster = { (0, 120), (3, 150), (2, 200) };
+        public int MercTypes => MercRoster.Length;
+        public int MercDesign(int i) => MercRoster[i].Design;
+        public int MercPrice(int i) => MercRoster[i].Price;
+        int MercPriceForDesign(int designId)
+        {
+            foreach (var m in MercRoster) if (m.Design == designId) return m.Price;
+            return 0;   // 0 == not a hireable design
+        }
+
+        // Hire one mercenary of a design: pay its gold price and muster a trained
+        // soldier at the realm's first market. Refused with no market, an unknown
+        // design, or too little gold — so an over-eager click simply does nothing.
+        void TryHireMercenary(int owner, int designId)
+        {
+            int price = MercPriceForDesign(designId);
+            if (price <= 0) return;
+            var market = FirstBuildingOf(owner, BuildingType.Market);
+            if (market == null) return;                      // needs a trading hall
+            var s = StockOf(owner);
+            if (s[GoldIdx] < price) return;
+
+            var spot = NearestFreeTile(market.CenterX, market.CenterY) ?? new Tile(market.CenterX, market.CenterY);
+            SpawnUnit(owner, spot.X, spot.Y, designId);       // a soldier (non-peasant), fully trained
+            s[GoldIdx] -= price;
+        }
+
+        // The owner's first live building of a type, in id order (deterministic).
+        Building FirstBuildingOf(int owner, BuildingType type)
+        {
+            foreach (var b in Buildings) if (b.Alive && b.Owner == owner && b.Type == type) return b;
+            return null;
+        }
+
         // A one-shot trade: qty > 0 buys, qty < 0 sells. A buy is capped by the
         // gold on hand; a sell by the goods on hand — so an over-ambitious order
         // simply does as much as it can rather than failing outright.

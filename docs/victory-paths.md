@@ -154,9 +154,14 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   recruit from a stocked weapon in place of wood** (0 weapons ⇒ byte-identical to
   the old wood-only recruit path, so frozen `SimParity` is untouched). Stock grew
   by appending (`WeaponsIdx` + 5 policy slots, `StockWidth` 33→39), so no index
-  moved and the snapshot round-trips unchanged. HUD: a palette building + a trade
-  board on selecting your market. `tests/Market` (14 cases incl. twin-client
-  determinism over 600 ticks).
+  moved and the snapshot round-trips unchanged. **Mercenaries** (`HireMercenary`,
+  `MercRoster`): the market also hires trained soldiers outright for gold — no
+  peasant, no barracks, no muster — so a rich realm turns its hoard straight into an
+  army, bypassing the population/food gate a trained army lives under (a premium
+  price keeps it a gold SINK; scouts aren't for sale). The merc musters at the
+  realm's first market on a deterministic free tile. HUD: a palette building + a
+  trade board (with a Hire section) on selecting your market. `tests/Market` (incl.
+  twin-client determinism over trades and hires).
 - **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
   cheaper wonders | Scholarship = faster tree) → Printing Press → the **Academy**
   capstone, which unlocks **Wonders** (`BuildingType.Wonder`) — a grand, expensive
