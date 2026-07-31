@@ -22,6 +22,7 @@ static class Program
         FogOffChangesNothing();
         AUnitLightsItsSurroundings();
         AScoutSeesFurtherThanASoldier();
+        AScoutHidesInTheFog();
         TheExploredFrontierHasNoHoles();
         RockBlocksSightButWaterDoesNot();
         ExploredRemembersWhatVisibleForgets();
@@ -121,6 +122,38 @@ static class Program
         Check($"the scout lights a tile {far} tiles off", sim.Fog.IsVisible(1, 30 + far, 30));
         Check($"a soldier does not reach {far} tiles", !sim.Fog.IsVisible(1, 30 + far, 55));
         Check("and the scout still cannot see the whole map", !sim.Fog.IsVisible(1, 63, 0));
+    }
+
+    // Stealth: an enemy's fog can reach the scout's tile and still not make the
+    // scout out — it is seen only with a watcher nearly on top of it. A plain unit
+    // on the same tile would be spotted, so this is the stealth, not the fog.
+    static void AScoutHidesInTheFog()
+    {
+        Console.WriteLine("\na scout hides in the fog until you're nearly on it:");
+        var sim = Fogged(TileMap.Open(64));
+        int scoutDesign = sim.RegisterDesign(new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13, Stealth = true });
+        var scout = sim.SpawnUnit(1, 30, 30, scoutDesign);   // owner 1's stealth scout
+        var plain = sim.SpawnUnit(1, 32, 30, 0);             // owner 1's ordinary soldier nearby
+        sim.SpawnUnit(2, 36, 30, 0);                          // owner 2 watcher, 6 tiles off (sight 7 reaches both)
+        sim.Tick(Array.Empty<Command>());
+
+        Check("the enemy's fog does reach the scout's tile", sim.CanSee(2, 30, 30));
+        Check("but the enemy cannot make out the stealth scout", !sim.CanSeeUnit(2, scout));
+        Check("while an ordinary unit at the same reach IS seen", sim.CanSeeUnit(2, plain));
+        Check("and the scout always sees itself", sim.CanSeeUnit(1, scout));
+
+        // Bring a watcher right up to it and the stealth breaks.
+        sim.SpawnUnit(2, 31, 30, 0);                          // now one tile away
+        sim.Tick(Array.Empty<Command>());
+        Check("a watcher nearly on top of it makes the scout out", sim.CanSeeUnit(2, scout));
+
+        // Fog off is omniscient — stealth hides nothing, so pre-stealth scenarios stand.
+        var open = new Simulation(TileMap.Open(32));
+        int sd = open.RegisterDesign(new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13, Stealth = true });
+        var s2 = open.SpawnUnit(1, 5, 5, sd);
+        open.SpawnUnit(2, 25, 25, 0);
+        open.Tick(Array.Empty<Command>());
+        Check("with fog off, even a stealth scout is plainly seen", open.CanSeeUnit(2, s2));
     }
 
     static void TheExploredFrontierHasNoHoles()

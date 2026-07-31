@@ -79,6 +79,7 @@ namespace Sim
         public int RangeStat;   // reach in half-tiles; 3 == 1.5 tiles; range = One*Stat/2
         public int Cooldown;    // ticks between blows
         public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
+        public bool Stealth;    // a scout skill: enemies spot it only at close range (see CanSeeUnit); NOT point-bought
 
         public int SpeedFixed => Fixed.One * SpeedStat / 40;
         public int RangeFixed => Fixed.One * RangeStat / 2;
@@ -94,7 +95,7 @@ namespace Sim
 
         public UnitDesign Clone() => new UnitDesign
         {
-            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight,
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth,
         };
 
         // The classic soldier, and the ceiling every custom design is measured
@@ -601,7 +602,42 @@ namespace Sim
         // both seen and known — which is what keeps every pre-fog scenario intact.
         public bool CanSee(int owner, int x, int y) => !FogEnabled || Fog.IsVisible(owner, x, y);
         public bool HasExplored(int owner, int x, int y) => !FogEnabled || Fog.IsExplored(owner, x, y);
-        public bool CanSeeUnit(int owner, Unit u) => CanSee(owner, Fixed.ToInt(u.X), Fixed.ToInt(u.Y));
+        public bool CanSeeUnit(int owner, Unit u)
+        {
+            if (owner == u.Owner) return true;                 // you always see your own
+            int ux = Fixed.ToInt(u.X), uy = Fixed.ToInt(u.Y);
+            if (!CanSee(owner, ux, uy)) return false;          // must clear the fog at all
+            // A stealth unit (the Scout) hides in the field: an enemy makes it out
+            // only with a watcher nearly on top of it. Fog-gated, so an omniscient
+            // (fog-off) view — every test written before stealth, and the parity
+            // scenario — is unchanged, and a scout is only sneaky where sight is a
+            // real constraint. Its OWN owner always sees it (short-circuit above).
+            if (FogEnabled && DesignOf(u.DesignId).Stealth)
+                return DetectorWithin(owner, ux, uy, StealthDetectRange);
+            return true;
+        }
+
+        // Does `owner` have any live unit or building within `range` tiles of a spot?
+        // The proximity test a stealth unit is caught by. Integer, fixed iteration
+        // order, so it is deterministic like everything else sight touches.
+        const int StealthDetectRange = 3;   // tiles: a scout is spotted only nearly on top of a watcher
+        bool DetectorWithin(int owner, int x, int y, int range)
+        {
+            int r2 = range * range;
+            foreach (var w in Units)
+                if (w.Alive && w.Owner == owner)
+                {
+                    int dx = Fixed.ToInt(w.X) - x, dy = Fixed.ToInt(w.Y) - y;
+                    if (dx * dx + dy * dy <= r2) return true;
+                }
+            foreach (var b in Buildings)
+                if (b.Alive && b.Owner == owner)
+                {
+                    int dx = b.CenterX - x, dy = b.CenterY - y;
+                    if (dx * dx + dy * dy <= r2) return true;
+                }
+            return false;
+        }
 
         // A building is bigger than a tile and does not move: knowing where a
         // wall stands is knowledge you keep. So a structure counts as known once
@@ -2638,7 +2674,7 @@ namespace Sim
             Mix(_designs.Count);
             foreach (var d in _designs)
             {
-                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight);
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0);
             }
 
             foreach (var u in Units)

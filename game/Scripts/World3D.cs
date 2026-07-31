@@ -2048,12 +2048,13 @@ public partial class World3D : Node3D
                 _skel[u.Id] = sk;
             }
 
-            // Fog: an enemy is on screen only while one of ours can actually see its
-            // tile. Ours are always drawn. (Buildings persist once explored; a unit
-            // does not — it has moved on.)
+            // Fog: an enemy is on screen only while one of ours can actually see it.
+            // CanSeeUnit (not just the tile) so a stealth scout stays hidden until a
+            // watcher is nearly on it. Ours are always drawn. (Buildings persist once
+            // explored; a unit does not — it has moved on.)
             if (u.Owner != MyPlayer && _sim.FogEnabled)
             {
-                bool seen = _sim.CanSee(MyPlayer, u.X >> 16, u.Y >> 16);
+                bool seen = _sim.CanSeeUnit(MyPlayer, u);
                 node.Visible = seen;
                 if (!seen)
                 {

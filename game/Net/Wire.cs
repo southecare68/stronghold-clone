@@ -208,6 +208,7 @@ namespace Netcode
                 PutInt(buf, d.RangeStat);
                 PutInt(buf, d.Cooldown);
                 PutInt(buf, d.Sight);
+                PutInt(buf, d.Stealth ? 1 : 0);
             }
 
             // Stockpiles and drop-offs, each written in the snapshot's iteration
@@ -390,6 +391,7 @@ namespace Netcode
                         RangeStat = GetInt(data, ref p),
                         Cooldown = GetInt(data, ref p),
                         Sight = GetInt(data, ref p),
+                        Stealth = GetInt(data, ref p) != 0,
                     };
                 }
                 snap.Designs = designs;

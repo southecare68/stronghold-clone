@@ -38,10 +38,12 @@ namespace Sim
         // 3 Archer, 4 Scout. Each spends the same budget, allocated differently —
         // the Archer trades HP and speed for reach (RangeStat 8 = 4 tiles), so it
         // softens the enemy on approach but folds fast if it gets caught. The Scout
-        // is the recon unit: the fastest legs on the field and a far-seeing eye
-        // (Sight 13 vs the usual 7), but frail and feeble in a fight — sent to find
-        // the enemy, not to trade blows. Its long sight also feeds the cautious
-        // march: what a scout reveals, your armies will route around.
+        // is the recon unit: the fastest legs on the field, a far-seeing eye
+        // (Sight 13 vs the usual 7), and STEALTH — the enemy makes it out only with
+        // a watcher nearly on top of it, so it slips through the fog unseen. Frail
+        // and feeble in a fight, sent to find the enemy, not to trade blows. Its long
+        // sight also feeds the cautious march: what a scout reveals, your armies will
+        // route around.
         public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout" };
 
         public static IEnumerable<UnitDesign> Designs()
@@ -49,7 +51,7 @@ namespace Sim
             yield return new UnitDesign { Hp = 60, Damage = 9, SpeedStat = 10, RangeStat = 3, Cooldown = 10 };
             yield return new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 };
             yield return new UnitDesign { Hp = 55, Damage = 9, SpeedStat = 6, RangeStat = 8, Cooldown = 13 };
-            yield return new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13 };
+            yield return new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13, Stealth = true };
         }
 
         // Where the resource nodes go. Two safe patches behind each base, and a
