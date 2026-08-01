@@ -248,6 +248,18 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   compounds with the cautious march — enemies it reveals feed the danger field every
   friendly unit routes around — and its own stealth means the enemy's cautious armies
   never route around IT (they can't see it to fear it).
+- **Siege engines** (`Skirmish` designs 6-8, `BuildingType.SiegeWorkshop`): Ram,
+  Catapult, Trebuchet — engineered at a **Siege Workshop** from **wood & iron** (per
+  design `CostWood`/`CostIron`), crewed by a spare peasant (the Train command routes
+  siege→workshop, soldiers→barracks; `ResolveProduction` builds both). A new
+  `SiegeDamage` stat is what they deal to BUILDINGS (`SiegeBuilding` uses it in place
+  of `Damage`); their `Damage` vs troops is feeble, so they must be escorted. The
+  Trebuchet's long `RangeStat` (22 = 11 tiles) out-reaches wall archers, levelling a
+  keep from safety. Siege designs are budget-exempt in `RegisterDesign` (they pay in
+  resources, not points) and off the barracks roster (routed by `IsSiege`). Gives
+  **iron** a real use. Design fields (`SiegeDamage`/`CostWood`/`CostIron`) ride the
+  roster's hash & snapshot. `tests/Siege` (trebuchet out-sieges a soldier, helpless
+  vs troops, workshop-only for iron).
 - **Movement options** (`Simulation` Move command, `PathFinder`): a plain move is
   one direct, string-pulled route (the Stronghold default, and what keeps the frozen
   parity scenario bit-identical). Two flags ride the Move command's `TargetId`:

@@ -211,6 +211,9 @@ namespace Netcode
                 PutInt(buf, d.Sight);
                 PutInt(buf, d.Stealth ? 1 : 0);
                 PutInt(buf, d.Trainable ? 1 : 0);
+                PutInt(buf, d.SiegeDamage);
+                PutInt(buf, d.CostWood);
+                PutInt(buf, d.CostIron);
             }
 
             // Stockpiles and drop-offs, each written in the snapshot's iteration
@@ -397,6 +400,9 @@ namespace Netcode
                         Sight = GetInt(data, ref p),
                         Stealth = GetInt(data, ref p) != 0,
                         Trainable = GetInt(data, ref p) != 0,
+                        SiegeDamage = GetInt(data, ref p),
+                        CostWood = GetInt(data, ref p),
+                        CostIron = GetInt(data, ref p),
                     };
                 }
                 snap.Designs = designs;

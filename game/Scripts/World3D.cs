@@ -97,6 +97,11 @@ public partial class World3D : Node3D
     Control _trainPanel;
     Label _trainInfo;
 
+    // The siege workshop's build board: click your workshop to build ram/catapult/
+    // trebuchet for wood & iron. Its own panel (a barracks builds soldiers).
+    Control _siegePanel;
+    Label _siegeInfo;
+
     // The market panel: click your trading hall to open the buy/sell board, with
     // a standing-order (auto-trade) toggle per good. Rows are built once and
     // refreshed each frame — one row per market good.
@@ -147,6 +152,7 @@ public partial class World3D : Node3D
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
     PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger;
+    PackedScene _mRam, _mCatapult, _mTrebuchet;
 
     // Camera orbit around a target on the ground.
     Vector3 _camTarget;
@@ -196,7 +202,7 @@ public partial class World3D : Node3D
     static readonly BuildingType[] Buildable =
     {
         BuildingType.Wall, BuildingType.Gatehouse, BuildingType.Steps, BuildingType.Turret,
-        BuildingType.House, BuildingType.Barracks,
+        BuildingType.House, BuildingType.Barracks, BuildingType.SiegeWorkshop,
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Granary, BuildingType.Market,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
@@ -424,6 +430,7 @@ public partial class World3D : Node3D
         SetupHud();
         SetupBuild();
         SetupTrainPanel();
+        SetupSiegePanel();
         SetupMarketPanel();
         SetupRealmPanel();
         SetupGoalsPanel();
@@ -591,6 +598,9 @@ public partial class World3D : Node3D
         _mArcher  = Load("Characters/SM_Chr_King_01");
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
+        _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
+        _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
+        _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
 
         void B(BuildingType t, string rel, float s) { _bldModel[t] = Load(rel); _bldScale[t] = s; }
         B(BuildingType.Keep,          "Castle/SM_Bld_Castle_Wall_Tower_L_01", 0.5f);
@@ -607,6 +617,7 @@ public partial class World3D : Node3D
         B(BuildingType.Wonder,        "Bonus/SM_Prop_Statue_King_01", 0.5f);   // a grand monument — the Science path's crown
         B(BuildingType.House,         "Buildings/Preset_Houses/SM_Bld_Preset_House_02_A_Optimized", 0.5f);
         B(BuildingType.Market,        "Props/SM_Prop_Market_Stall_01", 0.7f);   // a trading stall — buy & sell goods for gold
+        B(BuildingType.SiegeWorkshop, "Buildings/Preset_Houses/SM_Bld_Preset_Blacksmith_01_Optimized", 0.5f);   // an engineer's yard — builds siege machines
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
 
@@ -1641,7 +1652,7 @@ public partial class World3D : Node3D
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
         BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
         BuildingType.Church => "Church", BuildingType.Wonder => "Wonder",
-        BuildingType.Market => "Market", _ => t.ToString(),
+        BuildingType.Market => "Market", BuildingType.SiegeWorkshop => "Siege Wk", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
@@ -1906,6 +1917,7 @@ public partial class World3D : Node3D
         UpdateMusic(delta);
         UpdateGhost();
         UpdateTrainPanel();
+        UpdateSiegePanel();
         UpdateMarketPanel();
         UpdateRealmPanel();
         UpdateGoalsPanel();
@@ -3046,7 +3058,8 @@ public partial class World3D : Node3D
     PackedScene ModelFor(Unit u)
     {
         if (u.IsPeasant) return _mPeasant;
-        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, 5 => _mAvenger, _ => _mSoldier };
+        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, 5 => _mAvenger,
+                                   6 => _mRam, 7 => _mCatapult, 8 => _mTrebuchet, _ => _mSoldier };
     }
 
     // ---- camera ------------------------------------------------------------
@@ -3406,7 +3419,7 @@ public partial class World3D : Node3D
         // One button per registered design. All cost the same wood (TrainCost).
         for (int i = 0; i < _sim.DesignList.Count; i++)
         {
-            if (!_sim.DesignList[i].Trainable) continue;   // the Avenger is never on the barracks roster
+            if (!_sim.DesignList[i].Trainable || _sim.DesignList[i].IsSiege) continue;   // the Avenger and the siege engines are not barracks recruits
             string name = i < Skirmish.DesignNames.Length ? Skirmish.DesignNames[i] : $"Unit {i}";
             var b = new Button { Text = $"{name}\n15w", CustomMinimumSize = new Vector2(70, 0), FocusMode = Control.FocusModeEnum.None };
             b.AddThemeFontSizeOverride("font_size", 12);
@@ -3414,6 +3427,69 @@ public partial class World3D : Node3D
             b.Pressed += () => TrainAt(design);
             row.AddChild(b);
         }
+    }
+
+    // ---- the siege workshop's build board ---------------------------------
+
+    // Click your Siege Workshop and this opens: one button per siege engine, priced
+    // in wood & iron. Same berth as the barracks panel — a workshop is a different
+    // building, so only one is ever up. Reuses TrainAt (the sim routes siege to the
+    // workshop, soldiers to the barracks).
+    void SetupSiegePanel()
+    {
+        var layer = new CanvasLayer();
+        AddChild(layer);
+
+        _siegePanel = new PanelContainer
+        {
+            AnchorLeft = 0, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            OffsetLeft = 12, OffsetTop = -70, Visible = false,
+        };
+        ((PanelContainer)_siegePanel).AddThemeStyleboxOverride("panel", Panel(new Color(0.09f, 0.11f, 0.14f, 0.9f)));
+        layer.AddChild(_siegePanel);
+
+        var margin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) margin.AddThemeConstantOverride("margin_" + s, 12);
+        foreach (var s in new[] { "top", "bottom" }) margin.AddThemeConstantOverride("margin_" + s, 10);
+        _siegePanel.AddChild(margin);
+
+        var col = new VBoxContainer();
+        col.AddThemeConstantOverride("separation", 6);
+        margin.AddChild(col);
+
+        _siegeInfo = new Label { Text = "Siege Workshop" };
+        _siegeInfo.AddThemeColorOverride("font_color", new Color(0.9f, 0.92f, 0.96f));
+        _siegeInfo.AddThemeFontSizeOverride("font_size", 14);
+        col.AddChild(_siegeInfo);
+
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 5);
+        col.AddChild(row);
+        for (int i = 0; i < _sim.DesignList.Count; i++)
+        {
+            var d = _sim.DesignList[i];
+            if (!d.IsSiege) continue;
+            string name = i < Skirmish.DesignNames.Length ? Skirmish.DesignNames[i] : $"Unit {i}";
+            var b = new Button { Text = $"{name}\n{d.CostWood}w {d.CostIron}i", CustomMinimumSize = new Vector2(78, 0), FocusMode = Control.FocusModeEnum.None };
+            b.AddThemeFontSizeOverride("font_size", 12);
+            int design = i;
+            b.Pressed += () => TrainAt(design);
+            row.AddChild(b);
+        }
+    }
+
+    void UpdateSiegePanel()
+    {
+        bool show = _selectedBuilding != null && _selectedBuilding.Alive
+                    && _selectedBuilding.Type == BuildingType.SiegeWorkshop
+                    && _selectedBuilding.Owner == MyPlayer;
+        _siegePanel.Visible = show;
+        if (!show) return;
+
+        int queued = _selectedBuilding.TrainQueue.Count;
+        int idle = _sim.IdlePeasantCount(MyPlayer);
+        _siegeInfo.Text = $"Siege Workshop — queue {queued}"
+            + (idle > queued ? $"   ({idle - queued} crew spare)" : "   (no spare peasant to crew)");
     }
 
     // ---- the market's trade board -----------------------------------------
@@ -4232,7 +4308,9 @@ public partial class World3D : Node3D
     // spare peasant; a refused order simply queues nothing.
     void TrainAt(int design)
     {
-        if (_selectedBuilding == null || _selectedBuilding.Type != BuildingType.Barracks) return;
+        if (_selectedBuilding == null) return;
+        var t = _selectedBuilding.Type;
+        if (t != BuildingType.Barracks && t != BuildingType.SiegeWorkshop) return;   // the sim validates the design routing
         _me.Issue(new Command { Type = CommandType.Train, TargetId = _selectedBuilding.Id, X = design });
         _sound.PlayUi(Sfx.Select);
     }

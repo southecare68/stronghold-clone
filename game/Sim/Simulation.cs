@@ -21,7 +21,7 @@ namespace Sim
         SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14, HireMercenary = 15,
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -81,6 +81,8 @@ namespace Sim
         public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
         public bool Stealth;    // a scout skill: enemies spot it only at close range (see CanSeeUnit); NOT point-bought
         public bool Trainable = true;   // false for special units (the exile Avenger): off the barracks roster, and exempt from the point budget
+        public int SiegeDamage;         // damage dealt to BUILDINGS (0 = a normal unit, which uses Damage vs buildings). A siege engine: huge here, feeble in Damage. NOT point-bought.
+        public int CostWood, CostIron;  // build cost of a siege engine at the Siege Workshop (soldiers ignore these and pay the flat barracks cost)
 
         public int SpeedFixed => Fixed.One * SpeedStat / 40;
         public int RangeFixed => Fixed.One * RangeStat / 2;
@@ -97,7 +99,9 @@ namespace Sim
         public UnitDesign Clone() => new UnitDesign
         {
             Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, Trainable = Trainable,
+            SiegeDamage = SiegeDamage, CostWood = CostWood, CostIron = CostIron,
         };
+        public bool IsSiege => SiegeDamage > 0;
 
         // The classic soldier, and the ceiling every custom design is measured
         // against — its cost is the budget, so a design may spend up to what the
@@ -491,8 +495,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3 };  // ...Granary, Church, Wonder, Market
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2 };  // ...Granary, Church, Wonder, Market, SiegeWorkshop
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
@@ -513,6 +517,7 @@ namespace Sim
             new[] { 20, 10, 0 },      // Church — timber and stone; ministers to a flock, converting the realm (see ResolveRealm)
             new[] { 80, 130, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
             new[] { 30, 20, 0 },      // Market — a trading hall; owning one lets you buy & sell goods for gold (see Market.cs)
+            new[] { 45, 25, 0 },      // Siege Workshop — engineers the siege machines (built from wood & iron; see the Train command)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -523,7 +528,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -689,9 +694,10 @@ namespace Sim
         // match runs, like SpawnUnit. Designs don't change once the match is live.
         public int RegisterDesign(UnitDesign design)
         {
-            // The point budget balances what PLAYERS can build; a special, non-trainable
-            // design (the exile Avenger) is not player-built, so it is exempt.
-            if (design == null || (design.Trainable && design.PointCost > MaxDesignPoints)) return -1;
+            // The point budget balances the barracks roster of armed peasants; the
+            // special Avenger (non-trainable) and the engineered siege machines (which
+            // pay in wood & iron, not the budget) are exempt.
+            if (design == null || (design.Trainable && !design.IsSiege && design.PointCost > MaxDesignPoints)) return -1;
             _designs.Add(design.Clone());
             return _designs.Count - 1;
         }
@@ -1223,28 +1229,43 @@ namespace Sim
                     break;
 
                 case CommandType.Train:
-                    // TargetId carries the barracks id; X the design to build.
-                    // Costs wood and queues that design; the production phase
-                    // spawns it when the timer elapses.
-                    var barracks = Buildings.Find(x => x.Id == cmd.TargetId);
-                    if (barracks == null || barracks.Owner != cmd.Owner ||
-                        barracks.Type != BuildingType.Barracks) break;
+                    // TargetId carries the production building (a barracks OR a siege
+                    // workshop); X the design. Both queue the design and the production
+                    // phase crews it from an idle peasant when the timer elapses.
+                    var prod = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (prod == null || prod.Owner != cmd.Owner) break;
                     int designId = cmd.X >= 0 && cmd.X < _designs.Count ? cmd.X : 0;
-                    if (!DesignOf(designId).Trainable) break;   // the Avenger and its like are never barracks-built
-                    // A recruit is an armed peasant. Arm them from a stocked weapon if
-                    // you have one (bought at a market), otherwise whittle the arms from
-                    // wood as before. With no weapons in stock this is identical to the
-                    // old wood-only path — which is every match that never trades.
-                    bool armFromStock = Weapons(cmd.Owner) > 0;
-                    var trainCost = new[] { TrainCostWood, 0, 0 };
-                    if (!armFromStock && !CanAfford(cmd.Owner, trainCost)) break;
-                    // You need a spare peasant to recruit, and the queue may not outrun
-                    // your idle population — so army size is ultimately gated by food
-                    // and housing.
-                    if (IdlePeasantCount(cmd.Owner) <= barracks.TrainQueue.Count) break;
-                    if (armFromStock) StockOf(cmd.Owner)[WeaponsIdx] -= 1;
-                    else Pay(cmd.Owner, trainCost);
-                    barracks.TrainQueue.Add(designId);
+                    var design = DesignOf(designId);
+                    // Route: a barracks builds trainable NON-siege designs (soldiers); a
+                    // siege workshop builds siege engines. Anything else is refused (the
+                    // Avenger is neither; a trebuchet is never a barracks recruit).
+                    bool ok = prod.Type == BuildingType.Barracks ? (design.Trainable && !design.IsSiege)
+                            : prod.Type == BuildingType.SiegeWorkshop ? design.IsSiege
+                            : false;
+                    if (!ok) break;
+                    // Every unit is crewed by a spare idle peasant, and the queue may not
+                    // outrun your idle population — so army size is gated by food & housing.
+                    if (IdlePeasantCount(cmd.Owner) <= prod.TrainQueue.Count) break;
+
+                    if (design.IsSiege)
+                    {
+                        // An engine is built from wood & iron (per design), not armed peasants.
+                        var siegeCost = new[] { design.CostWood, 0, 0, 0, 0, design.CostIron };
+                        if (!CanAfford(cmd.Owner, siegeCost)) break;
+                        Pay(cmd.Owner, siegeCost);
+                    }
+                    else
+                    {
+                        // A recruit is an armed peasant: arm them from a stocked weapon if
+                        // you have one (bought at a market), otherwise whittle the arms from
+                        // wood. With no weapons this is identical to the old wood-only path.
+                        bool armFromStock = Weapons(cmd.Owner) > 0;
+                        var trainCost = new[] { TrainCostWood, 0, 0 };
+                        if (!armFromStock && !CanAfford(cmd.Owner, trainCost)) break;
+                        if (armFromStock) StockOf(cmd.Owner)[WeaponsIdx] -= 1;
+                        else Pay(cmd.Owner, trainCost);
+                    }
+                    prod.TrainQueue.Add(designId);
                     break;
 
                 case CommandType.ToggleGate:
@@ -1716,7 +1737,7 @@ namespace Sim
         {
             foreach (var b in Buildings)
             {
-                if (b.Type != BuildingType.Barracks || b.TrainQueue.Count == 0) continue;
+                if ((b.Type != BuildingType.Barracks && b.Type != BuildingType.SiegeWorkshop) || b.TrainQueue.Count == 0) continue;
 
                 if (b.BuildTimer <= 0) b.BuildTimer = TrainTime;
                 b.BuildTimer--;
@@ -2482,7 +2503,10 @@ namespace Sim
                 u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
                 if (u.AttackTimer == 0)
                 {
-                    b.Hp -= _rng.NextInt(d.Damage - 2, d.Damage + 3);
+                    // A siege engine batters a building with its SiegeDamage; a plain
+                    // soldier just uses its Damage, exactly as before.
+                    int hit = d.IsSiege ? d.SiegeDamage : d.Damage;
+                    b.Hp -= _rng.NextInt(hit - 2, hit + 3);
                     u.AttackTimer = d.Cooldown;
                     // Conquest: an attacker who has researched it ANNEXES a keep struck
                     // down rather than razing it — the territory and its people change
@@ -2721,6 +2745,7 @@ namespace Sim
             foreach (var d in _designs)
             {
                 Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.Trainable ? 1 : 0);
+                Mix(d.SiegeDamage); Mix(d.CostWood); Mix(d.CostIron);
             }
 
             foreach (var u in Units)

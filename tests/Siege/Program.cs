@@ -17,6 +17,9 @@ static class Program
         OnlyEnemyBuildingsCanBeSieged();
         RazingAKeepRemovesItsDropOff();
         MoveOnlyLeavesBuildingsAlone();
+        ATrebuchetLevelsAKeepFasterThanASoldier();
+        ASiegeEngineIsHelplessAgainstTroops();
+        SiegeIsEngineeredAtTheWorkshopForIron();
         TwoClientsAgreeOnTheSiege();
         SiegeSurvivesARejoin();
 
@@ -194,6 +197,75 @@ static class Program
     }
 
     // ---- helpers -----------------------------------------------------------
+
+    // Design ids after registering the Skirmish roster: 6 Ram, 7 Catapult, 8 Trebuchet.
+    const int Soldier = 0, Ram = 6, Trebuchet = 8;
+
+    // A siege engine batters a building with its SiegeDamage, so it levels a big
+    // structure far faster than a soldier's blows do.
+    static void ATrebuchetLevelsAKeepFasterThanASoldier()
+    {
+        Console.WriteLine("\na trebuchet levels a keep faster than a soldier:");
+        int treb = TicksToFellAKeep(Trebuchet);
+        int sol  = TicksToFellAKeep(Soldier);
+        Check($"both bring the keep down (treb {treb} / soldier {sol} ticks)", treb > 0 && sol > 0);
+        Check("the trebuchet is markedly quicker", treb * 2 < sol);
+    }
+
+    static int TicksToFellAKeep(int design)
+    {
+        var sim = new Simulation(TileMap.Open(48));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);
+        var keep = sim.PlaceBuilding(BuildingType.Keep, 2, 22, 20);        // a 600-hp enemy keep
+        var u = sim.SpawnUnit(1, 16, 20, design);                          // close, so we time the battering, not the walk
+        Order(sim, AttackBuilding(new[] { u }, keep));
+        for (int i = 0; i < 8000 && keep.Alive; i++) sim.Tick(Array.Empty<Command>());
+        return keep.Alive ? -1 : sim.TickNumber;
+    }
+
+    // The trade-off: a siege engine's Damage vs troops is feeble, so a lone soldier
+    // walks up and cuts it down. Siege must be escorted.
+    static void ASiegeEngineIsHelplessAgainstTroops()
+    {
+        Console.WriteLine("\na siege engine is helpless against troops:");
+        var sim = new Simulation(TileMap.Open(24));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);
+        var treb = sim.SpawnUnit(1, 10, 10, Trebuchet);
+        var sol  = sim.SpawnUnit(2, 11, 10, Soldier);
+        Order(sim, Attack(sol, treb));
+        for (int i = 0; i < 600 && treb.Alive; i++) sim.Tick(Array.Empty<Command>());
+        Check("a soldier cuts the trebuchet down", !treb.Alive);
+        Check("and is barely scratched doing it", sol.Alive && sol.Hp > sol.MaxHp / 2);
+    }
+
+    // Siege is engineered at a Siege Workshop for wood & iron — never at a barracks,
+    // which is for armed peasants.
+    static void SiegeIsEngineeredAtTheWorkshopForIron()
+    {
+        Console.WriteLine("\nsiege is engineered at the workshop for iron:");
+        var sim = new Simulation(TileMap.Open(48));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);
+        var ws  = sim.PlaceBuilding(BuildingType.SiegeWorkshop, 1, 10, 10);
+        var bar = sim.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
+        for (int i = 0; i < 3; i++) sim.SpawnPeasant(1);
+        sim.AddResource(1, ResourceType.Wood, 300);
+        sim.AddResource(1, ResourceType.Iron, 100);
+        int ironBefore = sim.Stockpile(1, ResourceType.Iron);
+
+        Order(sim, Train(1, ws.Id, Ram));
+        Check("the workshop queues the ram", ws.TrainQueue.Count == 1);
+        Check("and it costs iron", sim.Stockpile(1, ResourceType.Iron) < ironBefore);
+
+        Order(sim, Train(1, bar.Id, Ram));
+        Check("a barracks refuses to build a siege engine", bar.TrainQueue.Count == 0);
+        Order(sim, Train(1, ws.Id, Soldier));
+        Check("and the workshop refuses a soldier", ws.TrainQueue.Count == 1);
+    }
+
+    static Command Attack(Unit u, Unit target) => new Command
+    { Owner = u.Owner, Type = CommandType.Attack, UnitIds = new[] { u.Id }, TargetId = target.Id };
+    static Command Train(int owner, int buildingId, int design) => new Command
+    { Owner = owner, Type = CommandType.Train, TargetId = buildingId, X = design };
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
 
