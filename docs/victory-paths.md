@@ -56,6 +56,9 @@ the four races are comparable — see [Balance](#balance).)*
 - **War feeds the attacker** — every act of war advances your own path (loot /
   annex / sabotage); no spite-only griefing. Military is a shared **tool**, not a
   fifth path.
+- **No elimination** — you cannot kill the king. Razing a realm's last keep exiles
+  and resets it, never removes it (see Exile & Return below). War is a setback lever,
+  not a knockout, so an early rush can't kingmake anyone out of the scored race.
 
 ### The spy counter-web
 
@@ -212,6 +215,19 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   keep falls as before, so existing sieges are untouched. Units stop battering a
   keep the moment it turns friendly; an "⚔ seized a territory" toast fires. This is
   Domain's "or taken by force" — the aggressive player's road to the census crown.
+- **Exile & Return** (`Exile.cs`): you cannot kill the king. When a seated realm loses
+  its **last keep** it is not eliminated (there is no last-keep-standing win) — it
+  flees into exile: `BeginExile` razes the fallen territory and resets the realm to a
+  bare opening (starter wood/food, zero gold, holds + 80% latches + spy cooldowns +
+  market policies cleared) while **keeping the researched tech mask and banked
+  MEDIUMs** so the comeback has teeth; after `RegroupTicks` a fresh keep + starter
+  camp `Reseat` at the map's most isolated buildable tile (`FindExileSite`, farthest
+  from every standing keep). Two stock slots gate it (`EverSeatedIdx`, `ReseatTickIdx`),
+  so it rides the hash/snapshot and never touches the frozen units-only Checksum (no
+  seated realm loses a keep in the parity scenario). Emits `Exiled`/`Refounded` events
+  → HUD toasts, and the camera follows the human's king to the new seat. `tests/Exile`
+  (exile-not-eliminate, raze+reset, knowledge/medium carry-over, far refound, the
+  never-seated guard, twin-client determinism through exile and return).
 - **The Scout** (`Skirmish` design 4, `UnitDesign.Sight`/`Stealth`): a recon unit —
   the fastest legs on the field (`SpeedStat` 14), a far-wider eye (`Sight` 13 vs the
   usual 7), and **stealth**, but frail and weak (40 hp, 4 damage). Sight became a
@@ -320,6 +336,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   the design's ~10–30 real minutes and tests can drive them exactly.
 - Population floor: `MinPopToWin` (200, `Victory.cs`) — the peasant count every
   crown requires; gates the hold accrual and the buzzer, not the metric itself.
+- Exile: `RegroupTicks` (time in exile before refounding), `ExileStartPeasants`,
+  `ExileStartWood`/`ExileStartFood` (the starter camp), all in `Exile.cs`.
 - Cautious march: `DangerRadius`/`DangerPeak` (`Simulation.cs`) — how far a known
   enemy's avoidance bubble reaches and how strongly it repels the path;
   `RerouteInterval` — how often a cautious unit re-plans against newly-seen danger.

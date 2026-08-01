@@ -1,0 +1,26 @@
+<!-- Exile & Return — you cannot kill the king.
+
+     Losing a realm's last keep exiles rather than eliminates: the fallen territory
+     is razed and reset (but researched tech and a banked medium survive), and a
+     fresh keep rises at the map's safest corner after a regroup. These tests pin
+     the exile, the reset, the knowledge/medium carry-over, the far refound site,
+     the never-seated guard, and — the one that matters — twin-client determinism.
+
+     Sim-only. Run with `dotnet run`. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ExileTests</RootNamespace>
+    <AssemblyName>ExileTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+    <Compile Include="../../game/Net/*.cs" LinkBase="Net" />
+  </ItemGroup>
+
+</Project>

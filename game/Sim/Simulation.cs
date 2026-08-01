@@ -389,7 +389,9 @@ namespace Sim
         const int WeaponsIdx = 33;                             // arms — a market-only commodity; a barracks arms a recruit from it instead of spending wood
         const int MarketGoodCount = 5;                         // goods the market trades: Wood, Stone, Food, Iron, Weapons
         const int MarketPolicyBase = 34;                       // 34..38 — per-good auto-trade policy, (threshold<<2 | mode) packed per slot
-        const int StockWidth = 39;                             // ... + research + 4 tech words + 5 spy cooldowns + weapons + 5 trade policies
+        const int EverSeatedIdx = 39;                          // 1 once this owner has held a keep — the gate on Exile & Return
+        const int ReseatTickIdx = 40;                          // >0 while a keepless realm is in exile: the tick its king refounds (Exile.cs)
+        const int StockWidth = 41;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
@@ -1677,6 +1679,7 @@ namespace Sim
             ResolveCombat();        // ...then let the garrison and the field fight
             RemoveDead();
             RemoveDestroyedBuildings();
+            ResolveExile();         // a realm whose last keep just fell flees into exile, and refounds after a regroup (Exile.cs)
             ResolveWorkBuildings(); // hand idle peasants their next node...
             ResolveEconomy();       // ...before the shared walk/harvest/haul cycle runs
             ResolveProduction();

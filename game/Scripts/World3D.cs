@@ -3838,6 +3838,17 @@ public partial class World3D : Node3D
                 ShowRealmToast($"⚑   {Who(e.Owner)} — nearing the {PathName(e.Path)} crown");
             else if (e.Kind == VictoryEventKind.Annexed)
                 ShowRealmToast($"⚔   {Who(e.Owner)} seized a territory by force");
+            else if (e.Kind == VictoryEventKind.Exiled)
+                ShowRealmToast(e.Owner == MyPlayer
+                    ? "🏴   Your last keep has fallen — the king flees into exile"
+                    : $"🏴   {Who(e.Owner)} was driven into exile");
+            else if (e.Kind == VictoryEventKind.Refounded)
+            {
+                ShowRealmToast(e.Owner == MyPlayer
+                    ? "🏰   Your king refounds the realm — rebuild!"
+                    : $"🏰   {Who(e.Owner)} refounds a realm elsewhere");
+                if (e.Owner == MyPlayer) CenterOnMyKeep();   // the view follows the king to the new seat
+            }
             else
             {
                 string verb = e.Owner == MyPlayer ? "win" : "wins";
@@ -4342,6 +4353,15 @@ public partial class World3D : Node3D
     // zooming IN drops toward a near ground-level view, zooming OUT rises toward a
     // top-down overview. So "get down to the ground" is simply "zoom all the way in".
     const float CamMinDist = 6f, CamDefDist = 16f, CamMaxDist = 90f;
+    // Snap the view to my keep — used when the king refounds in exile far away, so
+    // the player isn't left staring at an empty corner where their realm used to be.
+    void CenterOnMyKeep()
+    {
+        foreach (var b in _sim.Buildings)
+            if (b.Alive && b.Owner == MyPlayer && b.Type == BuildingType.Keep)
+            { _camTarget = new Vector3(b.CenterX, 0, b.CenterY); return; }
+    }
+
     void UpdateCamera()
     {
         if (_cam == null) return;
