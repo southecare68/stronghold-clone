@@ -249,7 +249,10 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   friendly unit routes around — and its own stealth means the enemy's cautious armies
   never route around IT (they can't see it to fear it).
 - **Siege engines** (`Skirmish` designs 6-8, `BuildingType.SiegeWorkshop`): Ram,
-  Catapult, Trebuchet — engineered at a **Siege Workshop** from **wood & iron** (per
+  Catapult, Trebuchet — gated behind **Siege Engineering** (`TechTree.SiegeEngineering`,
+  a Muster/War-branch node reachable by any path; the Build command refuses the
+  workshop without it, and the palette shows it 🔒 locked). Engineered at a **Siege
+  Workshop** from **wood & iron** (per
   design `CostWood`/`CostIron`), crewed by a spare peasant (the Train command routes
   siege→workshop, soldiers→barracks; `ResolveProduction` builds both). A new
   `SiegeDamage` stat is what they deal to BUILDINGS (`SiegeBuilding` uses it in place

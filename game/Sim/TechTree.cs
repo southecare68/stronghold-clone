@@ -61,7 +61,7 @@ namespace Sim
         // Domain 40..49
         public const int Husbandry = 40, Homesteads = 41, Colonists = 42, ProvincialKeeps = 43, SovereignsCourt = 44, Conquest = 45;
         // War & espionage 50..59 — the shared tool layer, not a scored path
-        public const int SpyGuild = 50, Embezzler = 51, Inquisitor = 52, Saboteur = 53, Agitator = 54, Assassin = 55, Bodyguard = 56;
+        public const int SpyGuild = 50, Embezzler = 51, Inquisitor = 52, Saboteur = 53, Agitator = 54, Assassin = 55, Bodyguard = 56, SiegeEngineering = 57;
 
         // Fork groups.
         const int ForkHolyOrder = 1;    // Missionaries | Zealotry
@@ -132,6 +132,7 @@ namespace Sim
                 new TechNode(Agitator,   "Agitator",   TechBranch.War, 2, 18, new[] { SpyGuild }),   // → Domain
                 new TechNode(Assassin,   "Assassin",   TechBranch.War, 2, 18, new[] { SpyGuild }),   // → the war tool
                 new TechNode(Bodyguard,  "Bodyguard",  TechBranch.War, 2, 20, new[] { Muster }),     // 🛡 counters the Assassin
+                new TechNode(SiegeEngineering, "Siege Engineering", TechBranch.War, 2, 20, new[] { Muster }),   // unlocks the Siege Workshop & its machines
             };
 
             int max = 0;

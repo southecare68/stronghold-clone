@@ -1543,6 +1543,14 @@ public partial class World3D : Node3D
             kb.Text = unlocked ? $"Keep\n{CostText(BuildingType.Keep)}" : "Keep\n🔒 Prov. Keeps";
             kb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
         }
+        // The Siege Workshop — locked until Siege Engineering (shared War branch).
+        if (_buildButtons.TryGetValue(BuildingType.SiegeWorkshop, out var sb))
+        {
+            bool unlocked = _sim.IsTechResearched(me, TechTree.SiegeEngineering);
+            sb.Disabled = !unlocked;
+            sb.Text = unlocked ? $"Siege Wk\n{CostText(BuildingType.SiegeWorkshop)}" : "Siege Wk\n🔒 Siege Eng.";
+            sb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
+        }
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)

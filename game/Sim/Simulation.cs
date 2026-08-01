@@ -1200,6 +1200,9 @@ namespace Sim
                     // A Wonder is science-exclusive: raised only once the Academy
                     // capstone stands, and refused otherwise.
                     if (type == BuildingType.Wonder && !IsTechResearched(cmd.Owner, TechTree.Academy)) break;
+                    // A Siege Workshop needs Siege Engineering (the shared War branch) —
+                    // no siege machines until you've researched how to build them.
+                    if (type == BuildingType.SiegeWorkshop && !IsTechResearched(cmd.Owner, TechTree.SiegeEngineering)) break;
                     // Founding a NEW keep — a new territory — needs Provincial Keeps
                     // (Domain branch), and it must sit well clear of your other keeps
                     // so it is its own land, not a cluster. (The match's first keep is

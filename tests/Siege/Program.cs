@@ -20,6 +20,7 @@ static class Program
         ATrebuchetLevelsAKeepFasterThanASoldier();
         ASiegeEngineIsHelplessAgainstTroops();
         SiegeIsEngineeredAtTheWorkshopForIron();
+        TheWorkshopNeedsSiegeEngineering();
         TwoClientsAgreeOnTheSiege();
         SiegeSurvivesARejoin();
 
@@ -261,6 +262,35 @@ static class Program
         Order(sim, Train(1, ws.Id, Soldier));
         Check("and the workshop refuses a soldier", ws.TrainQueue.Count == 1);
     }
+
+    // Siege is gated: you cannot raise a Siege Workshop until you research Siege
+    // Engineering (the shared War branch).
+    static void TheWorkshopNeedsSiegeEngineering()
+    {
+        Console.WriteLine("\nthe workshop needs Siege Engineering:");
+        var sim = new Simulation(TileMap.Open(32));
+        sim.AddResource(1, ResourceType.Wood, 200);
+        sim.AddResource(1, ResourceType.Stone, 200);
+
+        Order(sim, Build(1, BuildingType.SiegeWorkshop, 10, 10));
+        Check("a workshop is refused without the tech", CountType(sim, BuildingType.SiegeWorkshop) == 0);
+
+        sim.AddResearch(1, 1000);
+        sim.TryResearch(1, TechTree.Roads);
+        sim.TryResearch(1, TechTree.Muster);
+        sim.TryResearch(1, TechTree.SiegeEngineering);
+        Order(sim, Build(1, BuildingType.SiegeWorkshop, 10, 10));
+        Check("and raised once Siege Engineering is researched", CountType(sim, BuildingType.SiegeWorkshop) == 1);
+    }
+
+    static int CountType(Simulation sim, BuildingType t)
+    {
+        int n = 0;
+        foreach (var b in sim.BuildingList) if (b.Alive && b.Owner == 1 && b.Type == t) n++;
+        return n;
+    }
+    static Command Build(int owner, BuildingType type, int x, int y) => new Command
+    { Owner = owner, Type = CommandType.Build, TargetId = (int)type, X = x, Y = y };
 
     static Command Attack(Unit u, Unit target) => new Command
     { Owner = u.Owner, Type = CommandType.Attack, UnitIds = new[] { u.Id }, TargetId = target.Id };
