@@ -79,7 +79,39 @@ namespace Sim
             for (int g = 0; g < MarketGoodCount; g++) s[MarketPolicyBase + g] = 0;
             // Tech mask (TechBase..) and VicMedBase are deliberately left intact.
 
+            RaiseAvenger(owner);
+
             _victoryEvents.Add(new VictoryEvent(VictoryEventKind.Exiled, owner, VictoryPath.Economic));
+        }
+
+        // The king's champion rises from the ruins — a single, immense unit spawned
+        // right where the last keep fell, in the midst of the attacker who just razed
+        // it. This is the whole deterrent: landing the killing blow means facing the
+        // Avenger. Only exile ever raises it (design flagged Trainable = false), and if
+        // no such design is registered (a bare test sim) it simply does not appear.
+        void RaiseAvenger(int owner)
+        {
+            int design = AvengerDesign();
+            if (design < 0) return;
+            Tile at = _fallenKeepTile.TryGetValue(owner, out var t) ? t : OwnerAnchor(owner);
+            var spot = NearestFreeTile(at.X, at.Y) ?? at;
+            SpawnUnit(owner, spot.X, spot.Y, design);
+        }
+
+        // The registered special (non-trainable) design — the Avenger. -1 if none.
+        int AvengerDesign()
+        {
+            for (int i = 0; i < DesignList.Count; i++) if (!DesignList[i].Trainable) return i;
+            return -1;
+        }
+
+        // A fallback spawn spot when no keep was recorded as felled this tick (e.g. a
+        // keep lost to annexation, not destruction): the owner's first surviving unit,
+        // else the middle of the map.
+        Tile OwnerAnchor(int owner)
+        {
+            foreach (var u in Units) if (u.Alive && u.Owner == owner) return new Tile(Fixed.ToInt(u.X), Fixed.ToInt(u.Y));
+            return new Tile(Map.Width / 2, Map.Height / 2);
         }
 
         // The king refounds: a fresh keep at the most isolated corner, a starter camp

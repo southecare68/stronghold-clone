@@ -80,6 +80,7 @@ namespace Sim
         public int Cooldown;    // ticks between blows
         public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
         public bool Stealth;    // a scout skill: enemies spot it only at close range (see CanSeeUnit); NOT point-bought
+        public bool Trainable = true;   // false for special units (the exile Avenger): off the barracks roster, and exempt from the point budget
 
         public int SpeedFixed => Fixed.One * SpeedStat / 40;
         public int RangeFixed => Fixed.One * RangeStat / 2;
@@ -95,7 +96,7 @@ namespace Sim
 
         public UnitDesign Clone() => new UnitDesign
         {
-            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth,
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, Trainable = Trainable,
         };
 
         // The classic soldier, and the ceiling every custom design is measured
@@ -676,7 +677,9 @@ namespace Sim
         // match runs, like SpawnUnit. Designs don't change once the match is live.
         public int RegisterDesign(UnitDesign design)
         {
-            if (design == null || design.PointCost > MaxDesignPoints) return -1;
+            // The point budget balances what PLAYERS can build; a special, non-trainable
+            // design (the exile Avenger) is not player-built, so it is exempt.
+            if (design == null || (design.Trainable && design.PointCost > MaxDesignPoints)) return -1;
             _designs.Add(design.Clone());
             return _designs.Count - 1;
         }
@@ -1213,6 +1216,7 @@ namespace Sim
                     if (barracks == null || barracks.Owner != cmd.Owner ||
                         barracks.Type != BuildingType.Barracks) break;
                     int designId = cmd.X >= 0 && cmd.X < _designs.Count ? cmd.X : 0;
+                    if (!DesignOf(designId).Trainable) break;   // the Avenger and its like are never barracks-built
                     // A recruit is an armed peasant. Arm them from a stocked weapon if
                     // you have one (bought at a market), otherwise whittle the arms from
                     // wood as before. With no weapons in stock this is identical to the
@@ -2513,12 +2517,19 @@ namespace Sim
         // razed keep stops being a drop-off, and the building leaves the list
         // (surviving order preserved). Besiegers whose target is now gone clear
         // themselves next tick.
+        // Where each realm's keep fell THIS tick — recorded as the rubble is swept, so
+        // ResolveExile (same tick) can raise the Avenger amid the attacker who did it.
+        // Transient, like ShotsThisTick: built and consumed within the tick, never
+        // hashed or snapshotted.
+        readonly Dictionary<int, Tile> _fallenKeepTile = new();
         void RemoveDestroyedBuildings()
         {
+            _fallenKeepTile.Clear();
             for (int i = Buildings.Count - 1; i >= 0; i--)
             {
                 var b = Buildings[i];
                 if (b.Alive) continue;
+                if (b.Type == BuildingType.Keep) _fallenKeepTile[b.Owner] = new Tile(b.CenterX, b.CenterY);
                 TearDownBuilding(b);
                 Buildings.RemoveAt(i);
             }
@@ -2695,7 +2706,7 @@ namespace Sim
             Mix(_designs.Count);
             foreach (var d in _designs)
             {
-                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0);
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.Trainable ? 1 : 0);
             }
 
             foreach (var u in Units)

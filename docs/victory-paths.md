@@ -225,9 +225,17 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   from every standing keep). Two stock slots gate it (`EverSeatedIdx`, `ReseatTickIdx`),
   so it rides the hash/snapshot and never touches the frozen units-only Checksum (no
   seated realm loses a keep in the parity scenario). Emits `Exiled`/`Refounded` events
-  → HUD toasts, and the camera follows the human's king to the new seat. `tests/Exile`
-  (exile-not-eliminate, raze+reset, knowledge/medium carry-over, far refound, the
-  never-seated guard, twin-client determinism through exile and return).
+  → HUD toasts, and the camera follows the human's king to the new seat.
+  **The Avenger** (`RaiseAvenger`, Skirmish design 5) is the deterrent that makes the
+  killing blow risky: on exile a single immense champion (600 hp / 35 dmg / fast) is
+  raised right where the last keep fell (`_fallenKeepTile`, a transient per-tick
+  record), in the attacker's midst. It is exile-only — a new `UnitDesign.Trainable`
+  flag (false) keeps it off the barracks roster (train command + HUD both skip it) and
+  exempts it from the point budget in `RegisterDesign`; `MercRoster` never lists it, so
+  it can't be hired either. Renders taller (non-trainable → 1.6× scale).
+  `tests/Exile` (exile-not-eliminate, raze+reset, knowledge/medium carry-over, far
+  refound, the never-seated guard, the Avenger rising + un-trainable, twin-client
+  determinism through exile and return).
 - **The Scout** (`Skirmish` design 4, `UnitDesign.Sight`/`Stealth`): a recon unit —
   the fastest legs on the field (`SpeedStat` 14), a far-wider eye (`Sight` 13 vs the
   usual 7), and **stealth**, but frail and weak (40 hp, 4 damage). Sight became a
@@ -345,7 +353,8 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
   under the `MaxDesignPoints` budget) plus `Sight` (free); `Vision.UnitSight` is the
   default radius. The Scout is design 4 — bump its `Sight`/`SpeedStat` to taste, and
   `StealthDetectRange` (`Simulation.cs`) is how close a watcher must get to spot a
-  stealth unit.
+  stealth unit. The Avenger is design 5 (`Trainable = false`, budget-exempt) — tune
+  its stats to make the exile deterrent softer or harder.
 - Tech: `BaseResearchPace`, `RoadsPace`, `CrossBranchPenalty`, `CapstoneLimit`
   (`Tech.cs`); node costs and the branch shape in `TechTree.cs`.
 - Economic income: `TradePostGold`, `MonopolyGold`, `BourseGoldPerBld`,

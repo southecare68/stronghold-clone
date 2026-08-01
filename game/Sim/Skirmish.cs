@@ -44,7 +44,7 @@ namespace Sim
         // and feeble in a fight, sent to find the enemy, not to trade blows. Its long
         // sight also feeds the cautious march: what a scout reveals, your armies will
         // route around.
-        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout" };
+        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger" };
 
         public static IEnumerable<UnitDesign> Designs()
         {
@@ -52,6 +52,12 @@ namespace Sim
             yield return new UnitDesign { Hp = 150, Damage = 11, SpeedStat = 3, RangeStat = 3, Cooldown = 15 };
             yield return new UnitDesign { Hp = 55, Damage = 9, SpeedStat = 6, RangeStat = 8, Cooldown = 13 };
             yield return new UnitDesign { Hp = 40, Damage = 4, SpeedStat = 14, RangeStat = 2, Cooldown = 14, Sight = 13, Stealth = true };
+            // The Avenger (design 5): the exiled king's champion, raised ONLY when a
+            // realm loses its last keep (Exile.cs) — never trained, never hired. A
+            // wrecking ball far past the point budget (Trainable = false exempts it):
+            // huge hp, a battering blow, fast legs. The one thing you get for losing
+            // everything, and the reason an attacker thinks twice about the killing blow.
+            yield return new UnitDesign { Hp = 600, Damage = 35, SpeedStat = 12, RangeStat = 3, Cooldown = 8, Sight = 10, Trainable = false };
         }
 
         // Where the resource nodes go. Two safe patches behind each base, and a

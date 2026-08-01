@@ -32,6 +32,8 @@ static class Program
         KnowledgeAndBankedMediumSurviveExile();
         TheKingRefoundsAwayFromEnemies();
         ANeverSeatedOwnerIsLeftAlone();
+        ExileRaisesAnAvenger();
+        TheAvengerIsNeverTrainable();
         TwoClientsAgreeThroughExileAndReturn();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -136,8 +138,47 @@ static class Program
         Check("and its gold is untouched", sim.Gold(1) == 500);
     }
 
+    // The deterrent: exile raises the Avenger — a lone champion in the ruins, right
+    // where the last keep fell, in the attacker's midst. The reason to think twice
+    // about the killing blow.
+    static void ExileRaisesAnAvenger()
+    {
+        Console.WriteLine("\nexile raises an Avenger from the ruins:");
+        var sim = new Simulation(TileMap.Open(64));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);   // registers the Avenger (design 5)
+        var keep = sim.PlaceBuilding(BuildingType.Keep, 1, 6, 6);      // centre ~ (7,7)
+        sim.Tick(None);
+        keep.Hp = 0;
+        sim.Tick(None);                                               // exile → the Avenger rises
+
+        var avenger = FindAvenger(sim, 1);
+        Check("a champion rose from the ruins", avenger != null);
+        Check("and it is immense (600 hp)", avenger != null && avenger.MaxHp >= 500);
+        Check("raised where the keep fell (in the attacker's midst)",
+              avenger != null && Math.Abs(Fixed.ToInt(avenger.X) - 7) <= 6 && Math.Abs(Fixed.ToInt(avenger.Y) - 7) <= 6);
+    }
+
+    // The Avenger is exile-only: it can never be built at a barracks, however you ask.
+    static void TheAvengerIsNeverTrainable()
+    {
+        Console.WriteLine("\nthe Avenger can never be trained:");
+        var sim = new Simulation(TileMap.Open(48));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);
+        int avenger = AvengerDesignId(sim);
+        Check("the Avenger is registered but off the roster", avenger >= 0 && !sim.DesignOf(avenger).Trainable);
+
+        var bar = sim.PlaceBuilding(BuildingType.Barracks, 1, 6, 6);
+        for (int i = 0; i < 3; i++) sim.SpawnPeasant(1);
+        sim.AddResource(1, ResourceType.Wood, 100);
+
+        Order(sim, Train(1, bar.Id, avenger));
+        Check("a barracks refuses to train the Avenger", bar.TrainQueue.Count == 0);
+        Order(sim, Train(1, bar.Id, 0));
+        Check("but it still trains an ordinary soldier", bar.TrainQueue.Count == 1);
+    }
+
     // The one that matters most: two clients must exile and refound identically —
-    // same razing, same reset, same refound site — every tick.
+    // same razing, same Avenger, same reset, same refound site — every tick.
     static void TwoClientsAgreeThroughExileAndReturn()
     {
         Console.WriteLine("\ntwo clients agree through exile and return:");
@@ -148,6 +189,7 @@ static class Program
         net.Connect(b);
         foreach (var c in new[] { a, b })
         {
+            foreach (var d in Skirmish.Designs()) c.Sim.RegisterDesign(d);   // so the Avenger rises on both, identically
             c.Sim.PlaceBuilding(BuildingType.Keep, 1, 6, 6);
             c.Sim.PlaceBuilding(BuildingType.Keep, 2, 56, 56);
         }
@@ -169,6 +211,23 @@ static class Program
     }
 
     // ---- helpers -----------------------------------------------------------
+
+    static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
+    static Command Train(int owner, int barracksId, int design) =>
+        new Command { Owner = owner, Type = CommandType.Train, TargetId = barracksId, X = design };
+
+    static int AvengerDesignId(Simulation sim)
+    {
+        for (int i = 0; i < sim.DesignList.Count; i++) if (!sim.DesignList[i].Trainable) return i;
+        return -1;
+    }
+
+    static Unit FindAvenger(Simulation sim, int owner)
+    {
+        foreach (var u in sim.Units)
+            if (u.Alive && u.Owner == owner && !sim.DesignOf(u.DesignId).Trainable) return u;
+        return null;
+    }
 
     static bool NoneOwnedBy(Simulation sim, int owner)
     {

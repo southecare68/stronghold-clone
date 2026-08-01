@@ -146,7 +146,7 @@ public partial class World3D : Node3D
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
-    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout;
+    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger;
 
     // Camera orbit around a target on the ground.
     Vector3 _camTarget;
@@ -588,6 +588,7 @@ public partial class World3D : Node3D
         _mBrute   = Load("Characters/SM_Chr_Rider_01");
         _mArcher  = Load("Characters/SM_Chr_King_01");
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
+        _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
 
         void B(BuildingType t, string rel, float s) { _bldModel[t] = Load(rel); _bldScale[t] = s; }
         B(BuildingType.Keep,          "Castle/SM_Bld_Castle_Wall_Tower_L_01", 0.5f);
@@ -2040,7 +2041,10 @@ public partial class World3D : Node3D
             if (!_unitNodes.TryGetValue(u.Id, out var node))
             {
                 node = ModelFor(u).Instantiate<Node3D>();
-                node.Scale = Vector3.One * CharScale;
+                // A special unit (the exile Avenger, flagged non-trainable) towers over
+                // the rank and file, so its threat reads at a glance.
+                float scale = _sim.DesignOf(u.DesignId).Trainable ? CharScale : CharScale * 1.6f;
+                node.Scale = Vector3.One * scale;
                 AddChild(node);
                 _unitNodes[u.Id] = node;
                 DisableBakedAnimation(node);            // the prefab's AnimationPlayer would clobber our posing
@@ -3040,7 +3044,7 @@ public partial class World3D : Node3D
     PackedScene ModelFor(Unit u)
     {
         if (u.IsPeasant) return _mPeasant;
-        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, _ => _mSoldier };
+        return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, 5 => _mAvenger, _ => _mSoldier };
     }
 
     // ---- camera ------------------------------------------------------------
@@ -3400,6 +3404,7 @@ public partial class World3D : Node3D
         // One button per registered design. All cost the same wood (TrainCost).
         for (int i = 0; i < _sim.DesignList.Count; i++)
         {
+            if (!_sim.DesignList[i].Trainable) continue;   // the Avenger is never on the barracks roster
             string name = i < Skirmish.DesignNames.Length ? Skirmish.DesignNames[i] : $"Unit {i}";
             var b = new Button { Text = $"{name}\n15w", CustomMinimumSize = new Vector2(70, 0), FocusMode = Control.FocusModeEnum.None };
             b.AddThemeFontSizeOverride("font_size", 12);
