@@ -169,7 +169,7 @@ namespace Sim
             var node = TechTree.Node(id);
             int cost = node.BaseCost;
             if (IsScoredBranch(node.Branch)) cost += CrossBranchPenalty * OffBranchNodeCount(owner, node.Branch);
-            return cost;
+            return cost * PaceScale;   // match-length dial: research is a proportionally longer climb (Simulation.PaceScale)
         }
 
         int CapstonesHeld(int owner)

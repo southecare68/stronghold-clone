@@ -480,6 +480,13 @@ static class Program
         join.Restore(back);
         Check($"setup-then-adopt joiner reproduces host (0x{join.StateChecksum():X8} == 0x{hostSum:X8})",
               join.StateChecksum() == hostSum);
+
+        // The match-length dial rides the snapshot, so a rejoiner paces its game the
+        // same as the host (a mismatch would silently desync every hold and cost).
+        var epic = new Simulation(TileMap.Open(48)) { PaceScale = 6 };
+        var rejoin = new Simulation(TileMap.Open(48));
+        rejoin.Restore(Wire.DeserializeSnapshot(Wire.Serialize(epic.Snapshot())));
+        Check($"the PaceScale dial survives the wire (got {rejoin.PaceScale})", rejoin.PaceScale == 6);
     }
 
     static void Check(string what, bool ok)

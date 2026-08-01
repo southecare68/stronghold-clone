@@ -240,6 +240,7 @@ namespace Netcode
             PutInt(buf, snap.VictoryOwner);
             PutInt(buf, snap.VictoryPathIdx);
             PutInt(buf, snap.MatchClockTicks);
+            PutInt(buf, snap.PaceScale);
             PutInt(buf, snap.Explored.Count);
             foreach (var kv in snap.Explored)
             {
@@ -430,6 +431,7 @@ namespace Netcode
                 snap.VictoryOwner = GetInt(data, ref p);
                 snap.VictoryPathIdx = GetInt(data, ref p);
                 snap.MatchClockTicks = GetInt(data, ref p);
+                snap.PaceScale = GetInt(data, ref p);
                 int fogCount = GetInt(data, ref p);
                 if (fogCount < 0 || fogCount > MaxUnits) return null;
                 var explored = new Dictionary<int, uint[]>();

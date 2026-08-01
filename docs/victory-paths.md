@@ -340,8 +340,14 @@ scoring shape (adjacency & symmetry), countered by an Arsonist.
 - Goals: `EconHighGold`/`EconMedGold`, `RelHighFaith`/`RelMedFaith`,
   `DomHighPop`/`DomMedPop`/`DomHighTerr`/`DomMedTerr` (`Victory.cs`).
 - Windows: `AnnounceAt` (80%), `HoldTicksFor(path)`, `MatchClockTicks`
-  (`Victory.cs`). Hold windows are in ticks (`TickRate` = 20/s) so they express
-  the design's ~10–30 real minutes and tests can drive them exactly.
+  (`Victory.cs`). Hold windows are in ticks (`TickRate` = 20/s).
+- **Match length**: `Simulation.PaceScale` — one dial that scales the victory holds
+  (`HoldTicksFor`) and research cost (`ResearchCostFor`) together; since crowns are
+  capstone-gated, this paces the whole game. An instance setting (a match setting like
+  `FogEnabled`) carried in the snapshot + hash: **default 1** (the original brisk
+  ~15-30 min matches, so every test runs full-speed), and the game sets it to **6** at
+  setup (`World3D`, `--pace=N` to override) for ~2-hour matches. Realm cadence is
+  untouched, so the economy still ticks every 2s.
 - Population floor: `MinPopToWin` (200, `Victory.cs`) — the peasant count every
   crown requires; gates the hold accrual and the buzzer, not the metric itself.
 - Exile: `RegroupTicks` (time in exile before refounding), `ExileStartPeasants`,

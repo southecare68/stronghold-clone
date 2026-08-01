@@ -402,9 +402,11 @@ public partial class World3D : Node3D
         // In a networked match both machines must pass it, like the match seed.
         bool noFog = HasFlag("--no-fog");
         int aiOwner = MyPlayer == 2 ? 1 : 2;
+        int pace = int.TryParse(FlagValue("--pace"), out var pv) && pv >= 1 ? pv : 6;   // ~2-hour matches by default; --pace=N to change
         foreach (var c in Clients())
         {
             Skirmish.Setup(c.Sim, MapSize);
+            c.Sim.PaceScale = pace;   // stretch victory holds & research so a match runs ~2 hours (set identically on every client)
             if (noFog) c.Sim.FogEnabled = false;
             // Give the bot a victory path to chase — by owner id, so a match with
             // several bots spreads them across the crowns (Economic 0 / Religious 1 /

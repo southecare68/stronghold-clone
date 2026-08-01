@@ -49,6 +49,7 @@ static class Program
         ADualGoalTakesTheCrown();
         APopulationFloorGatesTheCrown();
         TheGameCalendarAdvances();
+        PaceScaleStretchesTheMatch();
         TheTerritoryAndScienceSeams();
         TwoClientsAgreeOnTheCrown();
 
@@ -124,7 +125,7 @@ static class Program
         Check("the Grand Temple capstone unlocks the HIGH goal", sim.Progress(1, VictoryPath.Religious).HighMet);
         Check("no crown the instant the HIGH goal is first met", sim.VictoryOwner == -1);
 
-        int need = Simulation.HoldTicksFor(VictoryPath.Religious);
+        int need = sim.HoldTicksFor(VictoryPath.Religious);
         int used = TickUntil(sim, () => sim.VictoryOwner >= 0, need + 2000);
         Check("the dual goal takes the crown", sim.VictoryOwner == 1);
         Check("won by the path whose HIGH was held (Religious)", sim.VictoryPathIdx == (int)VictoryPath.Religious);
@@ -186,6 +187,23 @@ static class Program
         Check("and the month has a name", sim.GameMonthName == "January");
     }
 
+    // The match-length dial: one knob (PaceScale) stretches the victory holds and the
+    // research cost together, so a game can run brisk (1×) or epic (~2 hours at 6×).
+    // Defaults to 1, so every other test runs at full speed.
+    static void PaceScaleStretchesTheMatch()
+    {
+        Console.WriteLine("the pace dial stretches holds and research together:");
+        var brisk = new Simulation(TileMap.Open(32));                     // PaceScale 1 (default)
+        var epic  = new Simulation(TileMap.Open(32)) { PaceScale = 6 };
+        Check("the default is the brisk 1× pace", brisk.PaceScale == 1);
+        Check("a longer pace multiplies every hold window 6×",
+              epic.HoldTicksFor(VictoryPath.Religious) == 6 * brisk.HoldTicksFor(VictoryPath.Religious)
+           && epic.HoldTicksFor(VictoryPath.Economic)  == 6 * brisk.HoldTicksFor(VictoryPath.Economic));
+        Check("and research costs 6× as much to climb",
+              epic.ResearchCostFor(1, TechTree.Roads) == 6 * brisk.ResearchCostFor(1, TechTree.Roads)
+           && epic.ResearchCostFor(1, TechTree.GrandTemple) == 6 * brisk.ResearchCostFor(1, TechTree.GrandTemple));
+    }
+
     // The two clauses that wait on later phases: territory (Phase 3) and science
     // (Phase 4). Both are wired so the HUD and spies have their slots, and both
     // read exactly as designed at a one-keep, no-research start.
@@ -217,7 +235,7 @@ static class Program
             foreach (int id in ReligiousToCapstone) sim.TryResearch(1, id);   // unlock the Religious HIGH on both clients
         }
 
-        int cap = Simulation.HoldTicksFor(VictoryPath.Religious) + 4000;
+        int cap = a.HoldTicksFor(VictoryPath.Religious) + 4000;
         bool synced = true;
         int t = 0;
         for (; t < cap && a.VictoryOwner < 0; t++)

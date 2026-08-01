@@ -395,6 +395,18 @@ namespace Sim
         const int StockWidth = 41;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
+
+        // The MATCH-LENGTH dial. Scales the two things that set how long a game runs:
+        // the victory HOLD windows (HoldTicksFor) and the RESEARCH cost (ResearchCostFor),
+        // so both stretch together. Since every crown is capstone-GATED, slowing research
+        // also delays when any path can even start its hold — so this one knob paces the
+        // whole game. (Realm cadence is untouched, so the economy still ticks every 2s.)
+        //
+        // A match setting like FogEnabled: DEFAULT 1 — the original brisk ~15-30 min
+        // matches, so every test runs at full speed — and the game sets it to 6 for
+        // ~2-hour matches (World3D at setup). Carried in the snapshot & hash so a
+        // rejoiner and desync-detection agree on it. Raise for longer games.
+        public int PaceScale = 1;
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
 
         // Religion. Faith is the share of the populace won over — it opens at a
@@ -772,6 +784,7 @@ namespace Sim
             VictoryOwner = s.VictoryOwner;
             VictoryPathIdx = s.VictoryPathIdx;
             MatchClockTicks = s.MatchClockTicks;
+            PaceScale = s.PaceScale;
         }
 
         // A complete, standalone snapshot of the simulation's state right now — no
@@ -812,6 +825,7 @@ namespace Sim
                 VictoryOwner = VictoryOwner,
                 VictoryPathIdx = VictoryPathIdx,
                 MatchClockTicks = MatchClockTicks,
+                PaceScale = PaceScale,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -2778,7 +2792,7 @@ namespace Sim
             // Victory: the crown (or -1), the path it was won by, and the match-clock
             // length two machines must agree on. The per-owner hold/latch slots are
             // already hashed above as part of the stock array.
-            Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks);
+            Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks); Mix(PaceScale);
             return h;
         }
 

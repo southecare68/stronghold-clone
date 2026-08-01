@@ -104,10 +104,10 @@ namespace Sim
         // the design's sustained-hold windows (~10-30 real minutes), in ticks. Public
         // so the render layer can show a countdown and tests can drive it exactly. The
         // hoard is the longest vigil; the rest share ten minutes.
-        public static int HoldTicksFor(VictoryPath path) => path switch
+        public int HoldTicksFor(VictoryPath path) => path switch   // instance: reads this match's PaceScale
         {
-            VictoryPath.Economic => 15 * 60 * TickRate,   // the hoard is the longest vigil, but not thrice the others'
-            _                    => 10 * 60 * TickRate,    // the rest, ~10 min
+            VictoryPath.Economic => 15 * 60 * TickRate * PaceScale,   // the hoard is the longest vigil, but not thrice the others'
+            _                    => 10 * 60 * TickRate * PaceScale,    // the rest, ~10 min (× PaceScale for match length)
         };
 
         // Realm-wide announcements produced this match, oldest first. Transient (not

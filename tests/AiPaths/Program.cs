@@ -63,10 +63,13 @@ static class Program
         Skirmish.Setup(sim, Skirmish.DefaultSize);
         sim.FogEnabled = false;
         sim.EnableAi(2, AiLevel.Hard, VictoryPath.Economic);   // trade gold funds the ring fastest
-        sim.AddGold(1, 5000);                                   // a rival hoard worth skimming
-
         for (int t = 0; t < 60_000; t++)
         {
+            // Keep re-hoarding the rival so Economic stays its clear, announced crown.
+            // Otherwise, over a long match the Hard bot exiles the passive rival, which
+            // resets its gold, and the bot answers whatever metric is left standing
+            // instead of the intended Embezzler ("skim the rival's hoard").
+            if (t % 1000 == 0) sim.AddGold(1, 70_000);
             sim.Tick(Array.Empty<Command>());
             if (t % 200 == 0 && sim.IsTechResearched(2, TechTree.Embezzler)
                 && sim.SpyReadyAt(2, TechTree.Embezzler) > 0) break;
