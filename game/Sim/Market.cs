@@ -75,14 +75,54 @@ namespace Sim
         {
             int price = MercPriceForDesign(designId);
             if (price <= 0) return;
+            if (designId >= _designs.Count) return;          // must be a registered design, else you'd pay for one and get another
             var market = FirstBuildingOf(owner, BuildingType.Market);
             if (market == null) return;                      // needs a trading hall
             var s = StockOf(owner);
             if (s[GoldIdx] < price) return;
 
             var spot = NearestFreeTile(market.CenterX, market.CenterY) ?? new Tile(market.CenterX, market.CenterY);
-            SpawnUnit(owner, spot.X, spot.Y, designId);       // a soldier (non-peasant), fully trained
+            var merc = SpawnUnit(owner, spot.X, spot.Y, designId);   // a soldier (non-peasant), fully trained
+            merc.IsMercenary = true;                                 // and on the payroll — see PayMercenaryWages
             s[GoldIdx] -= price;
+        }
+
+        // The wage a mercenary of a design draws each realm tick — a fraction of its
+        // hire price, so dearer troops cost more to keep. At least 1, so every merc
+        // costs something to hold.
+        const int MercWageDivisor = 50;   // wage/tick ≈ hire price / 50 (Soldier 2, Archer 3, Brute 4)
+        int MercWage(int designId) => Math.Max(1, MercPriceForDesign(designId) / MercWageDivisor);
+
+        // For the HUD: how many mercenaries a realm keeps, and the gold-per-realm-tick
+        // wage bill they draw — so a player can see the running cost of their company.
+        public int MercenaryCount(int owner)
+        {
+            int n = 0;
+            foreach (var u in Units) if (u.Alive && u.Owner == owner && u.IsMercenary) n++;
+            return n;
+        }
+        public int MercenaryWageBill(int owner)
+        {
+            int bill = 0;
+            foreach (var u in Units) if (u.Alive && u.Owner == owner && u.IsMercenary) bill += MercWage(u.DesignId);
+            return bill;
+        }
+
+        // Pay the realm's mercenaries, oldest first, from whatever gold is on hand.
+        // Any the treasury cannot cover DESERT (Hp 0 → swept by RemoveDead), so a
+        // gold-bought army is capped at what income sustains — the fairness valve on
+        // "more income ⇒ more troops". Deterministic: units in id order, integer math.
+        void PayMercenaryWages(int owner, int[] s)
+        {
+            int budget = s[GoldIdx], paid = 0;
+            foreach (var u in Units)      // id order — the longest-serving keep their post
+            {
+                if (!u.Alive || u.Owner != owner || !u.IsMercenary) continue;
+                int wage = MercWage(u.DesignId);
+                if (paid + wage <= budget) paid += wage;
+                else u.Hp = 0;            // unpaid — the mercenary deserts
+            }
+            s[GoldIdx] = budget - paid;
         }
 
         // The owner's first live building of a type, in id order (deterministic).

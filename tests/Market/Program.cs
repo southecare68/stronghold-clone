@@ -42,6 +42,8 @@ static class Program
         HiringNeedsAMarketAndEnoughGold();
         OnlyRosteredDesignsCanBeHired();
         AnAutoEconomyCanFieldAnArmyOfMercenaries();
+        MercenariesDrawWagesEachTurn();
+        OverhiringBeyondIncomeDeserts();
         TwoClientsAgreeOnTrading();
         TwoClientsAgreeOnHiring();
 
@@ -311,6 +313,45 @@ static class Program
         Check("and the treasury was drawn down for it", sim.Gold(1) == 2000 - 6 * sim.MercPrice(0));
     }
 
+    // The fairness valve: a standing mercenary draws wages from the treasury every
+    // realm tick, so an army is a running cost, not a one-off — and that cost eats
+    // the very hoard a gold economy is racing to grow.
+    static void MercenariesDrawWagesEachTurn()
+    {
+        Console.WriteLine("\nmercenaries draw wages each turn:");
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);       // a realm, so wages are settled
+        sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        sim.AddGold(1, 500);
+        Order(sim, Hire(1, sim.MercDesign(0)));              // hire a Soldier (120g)
+        Check("one merc on the payroll", MercCount(sim, 1) == 1);
+
+        int afterHire = sim.Gold(1);
+        Settle(sim, 45);                                     // one realm tick (40)
+        Check("wages drew the treasury down", sim.Gold(1) < afterHire);
+        Check("but the merc stays while it can be paid", MercCount(sim, 1) == 1);
+    }
+
+    // Over-hire beyond what income sustains and the treasury can't cover the wage
+    // bill — the mercs it cannot pay desert, capping the army at sustainable size.
+    static void OverhiringBeyondIncomeDeserts()
+    {
+        Console.WriteLine("\nmercenaries you can't pay desert:");
+        var sim = new Simulation(TileMap.Open(48));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);   // so the Brute design exists to hire
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
+        int price = sim.MercPrice(2);                        // Brute 200g, wage 4/turn
+        sim.AddGold(1, price * 5 + 10);                      // enough to HIRE five, barely any left to keep them
+        for (int i = 0; i < 5; i++) Order(sim, Hire(1, sim.MercDesign(2)));
+        Check("five mercs hired", MercCount(sim, 1) == 5);
+        Check("with the treasury nearly bare", sim.Gold(1) == 10);
+
+        Settle(sim, 40);                                     // the first payday
+        Check("the mercs it couldn't pay deserted", MercCount(sim, 1) < 5);
+        Check("it keeps only the two the 10 gold could cover", MercCount(sim, 1) == 2);
+    }
+
     // The one that matters most: two clients issuing the same trades and standing
     // orders must agree on every tick — the goods, the gold, the auto-trader.
     static void TwoClientsAgreeOnTrading()
@@ -362,6 +403,7 @@ static class Program
         net.Connect(b);
         foreach (var c in new[] { a, b })
         {
+            foreach (var d in Skirmish.Designs()) c.Sim.RegisterDesign(d);   // the full roster, so all merc types exist
             c.Sim.PlaceBuilding(BuildingType.Market, 1, 20, 20);
             c.Sim.AddGold(1, 3000);
         }
@@ -386,6 +428,13 @@ static class Program
     {
         foreach (var b in sim.BuildingList) if (b.Type == BuildingType.Barracks) return b.Id;
         return 0;
+    }
+
+    static int MercCount(Simulation sim, int owner)
+    {
+        int n = 0;
+        foreach (var u in sim.Units) if (u.Alive && u.Owner == owner && u.IsMercenary) n++;
+        return n;
     }
 
     static void Settle(Simulation sim, int ticks)

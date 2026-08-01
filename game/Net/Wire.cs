@@ -148,6 +148,7 @@ namespace Netcode
                 PutInt(buf, u.CarryAmount);
                 PutInt(buf, u.GatherTimer);
                 PutInt(buf, u.IsPeasant ? 1 : 0);
+                PutInt(buf, u.IsMercenary ? 1 : 0);
                 PutInt(buf, u.GarrisonId);
 
                 // The remaining route. StateChecksum hashes it, so a snapshot that
@@ -312,6 +313,7 @@ namespace Netcode
                         CarryAmount = GetInt(data, ref p),
                         GatherTimer = GetInt(data, ref p),
                         IsPeasant = GetInt(data, ref p) != 0,
+                        IsMercenary = GetInt(data, ref p) != 0,
                         GarrisonId = GetInt(data, ref p),
                     };
 

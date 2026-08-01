@@ -157,11 +157,18 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   moved and the snapshot round-trips unchanged. **Mercenaries** (`HireMercenary`,
   `MercRoster`): the market also hires trained soldiers outright for gold — no
   peasant, no barracks, no muster — so a rich realm turns its hoard straight into an
-  army, bypassing the population/food gate a trained army lives under (a premium
-  price keeps it a gold SINK; scouts aren't for sale). The merc musters at the
-  realm's first market on a deterministic free tile. HUD: a palette building + a
-  trade board (with a Hire section) on selecting your market. `tests/Market` (incl.
-  twin-client determinism over trades and hires).
+  army, bypassing the population/food gate a trained army lives under (scouts aren't
+  for sale). The merc musters at the realm's first market on a deterministic free
+  tile. **Wages are the fairness valve** (`PayMercenaryWages`, `IsMercenary`): every
+  mercenary draws pay each realm tick (≈ hire price / 50), settled before anything
+  else, and any the treasury can't cover DESERT (oldest kept, id order). So a
+  gold-bought army is bounded by *sustainable income*, not the hoard, and its wages
+  drain the very treasury an Economic player is racing to 70k — the more income, the
+  more troops, but the more it costs to hold them, with rivals able to attrit the
+  company (each kill is gold you must re-spend). Hiring an unregistered design is
+  refused (no pay-for-one-get-another). HUD: a palette building + a trade board (Hire
+  section + live wage bill) on selecting your market. `tests/Market` (incl. wages,
+  desertion, and twin-client determinism over trades and hires).
 - **Science branch**: Scholar's Hut → Library → the University fork (Engineering =
   cheaper wonders | Scholarship = faster tree) → Printing Press → the **Academy**
   capstone, which unlocks **Wonders** (`BuildingType.Wonder`) — a grand, expensive

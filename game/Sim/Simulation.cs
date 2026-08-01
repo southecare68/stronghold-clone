@@ -215,6 +215,13 @@ namespace Sim
         // scenario) — only in StateChecksum, like every other post-freeze field.
         public bool IsPeasant;
 
+        // Hired at a market for gold, not trained. A mercenary demands WAGES each
+        // realm tick and deserts if the treasury cannot pay (see PayMercenaryWages),
+        // which is what bounds a gold-bought army to sustainable income. Post-freeze
+        // unit state: hashed in StateChecksum and snapshotted, never in the frozen
+        // units-only Checksum (no mercenary appears in the parity scenario).
+        public bool IsMercenary;
+
         public bool Alive => Hp > 0;
 
         // The route still to walk, and how far along it we are. Tx/Ty always
@@ -244,7 +251,7 @@ namespace Sim
                 TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
                 GarrisonId = GarrisonId,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
-                CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant,
+                CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant, IsMercenary = IsMercenary,
                 PathIndex = PathIndex,
                 Cautious = Cautious,
             };
@@ -1968,6 +1975,13 @@ namespace Sim
                 int gold = s[GoldIdx] + TaxGold[tax] * peasants + EconomicIncome(owner);
                 s[GoldIdx] = gold < 0 ? 0 : gold;
 
+                // Mercenary wages come first — troops are paid before the realm spends
+                // on anything else, and any it cannot afford desert. This is what keeps
+                // a gold economy fair: a standing merc army is bounded by SUSTAINABLE
+                // income, not the hoard, and its wages drain the very treasury an
+                // Economic player is racing to 70k (Market.cs).
+                PayMercenaryWages(owner, s);
+
                 // The market's standing orders: with a trading hall up, each good with a
                 // Buy/Sell policy closes the gap to its threshold this tick, spending the
                 // gold just settled above (Market.cs). Runs before research so an
@@ -2690,6 +2704,7 @@ namespace Sim
                 Mix((int)u.Job); Mix(u.GatherNodeId);
                 Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
                 Mix(u.IsPeasant ? 1 : 0);
+                Mix(u.IsMercenary ? 1 : 0);
                 Mix(u.GarrisonId);
 
                 // The route still to walk. Two units in identical positions with

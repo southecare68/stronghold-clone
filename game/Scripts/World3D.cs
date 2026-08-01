@@ -102,6 +102,7 @@ public partial class World3D : Node3D
     // refreshed each frame — one row per market good.
     Control _marketPanel;
     Label _marketHeader;
+    Label _mercInfo;
     Label[] _mkStock;
     Button[] _mkAuto;
     Label[] _mkThresh;
@@ -3478,7 +3479,7 @@ public partial class World3D : Node3D
         }
 
         // Mercenaries: hire trained soldiers for gold, no peasant needed.
-        RealmLabel(col, "hire mercenaries  ·  gold for trained troops, no peasant", 11, new Color(0.60f, 0.64f, 0.70f));
+        _mercInfo = RealmLabel(col, "hire mercenaries  ·  gold for trained troops, no peasant", 11, new Color(0.60f, 0.64f, 0.70f));
         var hireRow = new HBoxContainer();
         hireRow.AddThemeConstantOverride("separation", 5);
         col.AddChild(hireRow);
@@ -3533,6 +3534,11 @@ public partial class World3D : Node3D
 
         int me = MyPlayer;
         _marketHeader.Text = $"Market   ·   Gold {_sim.Gold(me)}";
+
+        int mercs = _sim.MercenaryCount(me);
+        _mercInfo.Text = mercs > 0
+            ? $"hire mercenaries  ·  {mercs} on payroll, {_sim.MercenaryWageBill(me)}g/turn in wages"
+            : "hire mercenaries  ·  gold for trained troops, no peasant";
         for (int g = 0; g < _mkStock.Length; g++)
         {
             _mkStock[g].Text = $"{_sim.GoodName(g)}  {_sim.GoodStock(me, g)}";
