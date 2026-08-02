@@ -306,6 +306,10 @@
         <li><b>Wait</b> — the default. Do nothing and the game stays frozen, keeping their seat. If they relaunch and re-join, everyone picks up exactly where they left off (a brief <em>“Opponent reconnected”</em> and play resumes).</li>
         <li><b>Hand it to the AI</b> — one click gives the silent realm to a Normal AI so the match carries on rather than waiting indefinitely.</li>
       </ul>
+      <p style="margin:.6rem 0 0"><b>If the one who dropped was the host</b>, there's no host left to re-join — so the player still in the game gets a third button, <b>“Take over hosting.”</b> Click it and your machine becomes the host; the game shows a short rejoin code. Read it to the other player and they relaunch with <span style="font-family:var(--mono);font-size:.85em">--code=…&nbsp;--seat=1</span> to slot back into their own realm, and the match resumes with the roles quietly swapped.</p>
+    </div>
+    <div class="note">
+      <p><b>Reachability, plainly:</b> the new host has to be reachable at the address it shows — true on a home or LAN network, where you and your friends usually play. Across the open internet it may need the same port-forwarding the original host did.</p>
     </div>
   </section>
 

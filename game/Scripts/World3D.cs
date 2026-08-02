@@ -258,6 +258,10 @@ public partial class World3D : Node3D
     Control _dropPanel;                // fallback: shown when the opponent stops responding
     bool _dropShown;                   // was the drop prompt up last frame (to notice a reconnect)
     float _stallSeconds;               // how long we've been stalled waiting for a peer
+    int _port = EnetTransport.DefaultPort;  // the match port, kept for host migration
+    Button _promoteButton;             // "Become host" — offered to a joiner whose host vanished
+    Label _rejoinInfo;                 // after promotion: how the returning host rejoins us
+    bool _promoted;                    // we've taken over hosting
     readonly HashSet<int> _aiAnnounced = new();   // opponents we've already toasted as AI-controlled
 
     // The tech-tree panel: the research web for your realm, node by node, with a
@@ -510,7 +514,14 @@ public partial class World3D : Node3D
         }
         else
         {
-            _enet = mode == "HOST" ? EnetTransport.Host(port) : EnetTransport.Join(address, port);
+            _port = port;
+            // Seats are normally fixed by role (host = 1, joiner = 2), but a returning
+            // host rejoins the NEW host as a joiner while reclaiming seat 1 — so
+            // `--seat=N` overrides the default. See host migration below.
+            int? seat = SeatOverride();
+            _enet = mode == "HOST"
+                ? EnetTransport.Host(port, playerId: seat ?? 1)
+                : EnetTransport.Join(address, port, playerId: seat ?? 2);
             _net = _enet;
             MyPlayer = _enet.PlayerId;
             _me = new Client(MyPlayer, _enet, Sim.TileMap.Skirmish(MapSize));
@@ -556,6 +567,11 @@ public partial class World3D : Node3D
 
     static int ParsePort(string s, int fallback) =>
         int.TryParse(s, out int p) && p > 0 && p < 65536 ? p : fallback;
+
+    // `--seat=1|2` reclaims a specific seat when rejoining — used when a returning
+    // host joins the player who took over hosting, to get its original realm back.
+    static int? SeatOverride() =>
+        int.TryParse(FlagValue("--seat"), out int s) && (s == 1 || s == 2) ? s : (int?)null;
 
     // Whether a bare flag was passed (either arg list — Godot splits them at `--`).
     static bool HasFlag(string flag)
@@ -4150,6 +4166,25 @@ public partial class World3D : Node3D
             dBtn.CustomMinimumSize = new Vector2(0, 40);
             dBtn.Pressed += TakeOverDroppedOpponent;
             dBox.AddChild(dBtn);
+
+            // Host migration. Only the JOINER can be left unable to wait: if the HOST
+            // vanished there's no host left to rejoin, so we offer to become one. (A
+            // host whose joiner dropped needs nothing — the joiner can rejoin it.)
+            if (MyPlayer == 2)
+            {
+                _promoteButton = new Button { Text = "Host dropped? — Take over hosting so they can rejoin", FocusMode = Control.FocusModeEnum.None };
+                _promoteButton.AddThemeFontSizeOverride("font_size", 14);
+                _promoteButton.CustomMinimumSize = new Vector2(0, 36);
+                _promoteButton.Pressed += PromoteToHost;
+                dBox.AddChild(_promoteButton);
+            }
+
+            _rejoinInfo = new Label { HorizontalAlignment = HorizontalAlignment.Center, Visible = false };
+            _rejoinInfo.AddThemeColorOverride("font_color", new Color(0.95f, 0.90f, 0.70f));
+            _rejoinInfo.AddThemeFontSizeOverride("font_size", 13);
+            _rejoinInfo.AutowrapMode = TextServer.AutowrapMode.Word;
+            _rejoinInfo.CustomMinimumSize = new Vector2(400, 0);
+            dBox.AddChild(_rejoinInfo);
         }
     }
 
@@ -4219,6 +4254,40 @@ public partial class World3D : Node3D
         if (!_sim.IsAi(opp)) _sim.TakeOverWithAi(opp, Sim.AiLevel.Normal, (Sim.VictoryPath)(opp % 4));
         _dropPanel.Visible = false;
         _stallSeconds = 0f;   // the toast fires from UpdateTakeoverNotices next frame
+    }
+
+    // Host migration: the host we joined is gone, so we become the host in its place.
+    // Our sim is frozen at the tick we stalled on; once we stand up a server the
+    // returning player rejoins US (reclaiming seat 1) and the normal snapshot handshake
+    // catches them back up. We stay frozen, waiting, until they connect.
+    void PromoteToHost()
+    {
+        if (_promoted || _enet == null) return;
+        if (!_enet.PromoteToHost(_port))
+        {
+            _rejoinInfo.Text = "Couldn't take over hosting (is the port in use?). Try again, or hand the realm to the AI.";
+            _rejoinInfo.Visible = true;
+            return;
+        }
+        _promoted = true;
+        if (_promoteButton != null) _promoteButton.Visible = false;
+
+        string ip = LocalIPv4();
+        string code = ip != null ? MatchCode.Encode(ip, _port) : null;
+        _rejoinInfo.Text = code != null
+            ? $"You are now the host.  Have the other player relaunch and rejoin:\n--code={code} --seat=1\n(or  --join={ip}:{_port} --seat=1)"
+            : $"You are now the host on port {_port}.  Have the other player rejoin with:\n--join=<your-ip>:{_port} --seat=1";
+        _rejoinInfo.Visible = true;
+        ShowRealmToast("♜   You are now hosting — waiting for them to rejoin");
+    }
+
+    // First non-loopback IPv4 address of this machine, to tell the returning player
+    // where to rejoin. Null if only loopback is up (they'll need to find it manually).
+    static string LocalIPv4()
+    {
+        foreach (string a in IP.GetLocalAddresses())
+            if (a.Contains('.') && !a.Contains(':') && !a.StartsWith("127.")) return a;
+        return null;
     }
 
     void ToggleGoals() => _showGoals = !_showGoals;

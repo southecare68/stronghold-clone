@@ -26,13 +26,17 @@ public sealed class EnetTransport : ITransport
 {
     public const int DefaultPort = 27015;
 
-    readonly ENetMultiplayerPeer _peer = new();
-    readonly bool _isHost;
+    // Not readonly: host migration replaces the socket wholesale — a joiner whose
+    // host vanished tears down its client peer and stands up a server peer in its
+    // place, so the departed host can rejoin IT. The player id is likewise no longer
+    // fixed by role, so a returning host can reclaim seat 1 against the new host.
+    ENetMultiplayerPeer _peer = new();
+    bool _isHost;
     readonly int _expectedPlayers;
 
     Client _local;
 
-    public int PlayerId { get; }
+    public int PlayerId { get; private set; }
     public string Status { get; private set; } = "starting";
     public bool Failed { get; private set; }
 
@@ -80,9 +84,9 @@ public sealed class EnetTransport : ITransport
         _expectedPlayers = expectedPlayers;
     }
 
-    public static EnetTransport Host(int port = DefaultPort, int expectedPlayers = 2)
+    public static EnetTransport Host(int port = DefaultPort, int expectedPlayers = 2, int playerId = 1)
     {
-        var t = new EnetTransport(isHost: true, playerId: 1, expectedPlayers);
+        var t = new EnetTransport(isHost: true, playerId, expectedPlayers);
         var err = t._peer.CreateServer(port, expectedPlayers - 1);
         if (err != Error.Ok)
         {
@@ -97,9 +101,9 @@ public sealed class EnetTransport : ITransport
         return t;
     }
 
-    public static EnetTransport Join(string address, int port = DefaultPort, int expectedPlayers = 2)
+    public static EnetTransport Join(string address, int port = DefaultPort, int expectedPlayers = 2, int playerId = 2)
     {
-        var t = new EnetTransport(isHost: false, playerId: 2, expectedPlayers);
+        var t = new EnetTransport(isHost: false, playerId, expectedPlayers);
         var err = t._peer.CreateClient(address, port);
         if (err != Error.Ok)
         {
@@ -112,6 +116,39 @@ public sealed class EnetTransport : ITransport
         t.Status = $"connecting to {address}:{port}";
         GD.Print($"[net] {t.Status}");
         return t;
+    }
+
+    // Host migration. The host we joined has vanished; rather than wait for a host
+    // that can never return, WE become the host so it can rejoin us. Tear down the
+    // client socket, stand up a server on `port`, and keep everything else — our
+    // player id, our Client, its sim frozen at the tick we stalled on. When the
+    // returning player connects, the normal join path (SendPendingSnapshots) hands
+    // them our current state and the match resumes. Reachability is on the caller:
+    // the new host must be reachable at the address it advertises (fine on a LAN).
+    public bool PromoteToHost(int port = DefaultPort)
+    {
+        _peer.Close();
+        var server = new ENetMultiplayerPeer();
+        var err = server.CreateServer(port, _expectedPlayers - 1);
+        if (err != Error.Ok)
+        {
+            Failed = true;
+            Status = $"could not take over hosting on port {port}: {err}";
+            GD.PrintErr($"[net] {Status}");
+            return false;
+        }
+
+        _peer = server;
+        _isHost = true;
+        Failed = false;
+        _eventPeers = 0;
+        PeersConnected = 0;
+        _snapshotAdopted = false;          // host-side field; unused now that we host
+        _awaitingSnapshot.Clear();
+        Watch();
+        Status = $"took over hosting on port {port} — waiting for the other player to rejoin";
+        GD.Print($"[net] {Status}");
+        return true;
     }
 
     // The Client this transport delivers into. Set once, right after construction.

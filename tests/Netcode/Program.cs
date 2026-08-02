@@ -32,6 +32,7 @@ static class Program
         AiTakesOverWhenAPlayerLeaves();
         TakeoverGrantsNoHandicap();
         AiOwnershipSurvivesTheWire();
+        HostMigrationSeatSwap();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -587,6 +588,67 @@ static class Program
     {
         Type = CommandType.LeaveToAi, X = (int)level, Y = (int)path,
     };
+
+    // Host migration's deterministic core. When the HOST drops, the surviving JOINER
+    // (player 2) becomes the source of truth and the returning host (player 1) rejoins
+    // by adopting the joiner's snapshot — reclaiming its own seat. The socket role-swap
+    // (client peer → server peer) lives in EnetTransport and needs real hardware to
+    // exercise; what's proven here is that the rejoin machinery is seat-agnostic and
+    // the match resumes in perfect lockstep with the roles reversed.
+    static void HostMigrationSeatSwap()
+    {
+        Console.WriteLine("\nhost migration (the joiner becomes host):");
+        var (host, peer, net) = StartMatch();   // host = player 1, peer = player 2
+
+        host.Issue(Move(unit: 1, x: 35, y: 30));
+        peer.Issue(Move(unit: 4, x: 20, y: 20));
+        Advance(host, peer, net, 60);
+
+        // The HOST (player 1) vanishes. The joiner runs out its committed input and
+        // freezes — it is now the survivor and the sole source of truth.
+        net.Drop(host);
+        int droppedAt = peer.Sim.TickNumber;
+        for (int i = 0; i < 50; i++) { peer.SendInput(); net.Flush(); peer.TryStep(); }
+        Check($"the surviving joiner freezes after the host drops (tick {peer.Sim.TickNumber})",
+              peer.Stalled && peer.Sim.TickNumber == droppedAt + Client.InputDelay);
+
+        // Player 2 takes over hosting; player 1 relaunches and rejoins, reclaiming seat 1.
+        var returning = new Client(1, net);     // fresh process, but the SAME seat
+        Army(returning);
+        var snap = peer.CaptureSnapshot();       // the NEW host (player 2) hands out the state
+        bool adopted = returning.AdoptSnapshot(snap);
+        net.Join(returning);
+
+        Check("the returning host adopts the new host's snapshot", adopted);
+        Check($"it lands on the survivor's tick ({returning.Sim.TickNumber})",
+              returning.Sim.TickNumber == peer.Sim.TickNumber);
+        Check("and reclaims seat 1", returning.PlayerId == 1);
+        Check("the two worlds hash identically", returning.Sim.Checksum() == peer.Sim.Checksum());
+
+        // The match carries on with roles reversed (2 hosting, 1 rejoined), in lockstep.
+        int desyncs = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            peer.SendInput();
+            returning.SendInput();
+            net.Flush();
+            peer.TryStep();
+            returning.TryStep();
+            if (peer.Sim.Checksum() != returning.Sim.Checksum()) desyncs++;
+        }
+        Check($"the survivor unfroze and ran on (tick {peer.Sim.TickNumber})",
+              peer.Sim.TickNumber > droppedAt + Client.InputDelay);
+        Check("200 ticks after migration, still in sync every tick", desyncs == 0);
+        Check("no desync reported by either side", peer.Desync == null && returning.Desync == null);
+
+        // The returned host commands its OWN realm (owner 1) again.
+        returning.Issue(Move(unit: 1, x: 8, y: 8));
+        for (int i = 0; i < 60; i++) { peer.SendInput(); returning.SendInput(); net.Flush(); peer.TryStep(); returning.TryStep(); }
+        var u1 = peer.Sim.Units.Find(u => u.Id == 1);
+        Check("the returned host commands its own realm again",
+              u1.Tx == Fixed.FromInt(8) && u1.Ty == Fixed.FromInt(8));
+        Check("still in sync afterwards", peer.Sim.Checksum() == returning.Sim.Checksum());
+    }
 
     // When a player leaves, the AI must take their realm WITHOUT stalling the
     // survivor — the departed seat sends no more turns, so the lockstep would jam
