@@ -42,3 +42,4 @@ node_modules/
 
 # 3D asset pack copied into the game project for runtime use (licensed art, like the source)
 /game/Assets/
+/game/Assets.zip

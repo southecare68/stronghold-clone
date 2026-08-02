@@ -238,6 +238,15 @@ public partial class World3D : Node3D
     Control _victoryBannerPanel;
     Label _victoryBanner;
 
+    // Single-player pause. LOCAL only for now — freezing the sim in a networked
+    // match without the peer's consent would just stall the lockstep, so the
+    // multiplayer consent-pause is a separate feature. While _paused, _Process
+    // skips the tick-advance loop entirely; rendering, camera and HUD keep
+    // running so the overlay draws and the player can still look around.
+    bool _paused;
+    Control _pauseBannerPanel;
+    Label _pauseBanner;
+
     // The tech-tree panel: the research web for your realm, node by node, with a
     // click to spend banked research on an available one. Toggled like the others.
     Control _techPanel;
@@ -1928,9 +1937,14 @@ public partial class World3D : Node3D
         // it is in hand. Each client publishes its turn (InputDelay ahead), then we
         // try to step. A stall — a peer's turn hasn't arrived — holds at the tick
         // boundary rather than banking wall-clock time to fast-forward through later.
+        // Paused (single-player): don't bank wall-clock time and don't advance the
+        // sim. Rendering, camera and HUD below keep running so the overlay draws and
+        // the player can still pan around the frozen field.
+        if (_paused) { _accum = 0; }
+
         _accum += delta;
         int ran = 0;
-        while (_accum >= Step && ran < MaxTicksPerFrame)
+        while (!_paused && _accum >= Step && ran < MaxTicksPerFrame)
         {
             foreach (var c in Clients()) c.SendInput();
             SnapshotPositions();
@@ -3152,6 +3166,18 @@ public partial class World3D : Node3D
             return;
         }
 
+        // P pauses/resumes a single-player game. Freezing the sim mid-match without
+        // the peer's agreement would just stall the lockstep, so this is LOCAL only;
+        // the multiplayer consent-pause is a separate feature. No modifiers, so it
+        // never collides with a chord.
+        if (e is InputEventKey pause && pause.Pressed && pause.Keycode == Key.P &&
+            !pause.CtrlPressed && !pause.MetaPressed && !pause.AltPressed && _mode == "LOCAL")
+        {
+            _paused = !_paused;
+            _pauseBannerPanel.Visible = _paused;
+            return;
+        }
+
         // T shows/hides the territory border overlay. Purely visual and local, so
         // it needs no modifiers, no lockstep, and works in any mode.
         if (e is InputEventKey terr && terr.Pressed && terr.Keycode == Key.T &&
@@ -3917,6 +3943,27 @@ public partial class World3D : Node3D
         _victoryBanner.AddThemeColorOverride("font_color", new Color(0.98f, 0.92f, 0.70f));
         _victoryBanner.AddThemeFontSizeOverride("font_size", 30);
         bMargin.AddChild(_victoryBanner);
+
+        // The pause overlay — centre screen, hidden until the player pauses. Same
+        // panel style as the winner's banner so the two read as one family.
+        var pauseWrap = new PanelContainer
+        {
+            AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+            GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+            Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        pauseWrap.AddThemeStyleboxOverride("panel", Panel(new Color(0.10f, 0.09f, 0.14f, 0.95f)));
+        layer.AddChild(pauseWrap);
+        _pauseBannerPanel = pauseWrap;
+        var pMargin = new MarginContainer();
+        foreach (var s in new[] { "left", "right" }) pMargin.AddThemeConstantOverride("margin_" + s, 40);
+        foreach (var s in new[] { "top", "bottom" }) pMargin.AddThemeConstantOverride("margin_" + s, 24);
+        pauseWrap.AddChild(pMargin);
+        _pauseBanner = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _pauseBanner.AddThemeColorOverride("font_color", new Color(0.98f, 0.92f, 0.70f));
+        _pauseBanner.AddThemeFontSizeOverride("font_size", 30);
+        _pauseBanner.Text = "⏸   PAUSED\nPress P to resume";
+        pMargin.AddChild(_pauseBanner);
     }
 
     void ToggleGoals() => _showGoals = !_showGoals;
