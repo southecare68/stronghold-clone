@@ -17,6 +17,8 @@ static class Program
         TheOutnumberedSideLoses();
         AcquiresTheNextFoeAfterAKill();
         AVeteranHardensWithKills();
+        PrestigeIsEarnedInBattleAndAtCourt();
+        AChampionIsMusteredForPrestige();
         MoveBreaksOffCombat();
         TwoClientsAgreeOnTheWholeFight();
         RngSurvivesARejoinMidFight();
@@ -249,6 +251,63 @@ static class Program
         Check("and rose to Elite", sim.RankOf(hero) == 2);
         Check($"growing tougher ({hero.MaxHp} > {baseMax})", hero.MaxHp > baseMax);
         Check("unharmed by the harmless fodder", hero.Hp > baseMax);   // healed past its old max by the promotions
+    }
+
+    // Prestige is earned three ways: felling foes, the Royal Kitchen's feasts, and a
+    // standing Statue's slow compounding. All deterministic, all riding the stock array.
+    static void PrestigeIsEarnedInBattleAndAtCourt()
+    {
+        Console.WriteLine("\nprestige earned in battle & at court:");
+
+        // Battle glory — a soldier that slays harmless fodder earns its court renown.
+        var war = new Simulation(TileMap.Open(24));
+        int dummy = war.RegisterDesign(new UnitDesign { Hp = 5, Damage = 0, SpeedStat = 5, RangeStat = 3, Cooldown = 10 });
+        var hero = war.SpawnUnit(1, 8, 8, 0);
+        var foes = new List<Unit>();
+        foreach (var off in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+            foes.Add(war.SpawnUnit(2, 8 + off.Item1, 8 + off.Item2, dummy));
+        Order(war, Atk(hero, foes[0]));
+        for (int i = 0; i < 2000 && war.Units.Count > 1; i++) war.Tick(Array.Empty<Command>());
+        Check($"felling foes earned the court prestige ({war.Prestige(1)})", war.Prestige(1) > 0);
+
+        // The Royal Kitchen — feasts turn food into renown (and a little goodwill).
+        var court = new Simulation(TileMap.Open(48));
+        court.PlaceBuilding(BuildingType.RoyalKitchen, 1, 20, 20);
+        court.AddResource(1, ResourceType.Food, 400);
+        int food0 = court.Stockpiles[1][(int)ResourceType.Food];
+        for (int i = 0; i < 300; i++) court.Tick(Array.Empty<Command>());
+        Check($"the Royal Kitchen's feasts earned prestige ({court.Prestige(1)})", court.Prestige(1) > 0);
+        Check("and ate food to lay them on", court.Stockpiles[1][(int)ResourceType.Food] < food0);
+
+        // The Statue — the compounding monument: it just stands there and radiates renown.
+        var monument = new Simulation(TileMap.Open(48));
+        monument.PlaceBuilding(BuildingType.Statue, 1, 20, 20);
+        for (int i = 0; i < 300; i++) monument.Tick(Array.Empty<Command>());
+        Check($"a standing Statue radiates prestige ({monument.Prestige(1)})", monument.Prestige(1) > 0);
+    }
+
+    // A Champion is mustered for Prestige at a Royal Kitchen — never trained, never
+    // point-bought — and it is a mighty unit.
+    static void AChampionIsMusteredForPrestige()
+    {
+        Console.WriteLine("\na champion is mustered for prestige:");
+        var sim = new Simulation(TileMap.Open(48));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);   // registers the Champion (design 9)
+        sim.PlaceBuilding(BuildingType.RoyalKitchen, 1, 20, 20);
+
+        Check("cannot muster with no prestige", !sim.CanMusterChampion(1));
+
+        sim.AddResource(1, ResourceType.Food, 4000);   // feast up the renown to afford one
+        for (int i = 0; i < 6000 && sim.Prestige(1) < Simulation.ChampionCost; i++) sim.Tick(Array.Empty<Command>());
+        Check($"the court amassed enough prestige ({sim.Prestige(1)})", sim.Prestige(1) >= Simulation.ChampionCost);
+        Check("and now it can muster", sim.CanMusterChampion(1));
+
+        int units = sim.Units.Count, p = sim.Prestige(1);
+        Order(sim, new Command { Owner = 1, Seq = 1, Type = CommandType.MusterChampion });
+        Check("a champion appeared", sim.Units.Count == units + 1);
+        Check($"prestige was spent ({p} → {sim.Prestige(1)})", sim.Prestige(1) == p - Simulation.ChampionCost);
+        var champ = sim.Units[sim.Units.Count - 1];
+        Check($"and it's a mighty unit ({champ.MaxHp} hp)", champ.MaxHp >= 400);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

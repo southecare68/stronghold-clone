@@ -22,9 +22,10 @@ namespace Sim
         SetPauseVote = 16,   // X = 1 (this player votes to pause) / 0 (votes to run); unanimity toggles GamePaused
         LeaveToAi = 17,      // a player is leaving: X = AiLevel, Y = VictoryPath — the AI inherits their realm as-is
         SetRoam = 18,        // X = 1 (scouts in UnitIds start free-roaming) / 0 (stop) — the reconnaissance mode
+        MusterChampion = 19, // spend Prestige at a Royal Kitchen to raise a Champion (Prestige.cs)
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -430,7 +431,8 @@ namespace Sim
         const int EverSeatedIdx = 39;                          // 1 once this owner has held a keep — the gate on Exile & Return
         const int ReseatTickIdx = 40;                          // >0 while a keepless realm is in exile: the tick its king refounds (Exile.cs)
         const int PauseVoteIdx = 41;                           // 1 while this player is voting to pause the match (multiplayer consent-pause)
-        const int StockWidth = 42;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer + pause vote
+        const int PrestigeIdx = 42;                            // court renown — earned in battle & at the Royal Kitchen, spent on Champions & Statues (Prestige.cs)
+        const int StockWidth = 43;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer + pause vote + prestige
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
 
@@ -563,8 +565,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2 };  // ...Granary, Church, Wonder, Market, SiegeWorkshop
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1 };  // ...Market, SiegeWorkshop, RoyalKitchen, Statue
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1 };
         static readonly int[][] BuildCost =
         {
             new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
@@ -586,6 +588,8 @@ namespace Sim
             new[] { 80, 130, 0 },     // Wonder — a grand monument; science-exclusive (needs the Academy), the base cost before it escalates (see BuildCostFor)
             new[] { 30, 20, 0 },      // Market — a trading hall; owning one lets you buy & sell goods for gold (see Market.cs)
             new[] { 45, 25, 0 },      // Siege Workshop — engineers the siege machines (built from wood & iron; see the Train command)
+            new[] { 35, 20, 0 },      // Royal Kitchen — the court: feasts & tournaments turn food & gold into Prestige (see Prestige.cs)
+            new[] { 0, 15, 0 },       // Statue — a monument raised WITH Prestige (checked separately) that then pays it back forever
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -596,7 +600,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240, 240, 300 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1320,11 +1324,16 @@ namespace Sim
                     // table price.
                     var cost = BuildCostFor(cmd.Owner, type);
                     if (!CanAfford(cmd.Owner, cost)) break;
+                    // A Statue is a monument raised WITH renown: it costs Prestige on top
+                    // of its stone, which is what turns battle-won glory into a lasting
+                    // engine of more glory (see Prestige.cs). Refused if you can't pay it.
+                    if (type == BuildingType.Statue && Prestige(cmd.Owner) < StatueCost) break;
                     // No building on ground you have never laid eyes on. Checked
                     // over the whole footprint, so a keep cannot be half-planted
                     // in the dark.
                     if (!BuildableFootprint(cmd.Owner, type, cmd.X, cmd.Y)) break;
                     Pay(cmd.Owner, cost);
+                    if (type == BuildingType.Statue) AddPrestige(cmd.Owner, -StatueCost);
                     if (swap != null) { TearDownBuilding(swap); Buildings.Remove(swap); }
                     PlaceBuilding(type, cmd.Owner, cmd.X, cmd.Y);
                     if (type == BuildingType.Wall || type == BuildingType.Gatehouse || type == BuildingType.Turret)
@@ -1454,6 +1463,10 @@ namespace Sim
 
                 case CommandType.LeaveToAi:       // player left: X = AiLevel, Y = VictoryPath — AI inherits their realm
                     TakeOverWithAi(cmd.Owner, (AiLevel)cmd.X, (VictoryPath)Math.Clamp(cmd.Y, 0, 3));
+                    break;
+
+                case CommandType.MusterChampion:  // spend Prestige at a Royal Kitchen to raise a Champion (Prestige.cs)
+                    TryMusterChampion(cmd.Owner);
                     break;
 
                 case CommandType.SetRoam:         // X = 1 roam / 0 stop; only scouts obey
@@ -1954,6 +1967,7 @@ namespace Sim
             ResolveProcessors();    // mills/bakeries turn last tick's harvest into food
             ResolveConstruction();  // wonders rise tick by tick until they count
             ResolveRealm();         // taxes, rations, popularity, faith — and who comes or goes by it
+            ResolvePrestige();      // the court: feasts, tournaments & statues turn food/gold/glory into renown (Prestige.cs)
             ResolveVictory();       // scores each path, announces at 80%, decides a crown (Victory.cs)
             RemoveDead();           // sweep out any peasant that just emigrated
             ResolveUpkeep();        // while the standing army eats away at the larder

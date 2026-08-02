@@ -32,6 +32,7 @@ namespace Sim
             killer.Kills++;
             int newMax = VetScale(DesignOf(killer.DesignId).Hp, RankOf(killer));
             if (newMax > killer.MaxHp) { killer.Hp += newMax - killer.MaxHp; killer.MaxHp = newMax; }
+            AwardGlory(killer);   // a felled foe adds renown to the slayer's court (Prestige.cs)
         }
     }
 }

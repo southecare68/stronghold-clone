@@ -155,7 +155,7 @@ public partial class World3D : Node3D
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
-    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger;
+    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger, _mChampion;
     PackedScene _mRam, _mCatapult, _mTrebuchet;
 
     // Camera orbit around a target on the ground.
@@ -217,6 +217,7 @@ public partial class World3D : Node3D
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Granary, BuildingType.Market,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
+        BuildingType.RoyalKitchen, BuildingType.Statue,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -225,7 +226,7 @@ public partial class World3D : Node3D
     Label _selInfo;
     Label _netInfo;
     Label _clockInfo;
-    const int StatCount = 12;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith, research
+    const int StatCount = 13;   // wood, stone, food, grain, flour, iron, pop, army, gold, approval, faith, research, prestige
 
     // A brief, prominent confirmation flashed when you turn a realm dial (tax or
     // rations). The setting's live reading sits in the top bar, but it is small and
@@ -656,6 +657,7 @@ public partial class World3D : Node3D
         _mArcher  = Load("Characters/SM_Chr_King_01");
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
+        _mChampion = Load("Characters/SM_Chr_Rider_01");   // a mounted knight of renown — mustered for Prestige
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -678,6 +680,8 @@ public partial class World3D : Node3D
         B(BuildingType.SiegeWorkshop, "Buildings/Preset_Houses/SM_Bld_Preset_Blacksmith_01_Optimized", 0.5f);   // an engineer's yard — builds siege machines
         B(BuildingType.Gatehouse,     "Castle/SM_Bld_Castle_Wall_Gate_01", 0.5f);
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
+        B(BuildingType.RoyalKitchen,  "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.6f);  // the court's feasting hall — feasts & tourneys → Prestige
+        B(BuildingType.Statue,        "Bonus/SM_Prop_Statue_King_01", 0.6f);   // a monument raised with Prestige, radiating more of it
 
         _wallBody = Load("Castle/SM_Bld_Castle_Wall_01");
         _wallBat  = Load("Castle/SM_Bld_Castle_Battlements_01");
@@ -1394,6 +1398,7 @@ public partial class World3D : Node3D
         ("Approval", new Color(0.52f, 0.74f, 0.95f)),
         ("Faith", new Color(0.78f, 0.62f, 0.92f)),
         ("Research", new Color(0.55f, 0.82f, 0.86f)),
+        ("Prestige", new Color(0.95f, 0.78f, 0.42f)),   // court renown — spent on Champions & Statues
     };
 
     // Readable names for the realm dials, indexed by level. Tax runs from a bribe
@@ -1612,6 +1617,10 @@ public partial class World3D : Node3D
         // it in the tech panel (C) to climb a branch toward its capstone.
         _stat[11].Text = $"Research {_sim.ResearchPoints(me)} (+{_sim.ResearchPace(me)})";
 
+        // Prestige: the court's renown, earned in battle and at the Royal Kitchen.
+        // Spend it on Statues (build menu) and Champions (M at a Royal Kitchen).
+        _stat[12].Text = $"Prestige {_sim.Prestige(me)}✦";
+
         // The Wonder is science-exclusive: its palette button stays locked until the
         // Academy capstone stands, and its price escalates with each one raised.
         if (_buildButtons.TryGetValue(BuildingType.Wonder, out var wb))
@@ -1749,7 +1758,8 @@ public partial class World3D : Node3D
         BuildingType.Steps => "Steps", BuildingType.Turret => "Turret",
         BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
         BuildingType.Church => "Church", BuildingType.Wonder => "Wonder",
-        BuildingType.Market => "Market", BuildingType.SiegeWorkshop => "Siege Wk", _ => t.ToString(),
+        BuildingType.Market => "Market", BuildingType.SiegeWorkshop => "Siege Wk",
+        BuildingType.RoyalKitchen => "Royal Kitchen", BuildingType.Statue => "Statue", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
@@ -1760,6 +1770,7 @@ public partial class World3D : Node3D
         string[] tag = { "w", "s", "f", "g" };
         var parts = new List<string>();
         for (int i = 0; i < cost.Length; i++) if (cost[i] > 0) parts.Add($"{cost[i]}{tag[i]}");
+        if (t == BuildingType.Statue) parts.Add($"{Simulation.StatueCost}✦");   // ✦ = Prestige, spent on top of the stone
         return parts.Count == 0 ? "free" : string.Join(" ", parts);
     }
 
@@ -3216,7 +3227,7 @@ public partial class World3D : Node3D
     {
         if (u.IsPeasant) return _mPeasant;
         return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, 5 => _mAvenger,
-                                   6 => _mRam, 7 => _mCatapult, 8 => _mTrebuchet, _ => _mSoldier };
+                                   6 => _mRam, 7 => _mCatapult, 8 => _mTrebuchet, 9 => _mChampion, _ => _mSoldier };
     }
 
     // ---- camera ------------------------------------------------------------
@@ -3294,6 +3305,23 @@ public partial class World3D : Node3D
             !roam.CtrlPressed && !roam.MetaPressed && !roam.AltPressed)
         {
             ToggleRoam();
+            return;
+        }
+
+        // M musters a Champion at a Royal Kitchen, spending Prestige — a power unit,
+        // not trained from a barracks. A sim order (MusterChampion), works in any mode.
+        if (e is InputEventKey mus && mus.Pressed && mus.Keycode == Key.M &&
+            !mus.CtrlPressed && !mus.MetaPressed && !mus.AltPressed)
+        {
+            if (_sim.CanMusterChampion(MyPlayer))
+            {
+                _me.Issue(new Command { Type = CommandType.MusterChampion });
+                ShowRealmToast("⚔   A Champion answers your court");
+            }
+            else if (_sim.Prestige(MyPlayer) < Simulation.ChampionCost)
+                ShowRealmToast($"Need {Simulation.ChampionCost}✦ prestige to muster a Champion");
+            else
+                ShowRealmToast("Build a Royal Kitchen to muster a Champion");
             return;
         }
 

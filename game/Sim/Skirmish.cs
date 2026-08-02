@@ -44,7 +44,7 @@ namespace Sim
         // and feeble in a fight, sent to find the enemy, not to trade blows. Its long
         // sight also feeds the cautious march: what a scout reveals, your armies will
         // route around.
-        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet" };
+        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet", "Champion" };
 
         public static IEnumerable<UnitDesign> Designs()
         {
@@ -68,6 +68,13 @@ namespace Sim
             yield return new UnitDesign { Hp = 220, Damage = 4, SpeedStat = 5, RangeStat = 3,  Cooldown = 12, Sight = 6, SiegeDamage = 45, CostWood = 30, CostIron = 10 };  // Ram
             yield return new UnitDesign { Hp = 55,  Damage = 5, SpeedStat = 5, RangeStat = 12, Cooldown = 22, Sight = 8, SiegeDamage = 55, CostWood = 25, CostIron = 25 };  // Catapult
             yield return new UnitDesign { Hp = 45,  Damage = 3, SpeedStat = 3, RangeStat = 22, Cooldown = 28, Sight = 8, SiegeDamage = 85, CostWood = 30, CostIron = 45 };  // Trebuchet
+
+            // The Champion (design 9): a knight of renown, MUSTERED for Prestige at a
+            // Royal Kitchen (never trained from a barracks, never point-bought — like the
+            // Avenger, Trainable = false exempts it from the budget). Tough and hard-
+            // hitting, well above a soldier though short of the exile Avenger — the reward
+            // for a court that wins its battles and feasts on the glory (Prestige.cs).
+            yield return new UnitDesign { Hp = 420, Damage = 26, SpeedStat = 11, RangeStat = 3, Cooldown = 9, Sight = 9, Trainable = false };  // Champion
         }
 
         // Where the resource nodes go. Two safe patches behind each base, and a
