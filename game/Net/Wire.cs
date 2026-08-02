@@ -248,6 +248,10 @@ namespace Netcode
             PutInt(buf, snap.PausedTicks);
             PutInt(buf, snap.GamePaused ? 1 : 0);
             PutInt(buf, snap.PauseRoster);
+            PutInt(buf, snap.AiLevels.Count);
+            foreach (var kv in snap.AiLevels) { PutInt(buf, kv.Key); PutInt(buf, kv.Value); }
+            PutInt(buf, snap.AiPaths.Count);
+            foreach (var kv in snap.AiPaths) { PutInt(buf, kv.Key); PutInt(buf, kv.Value); }
             PutInt(buf, snap.Explored.Count);
             foreach (var kv in snap.Explored)
             {
@@ -446,6 +450,16 @@ namespace Netcode
                 snap.PausedTicks = GetInt(data, ref p);
                 snap.GamePaused = GetInt(data, ref p) != 0;
                 snap.PauseRoster = GetInt(data, ref p);
+                int aiLevelCount = GetInt(data, ref p);
+                if (aiLevelCount < 0 || aiLevelCount > MaxUnits) return null;
+                var aiLevels = new Dictionary<int, int>();
+                for (int i = 0; i < aiLevelCount; i++) { int o = GetInt(data, ref p); aiLevels[o] = GetInt(data, ref p); }
+                snap.AiLevels = aiLevels;
+                int aiPathCount = GetInt(data, ref p);
+                if (aiPathCount < 0 || aiPathCount > MaxUnits) return null;
+                var aiPaths = new Dictionary<int, int>();
+                for (int i = 0; i < aiPathCount; i++) { int o = GetInt(data, ref p); aiPaths[o] = GetInt(data, ref p); }
+                snap.AiPaths = aiPaths;
                 int fogCount = GetInt(data, ref p);
                 if (fogCount < 0 || fogCount > MaxUnits) return null;
                 var explored = new Dictionary<int, uint[]>();

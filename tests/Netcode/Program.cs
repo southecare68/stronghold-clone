@@ -29,6 +29,9 @@ static class Program
         SkirmishSnapshotRoundTrip();
         ConsentPauseFreezesInLockstep();
         PauseStateSurvivesTheWire();
+        AiTakesOverWhenAPlayerLeaves();
+        TakeoverGrantsNoHandicap();
+        AiOwnershipSurvivesTheWire();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -578,6 +581,90 @@ static class Program
         Check($"PauseRoster survives the wire (got {back.PauseRoster})", back.PauseRoster == 2);
         Check("a rejoiner reproduces the paused world exactly",
               back.StateChecksum() == paused.Snapshot().Checksum);
+    }
+
+    static Command Leave(AiLevel level, VictoryPath path) => new Command
+    {
+        Type = CommandType.LeaveToAi, X = (int)level, Y = (int)path,
+    };
+
+    // When a player leaves, the AI must take their realm WITHOUT stalling the
+    // survivor — the departed seat sends no more turns, so the lockstep would jam
+    // forever unless those (empty) turns are synthesized while the in-sim AI plays on.
+    static void AiTakesOverWhenAPlayerLeaves()
+    {
+        Console.WriteLine("\nAI takeover on leave:");
+        var (a, b, net) = StartMatch();
+
+        // Let both realms get going.
+        a.Issue(Move(unit: 1, x: 30, y: 30));
+        b.Issue(Move(unit: 4, x: 20, y: 20));
+        Advance(a, b, net, 40);
+
+        int unitsAtLeave = a.Sim.Units.Count;
+
+        // Player 2 leaves, handing their realm to a Normal AI. Both are still live for
+        // a few ticks, so the command executes in lockstep and both sims must agree.
+        b.Issue(Leave(AiLevel.Normal, VictoryPath.Domain));
+        Advance(a, b, net, 8);
+        Check("both sims flag the departed player as AI", a.Sim.IsAi(2) && b.Sim.IsAi(2));
+        Check("takeover is deterministic (both worlds still agree at the handoff)",
+              a.Sim.StateChecksum() == b.Sim.StateChecksum());
+        Check($"takeover grants no bonus army — the AI inherits the realm as-is ({a.Sim.Units.Count} vs {unitsAtLeave})",
+              a.Sim.Units.Count == unitsAtLeave);
+
+        // Now player 2 is really gone: it sends nothing further. The survivor must
+        // keep ticking, driving the vacated realm as an AI, never stalling.
+        net.Drop(b);
+        int tickAtLeave = a.Sim.TickNumber;
+        bool everStalled = false;
+        for (int i = 0; i < 200; i++)
+        {
+            a.SendInput();
+            net.Flush();
+            a.TryStep();
+            if (a.Stalled) everStalled = true;
+        }
+        Check($"the survivor plays on after the peer is gone (tick {a.Sim.TickNumber})",
+              a.Sim.TickNumber >= tickAtLeave + 190);
+        Check("it never stalls waiting for the player who left", !everStalled);
+        Check("no desync on the survivor", a.Desync == null);
+        Check("the AI-run realm is still alive", a.Sim.Units.Count > 0);
+    }
+
+    // The mid-match takeover must not hand the AI the fresh-bot setup handicap —
+    // it inherits an established realm, not a new one.
+    static void TakeoverGrantsNoHandicap()
+    {
+        Console.WriteLine("\ntakeover grants no handicap:");
+        var fresh = new Simulation(TileMap.Open(48));
+        fresh.SpawnUnit(2, 20, 20);
+        fresh.SpawnUnit(2, 22, 20);
+        int before = fresh.Units.Count;
+        fresh.TakeOverWithAi(2, AiLevel.Hard, VictoryPath.Domain);
+        Check($"TakeOverWithAi adds no units ({fresh.Units.Count} == {before})", fresh.Units.Count == before);
+        Check("but it does mark the owner as AI", fresh.IsAi(2));
+
+        var bonus = new Simulation(TileMap.Open(48));
+        bonus.SpawnUnit(2, 20, 20);
+        bonus.EnableAi(2, AiLevel.Hard);
+        Check("whereas EnableAi (a fresh bot) still grants its handicap peasants",
+              bonus.Units.Count > 1);
+    }
+
+    // A rejoiner must learn who the computer is now running, or a match where a
+    // player left would have the bot on one machine and a frozen realm on the other.
+    static void AiOwnershipSurvivesTheWire()
+    {
+        Console.WriteLine("\nAI ownership on the wire:");
+        var host = new Simulation(TileMap.Open(48));
+        host.SpawnUnit(2, 20, 20);
+        host.TakeOverWithAi(2, AiLevel.Hard, VictoryPath.Science);
+        var back = new Simulation(TileMap.Open(48));
+        back.Restore(Wire.DeserializeSnapshot(Wire.Serialize(host.Snapshot())));
+        Check($"the AI seat survives the wire (IsAi(2) = {back.IsAi(2)})", back.IsAi(2));
+        Check("a rejoiner reproduces the world exactly, bot and all",
+              back.StateChecksum() == host.Snapshot().Checksum);
     }
 
     static void Check(string what, bool ok)

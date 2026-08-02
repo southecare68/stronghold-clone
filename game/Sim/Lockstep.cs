@@ -85,6 +85,8 @@ namespace Sim
         public int PausedTicks = 0;                        // ticks spent in the consent-pause (Simulation.PausedTicks)
         public bool GamePaused = false;                    // frozen by unanimous player consent
         public int PauseRoster = 0;                        // players whose unanimous vote toggles the pause
+        public Dictionary<int, int> AiLevels = new();      // owner -> AiLevel; who the computer controls (incl. players who left)
+        public Dictionary<int, int> AiPaths = new();       // owner -> VictoryPath each bot pursues
         public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
 
         // Turns the sender has ALREADY published for ticks at or after Tick.
@@ -153,6 +155,7 @@ namespace Sim
 
         int _nextSeq = 1;
         int _sentThrough = -1;   // highest tick we have published a turn for
+        int _roster = 0;         // confirmed player count, latched once the match is live — survives a peer's drop, when PlayerCount goes haywire
 
         // True when the last TryStep could not advance because a peer's turn for
         // the current tick had not arrived. This is normal on a lossy link; it is
@@ -233,8 +236,15 @@ namespace Sim
 
             if (!HasAllInput(Sim.TickNumber))
             {
-                Stalled = true;
-                return false;
+                // A departed player's turns will never arrive. If the sim has handed
+                // their realm to the AI, synthesize their empty turn and carry on
+                // rather than stalling; otherwise we really are waiting on a peer.
+                FillAiTurns(Sim.TickNumber);
+                if (!HasAllInput(Sim.TickNumber))
+                {
+                    Stalled = true;
+                    return false;
+                }
             }
             Stalled = false;
 
@@ -260,7 +270,39 @@ namespace Sim
 
         // Do we hold every player's input for this tick?
         public bool HasAllInput(int tick) =>
-            _turns.TryGetValue(tick, out var list) && list.Count >= _net.PlayerCount;
+            _turns.TryGetValue(tick, out var list) && list.Count >= EffectivePlayerCount();
+
+        // How many turns a tick needs before it may run. Normally the transport's
+        // live count — but that goes to int.MaxValue the instant a peer drops (so a
+        // client can't run alone at startup), which would strand the SURVIVOR of a
+        // departure forever. Once we've seen a real roster we latch it and hold to it
+        // through a disconnect; a seat handed to the AI still owes a turn each tick,
+        // it is just synthesized locally (FillAiTurns) rather than arriving over the wire.
+        int EffectivePlayerCount()
+        {
+            int live = _net.PlayerCount;
+            if (live != int.MaxValue) { if (live > _roster) _roster = live; return live; }
+            return _roster > 0 ? _roster : int.MaxValue;   // no roster yet → keep the startup guard
+        }
+
+        // A player who left handed their realm to the AI (Sim marks them, via a
+        // LeaveToAi command or the host converting a dropped peer). The AI drives their
+        // units inside Tick and issues NO commands, so their turn is always empty — we
+        // manufacture it here rather than wait for a packet that will never come.
+        void FillAiTurns(int tick)
+        {
+            foreach (int owner in Sim.AiOwners)
+            {
+                if (owner == PlayerId) continue;
+                if (_turns.TryGetValue(tick, out var list))
+                {
+                    bool has = false;
+                    foreach (var t in list) if (t.Owner == owner) { has = true; break; }
+                    if (has) continue;
+                }
+                Receive(new TurnInput { Owner = owner, Tick = tick, Commands = Array.Empty<Command>(), ChecksumTick = -1 });
+            }
+        }
 
         // ---- Rejoining a match in progress ----------------------------------
 

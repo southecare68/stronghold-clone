@@ -247,6 +247,18 @@ public partial class World3D : Node3D
     Control _pauseBannerPanel;
     Label _pauseBanner;
 
+    // Leaving a networked match. Rather than abandon a lifeless realm, a departing
+    // player hands it to the AI (a deterministic LeaveToAi command). The survivor is
+    // told and plays on vs the computer. A separate fallback covers an opponent who
+    // simply drops without leaving cleanly.
+    Button _leaveButton;
+    Control _leavePanel;               // the "hand off to which AI?" confirm
+    bool _leaving;                     // true once we've committed to go
+    float _leaveCountdown;             // seconds to keep ticking so the LeaveToAi turn reaches the peer, then quit
+    Control _dropPanel;                // fallback: shown when the opponent stops responding
+    float _stallSeconds;               // how long we've been stalled waiting for a peer
+    readonly HashSet<int> _aiAnnounced = new();   // opponents we've already toasted as AI-controlled
+
     // The tech-tree panel: the research web for your realm, node by node, with a
     // click to spend banked research on an available one. Toggled like the others.
     Control _techPanel;
@@ -1941,11 +1953,20 @@ public partial class World3D : Node3D
     // awaiting the other player, or a frozen match awaiting agreement to resume.
     void UpdatePauseOverlay()
     {
-        if (_mode == "LOCAL") return;   // solo: driven directly by the P key
+        if (_mode == "LOCAL" || _leaving) return;   // solo: driven directly by the P key; while leaving, the banner shows the handoff
 
-        int n = _sim.PauseRoster;
-        int yes = _sim.PauseYesCount;               // players voting to pause right now
+        int n = _sim.PauseHumanCount;               // AI-taken-over seats don't get a vote
+        int yes = _sim.PauseYesCount;               // human players voting to pause right now
         bool mine = _sim.PauseVoteOf(MyPlayer);
+
+        // If everyone else has left (we're the only human vs the AI now), the pause is
+        // effectively solo — no one to negotiate with, so keep it simple.
+        if (n <= 1)
+        {
+            _pauseBanner.Text = "⏸   PAUSED\nPress P to resume";
+            _pauseBannerPanel.Visible = _sim.GamePaused;
+            return;
+        }
 
         if (_sim.GamePaused)
         {
@@ -2017,6 +2038,9 @@ public partial class World3D : Node3D
         UpdateTechPanel();
         UpdateSpyPanel();
         UpdatePauseOverlay();
+        UpdateTakeoverNotices();
+        UpdateDropPrompt(delta);
+        UpdateLeave(delta);
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -4020,6 +4044,162 @@ public partial class World3D : Node3D
         _pauseBanner.AddThemeFontSizeOverride("font_size", 30);
         _pauseBanner.Text = "⏸   PAUSED\nPress P to resume";
         pMargin.AddChild(_pauseBanner);
+
+        // ── Leaving a networked match ────────────────────────────────────────────
+        // Only meaningful with a real opponent, so the button and its panels never
+        // appear in a solo game. The button sits top-right, out of the way.
+        if (_mode != "LOCAL")
+        {
+            _leaveButton = new Button
+            {
+                Text = "Leave", FocusMode = Control.FocusModeEnum.None,
+                AnchorLeft = 1, AnchorRight = 1, AnchorTop = 0, AnchorBottom = 0,
+                OffsetLeft = -104, OffsetRight = -14, OffsetTop = 14, OffsetBottom = 42,
+            };
+            _leaveButton.AddThemeFontSizeOverride("font_size", 14);
+            _leaveButton.Pressed += () => { if (!_leaving) _leavePanel.Visible = !_leavePanel.Visible; };
+            layer.AddChild(_leaveButton);
+
+            // The confirm: hand the realm to which AI, or think better of it.
+            var leaveWrap = new PanelContainer
+            {
+                AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+                GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+                Visible = false,
+            };
+            leaveWrap.AddThemeStyleboxOverride("panel", Panel(new Color(0.10f, 0.09f, 0.14f, 0.97f)));
+            layer.AddChild(leaveWrap);
+            _leavePanel = leaveWrap;
+            var lMargin = new MarginContainer();
+            foreach (var s in new[] { "left", "right" }) lMargin.AddThemeConstantOverride("margin_" + s, 30);
+            foreach (var s in new[] { "top", "bottom" }) lMargin.AddThemeConstantOverride("margin_" + s, 22);
+            leaveWrap.AddChild(lMargin);
+            var lBox = new VBoxContainer();
+            lBox.AddThemeConstantOverride("separation", 10);
+            lMargin.AddChild(lBox);
+
+            var lTitle = new Label { Text = "Leave the match?", HorizontalAlignment = HorizontalAlignment.Center };
+            lTitle.AddThemeColorOverride("font_color", new Color(0.98f, 0.92f, 0.70f));
+            lTitle.AddThemeFontSizeOverride("font_size", 24);
+            lBox.AddChild(lTitle);
+            var lSub = new Label { Text = "Your realm keeps fighting under an AI you choose.", HorizontalAlignment = HorizontalAlignment.Center };
+            lSub.AddThemeColorOverride("font_color", new Color(0.80f, 0.78f, 0.70f));
+            lSub.AddThemeFontSizeOverride("font_size", 14);
+            lBox.AddChild(lSub);
+
+            var diffRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+            diffRow.AddThemeConstantOverride("separation", 10);
+            lBox.AddChild(diffRow);
+            foreach (var (label, level) in new[] { ("Easy AI", Sim.AiLevel.Easy), ("Normal AI", Sim.AiLevel.Normal), ("Hard AI", Sim.AiLevel.Hard) })
+            {
+                var lvl = level;
+                var btn = new Button { Text = label, FocusMode = Control.FocusModeEnum.None };
+                btn.AddThemeFontSizeOverride("font_size", 15);
+                btn.CustomMinimumSize = new Vector2(112, 40);
+                btn.Pressed += () => ConfirmLeave(lvl);
+                diffRow.AddChild(btn);
+            }
+
+            var cancel = new Button { Text = "Cancel — stay in the match", FocusMode = Control.FocusModeEnum.None };
+            cancel.AddThemeFontSizeOverride("font_size", 13);
+            cancel.Pressed += () => _leavePanel.Visible = false;
+            lBox.AddChild(cancel);
+
+            // Fallback: an opponent who dropped without leaving cleanly. Offered only
+            // after we've been stalled a while, so a brief hiccup doesn't trigger it.
+            var dropWrap = new PanelContainer
+            {
+                AnchorLeft = 0.5f, AnchorRight = 0.5f, AnchorTop = 0.5f, AnchorBottom = 0.5f,
+                GrowHorizontal = Control.GrowDirection.Both, GrowVertical = Control.GrowDirection.Both,
+                Visible = false,
+            };
+            dropWrap.AddThemeStyleboxOverride("panel", Panel(new Color(0.14f, 0.08f, 0.08f, 0.97f)));
+            layer.AddChild(dropWrap);
+            _dropPanel = dropWrap;
+            var dMargin = new MarginContainer();
+            foreach (var s in new[] { "left", "right" }) dMargin.AddThemeConstantOverride("margin_" + s, 30);
+            foreach (var s in new[] { "top", "bottom" }) dMargin.AddThemeConstantOverride("margin_" + s, 22);
+            dropWrap.AddChild(dMargin);
+            var dBox = new VBoxContainer();
+            dBox.AddThemeConstantOverride("separation", 10);
+            dMargin.AddChild(dBox);
+            var dTitle = new Label { Text = "Opponent not responding", HorizontalAlignment = HorizontalAlignment.Center };
+            dTitle.AddThemeColorOverride("font_color", new Color(0.98f, 0.85f, 0.72f));
+            dTitle.AddThemeFontSizeOverride("font_size", 22);
+            dBox.AddChild(dTitle);
+            var dSub = new Label { Text = "They may have lost connection. Let the AI take their realm so the match can go on?", HorizontalAlignment = HorizontalAlignment.Center };
+            dSub.AddThemeColorOverride("font_color", new Color(0.82f, 0.78f, 0.72f));
+            dSub.AddThemeFontSizeOverride("font_size", 14);
+            dSub.AutowrapMode = TextServer.AutowrapMode.Word;
+            dSub.CustomMinimumSize = new Vector2(360, 0);
+            dBox.AddChild(dSub);
+            var dBtn = new Button { Text = "Let a Normal AI take over", FocusMode = Control.FocusModeEnum.None };
+            dBtn.AddThemeFontSizeOverride("font_size", 15);
+            dBtn.CustomMinimumSize = new Vector2(0, 40);
+            dBtn.Pressed += TakeOverDroppedOpponent;
+            dBox.AddChild(dBtn);
+        }
+    }
+
+    // Commit to leaving: send the takeover down the lockstep so the survivor's sim
+    // (and ours, harmlessly) flags our realm as AI, then keep ticking a moment so the
+    // turn actually reaches them before we close the socket and quit.
+    void ConfirmLeave(Sim.AiLevel level)
+    {
+        if (_leaving) return;
+        _leaving = true;
+        _leaveCountdown = 1.8f;
+        _leavePanel.Visible = false;
+        _me.Issue(new Command { Type = CommandType.LeaveToAi, X = (int)level, Y = MyPlayer % 4 });
+        _pauseBanner.Text = "Handing your realm to the AI…\nyou may close the window";
+        _pauseBannerPanel.Visible = true;
+    }
+
+    // Once committed to leaving, tick on for a beat so the LeaveToAi turn reaches the
+    // peer over the reliable channel, then close the link and quit to desktop.
+    void UpdateLeave(double delta)
+    {
+        if (!_leaving) return;
+        _leaveCountdown -= (float)delta;
+        if (_leaveCountdown <= 0f)
+        {
+            _enet?.Close();
+            GetTree().Quit();
+        }
+    }
+
+    // Survivor's side: the moment the sim reports an opponent is now AI-run — whether
+    // from their graceful LeaveToAi or our own fallback — announce it once.
+    void UpdateTakeoverNotices()
+    {
+        if (_mode == "LOCAL") return;
+        foreach (int owner in _sim.AiOwners)
+        {
+            if (owner == MyPlayer || _aiAnnounced.Contains(owner)) continue;
+            _aiAnnounced.Add(owner);
+            ShowRealmToast($"⚔   Player {owner} left — the AI now holds their realm");
+            _dropPanel.Visible = false;
+        }
+    }
+
+    // Fallback for an ungraceful drop: if we've been stalled waiting on a peer for a
+    // few seconds and they aren't already AI, offer to hand their realm to the computer
+    // so the match can continue. A brief network hiccup clears itself before the prompt.
+    void UpdateDropPrompt(double delta)
+    {
+        if (_mode == "LOCAL" || _leaving) { if (_dropPanel != null) _dropPanel.Visible = false; return; }
+        if (_me.Stalled) _stallSeconds += (float)delta;
+        else _stallSeconds = 0f;
+        bool opponentIsAi = _sim.IsAi(MyPlayer == 1 ? 2 : 1);
+        _dropPanel.Visible = _stallSeconds > 4f && !opponentIsAi;
+    }
+
+    void TakeOverDroppedOpponent()
+    {
+        int opp = MyPlayer == 1 ? 2 : 1;
+        if (!_sim.IsAi(opp)) _sim.TakeOverWithAi(opp, Sim.AiLevel.Normal, (Sim.VictoryPath)(opp % 4));
+        _dropPanel.Visible = false;
+        _stallSeconds = 0f;   // the toast fires from UpdateTakeoverNotices next frame
     }
 
     void ToggleGoals() => _showGoals = !_showGoals;

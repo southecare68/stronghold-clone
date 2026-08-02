@@ -20,6 +20,7 @@ namespace Sim
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
         SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14, HireMercenary = 15,
         SetPauseVote = 16,   // X = 1 (this player votes to pause) / 0 (votes to run); unanimity toggles GamePaused
+        LeaveToAi = 17,      // a player is leaving: X = AiLevel, Y = VictoryPath — the AI inherits their realm as-is
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18 }
@@ -438,14 +439,21 @@ namespace Sim
         public int GameClock => TickNumber - PausedTicks;   // game-TIME: what the calendar, cooldowns and match clock read
 
         public bool PauseVoteOf(int owner) => _stock.TryGetValue(owner, out var s) && s[PauseVoteIdx] != 0;
-        public int PauseYesCount            // players currently voting to pause, over the roster
+        public int PauseYesCount => PauseTally().yes;    // human players currently voting to pause
+        public int PauseHumanCount => PauseTally().humans; // human players still in the match (AI-taken-over seats don't vote)
+
+        // Only HUMAN players in the roster get a say in the pause — a seat handed to
+        // the AI (a player who left) neither blocks a pause nor holds one open.
+        (int yes, int humans) PauseTally()
         {
-            get
+            int yes = 0, humans = 0;
+            for (int o = 1; o <= PauseRoster; o++)
             {
-                int y = 0;
-                for (int o = 1; o <= PauseRoster; o++) if (PauseVoteOf(o)) y++;
-                return y;
+                if (IsAi(o)) continue;
+                humans++;
+                if (PauseVoteOf(o)) yes++;
             }
+            return (yes, humans);
         }
 
         // Religion. Faith is the share of the populace won over — it opens at a
@@ -597,6 +605,20 @@ namespace Sim
             if (t.BonusFood > 0) AddResource(owner, ResourceType.Food, t.BonusFood);
         }
         public bool IsAi(int owner) => _aiOwners.ContainsKey(owner);
+        public IEnumerable<int> AiOwners => _aiOwners.Keys;   // for the lockstep layer, to synthesize a departed AI's empty turns
+
+        // Hand a player's EXISTING realm to the computer mid-match — they have left,
+        // and rather than leaving a lifeless enemy, the AI plays on in their place.
+        // Unlike EnableAi (a fresh bot handed a setup handicap), this grants NO bonus:
+        // the AI inherits exactly what the player built and holds. Their pause vote is
+        // cleared so a departure can never deadlock a pending pause. Deterministic —
+        // it rides the command stream, so every client flags the owner on the same tick.
+        public void TakeOverWithAi(int owner, AiLevel level, VictoryPath path)
+        {
+            _aiOwners[owner] = level;
+            _aiPath[owner] = path;
+            if (_stock.TryGetValue(owner, out var s)) s[PauseVoteIdx] = 0;
+        }
 
         // Scratch buffers for pathfinding, reused across calls. Working memory,
         // not game state: nothing here survives a call, so none of it is hashed.
@@ -829,6 +851,10 @@ namespace Sim
             PausedTicks = s.PausedTicks;
             GamePaused = s.GamePaused;
             PauseRoster = s.PauseRoster;
+            _aiOwners.Clear();
+            if (s.AiLevels != null) foreach (var kv in s.AiLevels) _aiOwners[kv.Key] = (AiLevel)kv.Value;
+            _aiPath.Clear();
+            if (s.AiPaths != null) foreach (var kv in s.AiPaths) _aiPath[kv.Key] = (VictoryPath)kv.Value;
         }
 
         // A complete, standalone snapshot of the simulation's state right now — no
@@ -849,6 +875,10 @@ namespace Sim
             foreach (var kv in _stock) stock[kv.Key] = (int[])kv.Value.Clone();
             var drops = new Dictionary<int, Tile>();
             foreach (var kv in _dropOff) drops[kv.Key] = kv.Value;
+            var aiLevels = new Dictionary<int, int>();
+            foreach (var kv in _aiOwners) aiLevels[kv.Key] = (int)kv.Value;
+            var aiPaths = new Dictionary<int, int>();
+            foreach (var kv in _aiPath) aiPaths[kv.Key] = (int)kv.Value;
 
             return new MatchSnapshot
             {
@@ -873,6 +903,8 @@ namespace Sim
                 PausedTicks = PausedTicks,
                 GamePaused = GamePaused,
                 PauseRoster = PauseRoster,
+                AiLevels = aiLevels,
+                AiPaths = aiPaths,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -1392,6 +1424,10 @@ namespace Sim
                 case CommandType.SetPauseVote:    // X = 1 vote-pause / 0 vote-run (multiplayer consent-pause)
                     StockOf(cmd.Owner)[PauseVoteIdx] = cmd.X != 0 ? 1 : 0;
                     break;
+
+                case CommandType.LeaveToAi:       // player left: X = AiLevel, Y = VictoryPath — AI inherits their realm
+                    TakeOverWithAi(cmd.Owner, (AiLevel)cmd.X, (VictoryPath)Math.Clamp(cmd.Y, 0, 3));
+                    break;
             }
         }
 
@@ -1800,8 +1836,9 @@ namespace Sim
         void UpdatePauseLatch()
         {
             if (PauseRoster <= 0) return;
-            int yes = PauseYesCount;
-            if (!GamePaused && yes == PauseRoster) GamePaused = true;
+            var (yes, humans) = PauseTally();
+            if (humans == 0) { GamePaused = false; return; }   // everyone left — nothing to pause for
+            if (!GamePaused && yes == humans) GamePaused = true;
             else if (GamePaused && yes == 0) GamePaused = false;
         }
 
@@ -2901,6 +2938,13 @@ namespace Sim
             // as part of the stock array above. PauseRoster is a fixed match setting
             // set identically on every client, hashed so a mismatch is caught early.
             Mix(GamePaused ? 1 : 0); Mix(PausedTicks); Mix(PauseRoster);
+
+            // Who the computer controls. A match setting at setup, but now also
+            // mutable mid-match (a player who leaves hands their realm to the AI), so
+            // it must be hashed — two machines that disagree on who is a bot would
+            // disagree on every move that bot makes. SortedDictionary → owner order.
+            foreach (var kv in _aiOwners) { Mix(kv.Key); Mix((int)kv.Value); }
+            foreach (var kv in _aiPath)   { Mix(kv.Key); Mix((int)kv.Value); }
             return h;
         }
 
