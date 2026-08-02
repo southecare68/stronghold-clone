@@ -19,6 +19,7 @@ namespace Sim
     {
         Move = 0, Attack = 1, Gather = 2, Build = 3, Train = 4, ToggleGate = 5, AttackBuilding = 6, Garrison = 7, Demolish = 8,
         SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14, HireMercenary = 15,
+        SetPauseVote = 16,   // X = 1 (this player votes to pause) / 0 (votes to run); unanimity toggles GamePaused
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18 }
@@ -402,7 +403,8 @@ namespace Sim
         const int MarketPolicyBase = 34;                       // 34..38 — per-good auto-trade policy, (threshold<<2 | mode) packed per slot
         const int EverSeatedIdx = 39;                          // 1 once this owner has held a keep — the gate on Exile & Return
         const int ReseatTickIdx = 40;                          // >0 while a keepless realm is in exile: the tick its king refounds (Exile.cs)
-        const int StockWidth = 41;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer
+        const int PauseVoteIdx = 41;                           // 1 while this player is voting to pause the match (multiplayer consent-pause)
+        const int StockWidth = 42;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer + pause vote
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
 
@@ -418,6 +420,33 @@ namespace Sim
         // rejoiner and desync-detection agree on it. Raise for longer games.
         public int PaceScale = 1;
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
+
+        // ── Multiplayer consent-pause ───────────────────────────────────────────
+        // A networked match freezes ONLY when every player agrees, and stays frozen
+        // until every player agrees to resume. The whole protocol rides the ordinary
+        // deterministic command stream (CommandType.SetPauseVote), so all clients flip
+        // the latch on the SAME tick and never desync — no side channel needed.
+        //
+        // The trick that lets the world freeze while the lockstep keeps ticking (it
+        // MUST keep ticking, or the resume votes could never be heard): TickNumber is
+        // the lockstep clock and always advances, but GAME-TIME reads GameClock, which
+        // subtracts the ticks spent paused. So the calendar, cooldowns and timers all
+        // hold still across a pause while turns keep flowing underneath.
+        public int PausedTicks = 0;    // lockstep ticks spent paused; GameClock nets these out
+        public bool GamePaused = false; // latched: set once all players voted pause, cleared once all voted resume
+        public int PauseRoster = 0;    // number of players (owners 1..N) whose unanimous vote toggles the pause; 0 disables (LOCAL/tests)
+        public int GameClock => TickNumber - PausedTicks;   // game-TIME: what the calendar, cooldowns and match clock read
+
+        public bool PauseVoteOf(int owner) => _stock.TryGetValue(owner, out var s) && s[PauseVoteIdx] != 0;
+        public int PauseYesCount            // players currently voting to pause, over the roster
+        {
+            get
+            {
+                int y = 0;
+                for (int o = 1; o <= PauseRoster; o++) if (PauseVoteOf(o)) y++;
+                return y;
+            }
+        }
 
         // Religion. Faith is the share of the populace won over — it opens at a
         // starting congregation and climbs as churches reach more of the people. Each
@@ -797,6 +826,9 @@ namespace Sim
             VictoryPathIdx = s.VictoryPathIdx;
             MatchClockTicks = s.MatchClockTicks;
             PaceScale = s.PaceScale;
+            PausedTicks = s.PausedTicks;
+            GamePaused = s.GamePaused;
+            PauseRoster = s.PauseRoster;
         }
 
         // A complete, standalone snapshot of the simulation's state right now — no
@@ -838,6 +870,9 @@ namespace Sim
                 VictoryPathIdx = VictoryPathIdx,
                 MatchClockTicks = MatchClockTicks,
                 PaceScale = PaceScale,
+                PausedTicks = PausedTicks,
+                GamePaused = GamePaused,
+                PauseRoster = PauseRoster,
                 Explored = Fog.CopyExplored(),
                 Checksum = StateChecksum(),
             };
@@ -1353,6 +1388,10 @@ namespace Sim
                 case CommandType.HireMercenary:   // X = design id to hire
                     TryHireMercenary(cmd.Owner, cmd.X);       // gold for a trained soldier, no peasant (Market.cs)
                     break;
+
+                case CommandType.SetPauseVote:    // X = 1 vote-pause / 0 vote-run (multiplayer consent-pause)
+                    StockOf(cmd.Owner)[PauseVoteIdx] = cmd.X != 0 ? 1 : 0;
+                    break;
             }
         }
 
@@ -1665,15 +1704,27 @@ namespace Sim
         {
             ShotsThisTick.Clear();   // transient render log; nothing here is game state
 
+            var ordered = new List<Command>(commands);
+            ordered.Sort(CanonicalOrder); // same order on every machine
+
+            // Pause votes are heard EVERY tick — even while paused, since agreeing to
+            // resume is the one thing a frozen match must still be able to do. Applied
+            // before the world so the latch reflects this tick's votes.
+            foreach (var c in ordered) if (c.Type == CommandType.SetPauseVote) Apply(c);
+            UpdatePauseLatch();
+
+            // Frozen (multiplayer consent-pause): the lockstep TickNumber still advances
+            // so turns keep flowing, but PausedTicks nets it out of GameClock, so game
+            // time and the whole world below hold perfectly still until everyone resumes.
+            if (GamePaused) { PausedTicks++; TickNumber++; return; }
+
             // Sight FIRST, so a command is judged against the world as the player
             // could last have seen it — and at the same point in the sequence on
             // every machine. Doing it after the commands would mean an order was
             // legal or not depending on where the move it triggered ended up.
             if (FogEnabled) Fog.Update(Units, Buildings, SightOf);
 
-            var ordered = new List<Command>(commands);
-            ordered.Sort(CanonicalOrder); // same order on every machine
-            foreach (var c in ordered) Apply(c);
+            foreach (var c in ordered) if (c.Type != CommandType.SetPauseVote) Apply(c);
 
             // Computer players decide here, on the same fog-updated world and at the
             // same point in the tick as human orders — so an AI opponent is byte
@@ -1738,6 +1789,20 @@ namespace Sim
             RemoveDead();           // sweep out any peasant that just emigrated
             ResolveUpkeep();        // while the standing army eats away at the larder
             TickNumber++;
+        }
+
+        // The consent-pause latch, re-evaluated each tick against the just-applied
+        // votes. Hysteresis on unanimity: a running match freezes only when EVERY
+        // player has voted to pause, and a frozen match resumes only when every
+        // player has cleared their vote — so a lone dissenter keeps it running, and
+        // a lone hold-out keeps it paused. Inert when PauseRoster is 0 (LOCAL/tests),
+        // which is why the parity scenario and every sim test are untouched.
+        void UpdatePauseLatch()
+        {
+            if (PauseRoster <= 0) return;
+            int yes = PauseYesCount;
+            if (!GamePaused && yes == PauseRoster) GamePaused = true;
+            else if (GamePaused && yes == 0) GamePaused = false;
         }
 
         // Barracks turn their queue into units. Iterated in id order so a spawn
@@ -2830,6 +2895,12 @@ namespace Sim
             // length two machines must agree on. The per-owner hold/latch slots are
             // already hashed above as part of the stock array.
             Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks); Mix(PaceScale);
+
+            // Consent-pause: the frozen flag and the accumulated paused-tick count
+            // (which drives GameClock). The per-owner pause votes are already hashed
+            // as part of the stock array above. PauseRoster is a fixed match setting
+            // set identically on every client, hashed so a mismatch is caught early.
+            Mix(GamePaused ? 1 : 0); Mix(PausedTicks); Mix(PauseRoster);
             return h;
         }
 

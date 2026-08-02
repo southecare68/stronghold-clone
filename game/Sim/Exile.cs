@@ -48,10 +48,10 @@ namespace Sim
                 if (s[ReseatTickIdx] == 0)
                 {
                     BeginExile(owner, s);
-                    int at = TickNumber + RegroupTicks;
+                    int at = GameClock + RegroupTicks;
                     s[ReseatTickIdx] = at <= 0 ? 1 : at;   // never 0 while exiled
                 }
-                else if (TickNumber >= s[ReseatTickIdx])
+                else if (GameClock >= s[ReseatTickIdx])
                 {
                     Reseat(owner, s);
                 }
@@ -123,7 +123,7 @@ namespace Sim
             var keep = site == null ? null : PlaceBuilding(BuildingType.Keep, owner, site.Value.X, site.Value.Y);
             if (keep == null)
             {
-                int at = TickNumber + RegroupTicks;
+                int at = GameClock + RegroupTicks;
                 s[ReseatTickIdx] = at <= 0 ? 1 : at;
                 return;
             }

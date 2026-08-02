@@ -82,6 +82,9 @@ namespace Sim
         public int VictoryPathIdx = -1;                    // which path (VictoryPath) the crown was won by
         public int MatchClockTicks = 0;                    // match-clock length in ticks, 0 = no buzzer
         public int PaceScale = 1;                          // match-length dial (Simulation.PaceScale)
+        public int PausedTicks = 0;                        // ticks spent in the consent-pause (Simulation.PausedTicks)
+        public bool GamePaused = false;                    // frozen by unanimous player consent
+        public int PauseRoster = 0;                        // players whose unanimous vote toggles the pause
         public Dictionary<int, uint[]> Explored = new();   // owner -> tile bitset
 
         // Turns the sender has ALREADY published for ticks at or after Tick.

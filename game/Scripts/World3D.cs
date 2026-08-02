@@ -502,6 +502,10 @@ public partial class World3D : Node3D
             MyPlayer = _enet.PlayerId;
             _me = new Client(MyPlayer, _enet, Sim.TileMap.Skirmish(MapSize));
             _enet.Attach(_me);
+            // A networked match is 1v1 (west vs east), so a consent-pause needs both
+            // players' agreement. Set identically on both machines — it's hashed, so a
+            // mismatch would be caught as a desync rather than silently diverging.
+            _me.Sim.PauseRoster = 2;
         }
         _sim = _me.Sim;
     }
@@ -1931,6 +1935,39 @@ public partial class World3D : Node3D
 
     // ---- per-frame ---------------------------------------------------------
 
+    // The multiplayer consent-pause overlay. Solo pause is a plain frozen banner
+    // toggled straight off the P key; a networked pause is a negotiation, so this
+    // reads the shared sim each frame and shows where the vote stands: a proposal
+    // awaiting the other player, or a frozen match awaiting agreement to resume.
+    void UpdatePauseOverlay()
+    {
+        if (_mode == "LOCAL") return;   // solo: driven directly by the P key
+
+        int n = _sim.PauseRoster;
+        int yes = _sim.PauseYesCount;               // players voting to pause right now
+        bool mine = _sim.PauseVoteOf(MyPlayer);
+
+        if (_sim.GamePaused)
+        {
+            int ready = n - yes;                    // players who have voted to resume
+            _pauseBanner.Text = mine
+                ? $"⏸   PAUSED\n{ready}/{n} ready to resume\nPress P to resume"
+                : $"⏸   PAUSED\n{ready}/{n} ready to resume\nWaiting for the other player…   (P to hold)";
+            _pauseBannerPanel.Visible = true;
+        }
+        else if (yes > 0)
+        {
+            _pauseBanner.Text = mine
+                ? $"PAUSE PROPOSED — {yes}/{n} agreed\nWaiting for the other player…   (P to withdraw)"
+                : $"PAUSE PROPOSED — {yes}/{n} agreed\nPress P to accept";
+            _pauseBannerPanel.Visible = true;
+        }
+        else
+        {
+            _pauseBannerPanel.Visible = false;
+        }
+    }
+
     public override void _Process(double delta)
     {
         // Fixed-timestep lockstep: a tick runs only when every player's input for
@@ -1979,6 +2016,7 @@ public partial class World3D : Node3D
         UpdateGoalsPanel();
         UpdateTechPanel();
         UpdateSpyPanel();
+        UpdatePauseOverlay();
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -3166,15 +3204,26 @@ public partial class World3D : Node3D
             return;
         }
 
-        // P pauses/resumes a single-player game. Freezing the sim mid-match without
-        // the peer's agreement would just stall the lockstep, so this is LOCAL only;
-        // the multiplayer consent-pause is a separate feature. No modifiers, so it
-        // never collides with a chord.
+        // P pauses/resumes. Solo (LOCAL) freezes the render loop outright. In a
+        // networked match one machine cannot freeze the shared sim on its own, so P
+        // casts this player's pause vote into the deterministic command stream: the
+        // match freezes only once BOTH players have voted, and resumes only once both
+        // have cleared their vote (see Simulation.UpdatePauseLatch). Pressing P again
+        // toggles your own vote — propose, then withdraw, or agree to resume.
+        // No modifiers, so it never collides with a chord.
         if (e is InputEventKey pause && pause.Pressed && pause.Keycode == Key.P &&
-            !pause.CtrlPressed && !pause.MetaPressed && !pause.AltPressed && _mode == "LOCAL")
+            !pause.CtrlPressed && !pause.MetaPressed && !pause.AltPressed)
         {
-            _paused = !_paused;
-            _pauseBannerPanel.Visible = _paused;
+            if (_mode == "LOCAL")
+            {
+                _paused = !_paused;
+                _pauseBannerPanel.Visible = _paused;
+            }
+            else
+            {
+                bool want = !_sim.PauseVoteOf(MyPlayer);
+                _me.Issue(new Command { Type = CommandType.SetPauseVote, X = want ? 1 : 0 });
+            }
             return;
         }
 
@@ -3292,6 +3341,13 @@ public partial class World3D : Node3D
         {
             if (mb.ButtonIndex == MouseButton.WheelUp && mb.Pressed)   { _camDist = Mathf.Max(6f, _camDist * 0.9f); UpdateCamera(); }
             if (mb.ButtonIndex == MouseButton.WheelDown && mb.Pressed) { _camDist = Mathf.Min(90f, _camDist * 1.1f); UpdateCamera(); }
+
+            // While a networked match is frozen by the consent-pause, orders are
+            // ignored — you cannot command a paused game. Wheel-zoom above still works
+            // so both players can look around the frozen field while they talk it over.
+            if (_mode != "LOCAL" && _sim.GamePaused &&
+                (mb.ButtonIndex == MouseButton.Left || mb.ButtonIndex == MouseButton.Right))
+                return;
 
             // In build mode the left/right buttons place and cancel instead of
             // selecting and ordering. Wheel-zoom above still works either way.

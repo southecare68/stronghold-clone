@@ -92,8 +92,8 @@ namespace Sim
         // hash. A month is 20 seconds of play (ten realm ticks); twelve make a year.
         // Both are 1-based: a match opens on Year 1, Month 1.
         public const int TicksPerMonth = 20 * TickRate;
-        public int GameMonth => TickNumber / TicksPerMonth % 12 + 1;   // 1..12
-        public int GameYear  => TickNumber / TicksPerMonth / 12 + 1;   // 1..
+        public int GameMonth => GameClock / TicksPerMonth % 12 + 1;   // 1..12 — game time, so a pause holds the calendar
+        public int GameYear  => GameClock / TicksPerMonth / 12 + 1;   // 1..
         static readonly string[] MonthNames =
         {
             "January", "February", "March", "April", "May", "June",
@@ -201,7 +201,7 @@ namespace Sim
         // match with no keep (the units-only parity scenario) does nothing here.
         void ResolveVictory()
         {
-            if (TickNumber == 0 || TickNumber % RealmInterval != 0) return;
+            if (GameClock == 0 || GameClock % RealmInterval != 0) return;
             if (VictoryOwner >= 0) return;   // a crown is already claimed — the match is decided
 
             var realms = new SortedSet<int>();
@@ -252,7 +252,7 @@ namespace Sim
             // The buzzer. If a match clock was set and no one claimed a crown by it,
             // the realm furthest along across all paths takes it; owner order breaks
             // ties. Off (0) by default, so an untimed match simply plays on.
-            if (MatchClockTicks > 0 && TickNumber >= MatchClockTicks)
+            if (MatchClockTicks > 0 && GameClock >= MatchClockTicks)
             {
                 int best = -1, bestScore = -1, bestPath = 0;
                 foreach (int owner in realms)

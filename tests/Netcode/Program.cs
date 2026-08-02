@@ -27,6 +27,8 @@ static class Program
         RejoinResumesTheMatch();
         CorruptSnapshotIsCaughtOnArrival();
         SkirmishSnapshotRoundTrip();
+        ConsentPauseFreezesInLockstep();
+        PauseStateSurvivesTheWire();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -487,6 +489,95 @@ static class Program
         var rejoin = new Simulation(TileMap.Open(48));
         rejoin.Restore(Wire.DeserializeSnapshot(Wire.Serialize(epic.Snapshot())));
         Check($"the PaceScale dial survives the wire (got {rejoin.PaceScale})", rejoin.PaceScale == 6);
+    }
+
+    static Command Vote(bool pause) => new Command
+    {
+        Type = CommandType.SetPauseVote, X = pause ? 1 : 0,
+    };
+
+    static (int, int) UnitPos(Simulation sim, int id)
+    {
+        foreach (var u in sim.Units) if (u.Id == id) return (u.X, u.Y);
+        return (int.MinValue, int.MinValue);
+    }
+
+    // The heart of the multiplayer pause: it must ride the deterministic command
+    // stream, so two clients freeze and thaw on the SAME tick and never desync —
+    // and while frozen, game-time (calendar, cooldowns, victory clock) must hold
+    // still even though the lockstep tick keeps advancing underneath.
+    static void ConsentPauseFreezesInLockstep()
+    {
+        Console.WriteLine("\nconsent-pause (multiplayer):");
+        var (a, b, net) = StartMatch();
+        a.Sim.PauseRoster = 2;
+        b.Sim.PauseRoster = 2;
+
+        // Send a unit on a long march and let game-time get well underway.
+        var spawnPos = UnitPos(a.Sim, 1);
+        a.Issue(Move(unit: 1, x: 120, y: 120));
+        Advance(a, b, net, 60);
+        Check("the unit is mid-march before we pause", UnitPos(a.Sim, 1) != spawnPos);
+
+        // One player alone voting to pause does NOT stop the match — pause is unanimous.
+        a.Issue(Vote(true));
+        Advance(a, b, net, 10);
+        Check("one vote does not pause (unanimity required)", !a.Sim.GamePaused && !b.Sim.GamePaused);
+
+        // The second player agrees → both freeze, on the same tick, in the same state.
+        b.Issue(Vote(true));
+        Advance(a, b, net, 10);
+        Check("both agree → both paused", a.Sim.GamePaused && b.Sim.GamePaused);
+        Check("paused in lockstep (same tick, same checksum)",
+              a.Sim.TickNumber == b.Sim.TickNumber && a.Sim.StateChecksum() == b.Sim.StateChecksum());
+
+        int clockAtPause = a.Sim.GameClock;
+        int monthAtPause = a.Sim.GameMonth;
+        int tickAtPause = a.Sim.TickNumber;
+        var posAtPause = UnitPos(a.Sim, 1);
+
+        // Run a long paused span. The lockstep keeps ticking (turns must keep flowing)
+        // but nothing in the world may move.
+        Advance(a, b, net, 400);
+
+        Check($"the lockstep keeps ticking while paused ({a.Sim.TickNumber} == {tickAtPause}+400)",
+              a.Sim.TickNumber == tickAtPause + 400);
+        Check($"game-time is frozen (clock held at {clockAtPause})", a.Sim.GameClock == clockAtPause);
+        Check($"the calendar holds (still Year/Month {monthAtPause})", a.Sim.GameMonth == monthAtPause);
+        Check("units do not move while paused", UnitPos(a.Sim, 1) == posAtPause);
+        Check("both worlds still agree after 400 paused ticks",
+              a.Sim.StateChecksum() == b.Sim.StateChecksum());
+
+        // Resume is unanimous too: one player clearing their vote is not enough.
+        a.Issue(Vote(false));
+        Advance(a, b, net, 10);
+        Check("one resume vote does not resume (unanimity required)", a.Sim.GamePaused && b.Sim.GamePaused);
+
+        // Both clear → the match runs again, and game-time picks up EXACTLY where it
+        // froze — it must not have skipped the 400 paused ticks.
+        b.Issue(Vote(false));
+        Advance(a, b, net, 40);
+        Check("both agree → resumed", !a.Sim.GamePaused && !b.Sim.GamePaused);
+        Check($"game-time resumes where it froze, not skipped ahead (clock {a.Sim.GameClock}, was {clockAtPause})",
+              a.Sim.GameClock > clockAtPause && a.Sim.GameClock < clockAtPause + 100);
+        Check("units march again after resume", UnitPos(a.Sim, 1) != posAtPause);
+        Check("still in perfect lockstep after the whole pause cycle",
+              a.Sim.StateChecksum() == b.Sim.StateChecksum());
+    }
+
+    // A rejoiner must adopt the pause exactly, or a match paused when someone drops
+    // would thaw on their machine alone the moment they reconnect.
+    static void PauseStateSurvivesTheWire()
+    {
+        Console.WriteLine("\npause state on the wire:");
+        var paused = new Simulation(TileMap.Open(48)) { PauseRoster = 2, GamePaused = true, PausedTicks = 137 };
+        var back = new Simulation(TileMap.Open(48));
+        back.Restore(Wire.DeserializeSnapshot(Wire.Serialize(paused.Snapshot())));
+        Check($"GamePaused survives the wire (got {back.GamePaused})", back.GamePaused);
+        Check($"PausedTicks survives the wire (got {back.PausedTicks})", back.PausedTicks == 137);
+        Check($"PauseRoster survives the wire (got {back.PauseRoster})", back.PauseRoster == 2);
+        Check("a rejoiner reproduces the paused world exactly",
+              back.StateChecksum() == paused.Snapshot().Checksum);
     }
 
     static void Check(string what, bool ok)

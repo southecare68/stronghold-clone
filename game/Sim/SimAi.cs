@@ -68,7 +68,7 @@ namespace Sim
         void StepAiOwner(int owner, AiLevel level)
         {
             var t = TuningFor(level);
-            if (TickNumber % t.Interval != 0) return;   // the cadence, per difficulty
+            if (GameClock % t.Interval != 0) return;   // the cadence, per difficulty (game time, so a pause holds it)
 
             var keep = AiKeep(owner);
             if (keep == null) return;    // no keep — the bot has been beaten, nothing to do

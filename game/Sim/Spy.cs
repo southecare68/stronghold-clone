@@ -35,7 +35,7 @@ namespace Sim
             return s[SpyReadyBase + idx];
         }
         // Ticks until a spy can be used again — 0 when ready. For the HUD.
-        public int SpyReadyIn(int owner, int spyNode) => Math.Max(0, SpyReadyAt(owner, spyNode) - TickNumber);
+        public int SpyReadyIn(int owner, int spyNode) => Math.Max(0, SpyReadyAt(owner, spyNode) - GameClock);
 
         // The first rival realm (a keep-holder that isn't you), in owner order — the
         // default target when there is a single obvious enemy.
@@ -54,7 +54,7 @@ namespace Sim
             if (!IsTechResearched(owner, spyNode)) return false;     // untrained
             if (target == owner || TerritoryCount(target) <= 0) return false;   // needs a real rival realm
             if (Gold(owner) < SpyCost) return false;
-            return TickNumber >= SpyReadyAt(owner, spyNode);          // off cooldown
+            return GameClock >= SpyReadyAt(owner, spyNode);          // off cooldown (game time — a pause doesn't tick it down)
         }
 
         // Run the operation if it is legal: charge the gold, start the cooldown, land
@@ -64,7 +64,7 @@ namespace Sim
             if (!CanSpy(owner, spyNode, target)) return false;
             var s = StockOf(owner);
             s[GoldIdx] = Math.Max(0, s[GoldIdx] - SpyCost);
-            s[SpyReadyBase + SpyIndex(spyNode)] = TickNumber + SpyCooldown;
+            s[SpyReadyBase + SpyIndex(spyNode)] = GameClock + SpyCooldown;
             ApplySpy(owner, spyNode, target);
             return true;
         }
