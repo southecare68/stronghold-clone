@@ -246,6 +246,9 @@ public partial class World3D : Node3D
     bool _paused;
     Control _pauseBannerPanel;
     Label _pauseBanner;
+    Control _saveLoadRow;              // Save / Load buttons, shown only while fully paused
+    Button _saveButton, _loadButton;
+    const string SaveDir = "user://saves";
 
     // Leaving a networked match. Rather than abandon a lifeless realm, a departing
     // player hands it to the AI (a deterministic LeaveToAi command). The survivor is
@@ -1982,6 +1985,7 @@ public partial class World3D : Node3D
         {
             _pauseBanner.Text = "⏸   PAUSED\nPress P to resume";
             _pauseBannerPanel.Visible = _sim.GamePaused;
+            _saveLoadRow.Visible = _sim.GamePaused;
             return;
         }
 
@@ -1992,6 +1996,7 @@ public partial class World3D : Node3D
                 ? $"⏸   PAUSED\n{ready}/{n} ready to resume\nPress P to resume"
                 : $"⏸   PAUSED\n{ready}/{n} ready to resume\nWaiting for the other player…   (P to hold)";
             _pauseBannerPanel.Visible = true;
+            _saveLoadRow.Visible = true;            // save/load only while actually frozen
         }
         else if (yes > 0)
         {
@@ -1999,6 +2004,7 @@ public partial class World3D : Node3D
                 ? $"PAUSE PROPOSED — {yes}/{n} agreed\nWaiting for the other player…   (P to withdraw)"
                 : $"PAUSE PROPOSED — {yes}/{n} agreed\nPress P to accept";
             _pauseBannerPanel.Visible = true;
+            _saveLoadRow.Visible = false;           // not yet frozen — no save/load during a proposal
         }
         else
         {
@@ -3259,6 +3265,7 @@ public partial class World3D : Node3D
             {
                 _paused = !_paused;
                 _pauseBannerPanel.Visible = _paused;
+                _saveLoadRow.Visible = _paused;
             }
             else
             {
@@ -4056,11 +4063,34 @@ public partial class World3D : Node3D
         foreach (var s in new[] { "left", "right" }) pMargin.AddThemeConstantOverride("margin_" + s, 40);
         foreach (var s in new[] { "top", "bottom" }) pMargin.AddThemeConstantOverride("margin_" + s, 24);
         pauseWrap.AddChild(pMargin);
+        var pBox = new VBoxContainer();
+        pBox.AddThemeConstantOverride("separation", 16);
+        pMargin.AddChild(pBox);
         _pauseBanner = new Label { HorizontalAlignment = HorizontalAlignment.Center };
         _pauseBanner.AddThemeColorOverride("font_color", new Color(0.98f, 0.92f, 0.70f));
         _pauseBanner.AddThemeFontSizeOverride("font_size", 30);
         _pauseBanner.Text = "⏸   PAUSED\nPress P to resume";
-        pMargin.AddChild(_pauseBanner);
+        pBox.AddChild(_pauseBanner);
+
+        // Save / Load, available while the game is fully paused. Save writes the frozen
+        // match to disk; Load re-seeds from the newest save. In a networked match only
+        // the host loads (it re-distributes the save to everyone through the snapshot
+        // handshake), so the button is hidden for a joiner.
+        var slRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        slRow.AddThemeConstantOverride("separation", 12);
+        pBox.AddChild(slRow);
+        _saveLoadRow = slRow;
+        _saveButton = new Button { Text = "Save game", FocusMode = Control.FocusModeEnum.None };
+        _saveButton.AddThemeFontSizeOverride("font_size", 15);
+        _saveButton.CustomMinimumSize = new Vector2(140, 38);
+        _saveButton.Pressed += QuickSave;
+        slRow.AddChild(_saveButton);
+        _loadButton = new Button { Text = "Load last save", FocusMode = Control.FocusModeEnum.None };
+        _loadButton.AddThemeFontSizeOverride("font_size", 15);
+        _loadButton.CustomMinimumSize = new Vector2(140, 38);
+        _loadButton.Pressed += QuickLoad;
+        _loadButton.Visible = _mode == "LOCAL" || MyPlayer == 1;   // host (or solo) loads; a joiner receives it
+        slRow.AddChild(_loadButton);
 
         // ── Leaving a networked match ────────────────────────────────────────────
         // Only meaningful with a real opponent, so the button and its panels never
@@ -4200,6 +4230,7 @@ public partial class World3D : Node3D
         _me.Issue(new Command { Type = CommandType.LeaveToAi, X = (int)level, Y = MyPlayer % 4 });
         _pauseBanner.Text = "Handing your realm to the AI…\nyou may close the window";
         _pauseBannerPanel.Visible = true;
+        if (_saveLoadRow != null) _saveLoadRow.Visible = false;
     }
 
     // Once committed to leaving, tick on for a beat so the LeaveToAi turn reaches the
@@ -4288,6 +4319,73 @@ public partial class World3D : Node3D
         foreach (string a in IP.GetLocalAddresses())
             if (a.Contains('.') && !a.Contains(':') && !a.StartsWith("127.")) return a;
         return null;
+    }
+
+    // ── Save / Load (pause menu) ─────────────────────────────────────────────
+    // A save is the whole match frozen to disk — one MatchSnapshot in the exact wire
+    // format a rejoiner adopts. Reachable only while paused, so the state is stable
+    // and (in a networked match) the turn stream is empty, which is what makes a
+    // mid-match re-seed on load safe.
+    void QuickSave()
+    {
+        DirAccess.MakeDirRecursiveAbsolute(SaveDir);
+        string stamp = System.DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string path = $"{SaveDir}/khsave-{stamp}.khsave";
+        byte[] bytes = Wire.Serialize(_me.Sim.Snapshot());
+        using var f = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Write);
+        if (f == null) { ShowRealmToast("⚠   Could not write the save"); return; }
+        f.StoreBuffer(bytes);
+        ShowRealmToast($"💾   Saved — Year {_sim.GameYear}, {_sim.GameMonthName}");
+        GD.Print("[save] wrote ", ProjectSettings.GlobalizePath(path), " (", bytes.Length, " bytes)");
+    }
+
+    // Load the newest save. Solo adopts locally on both in-process sims; a networked
+    // host adopts and re-distributes the same bytes to the joiner (who adopts it in
+    // Poll, exactly like a rejoin). We stay paused afterwards — press P to resume.
+    void QuickLoad()
+    {
+        string path = NewestSave();
+        if (path == null) { ShowRealmToast("No saved game found"); return; }
+        using var f = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+        if (f == null) { ShowRealmToast("⚠   Could not read the save"); return; }
+        byte[] bytes = f.GetBuffer((long)f.GetLength());
+        var snap = Wire.DeserializeSnapshot(bytes);
+        if (snap == null) { ShowRealmToast("⚠   That save is unreadable"); return; }
+
+        foreach (var c in Clients())
+            if (!c.AdoptSnapshot(snap)) GD.PrintErr("[load] a client rejected the save (checksum mismatch)");
+        _enet?.BroadcastSnapshot(snap);
+
+        AfterLoad();
+        ShowRealmToast($"📂   Loaded — Year {_sim.GameYear}, {_sim.GameMonthName}");
+    }
+
+    // Re-baseline the render/interpolation state to the freshly loaded world so
+    // nothing lurches, and don't mistake the loaded AI seats for players who just left.
+    void AfterLoad()
+    {
+        _accum = 0;
+        _prevPos.Clear();
+        SnapshotPositions();
+        _aiAnnounced.Clear();
+        foreach (int o in _sim.AiOwners) _aiAnnounced.Add(o);
+        _stallSeconds = 0f;
+    }
+
+    // Newest *.khsave by name — the timestamped names sort lexically, so the last is
+    // the most recent. Null if there are no saves yet.
+    static string NewestSave()
+    {
+        using var dir = DirAccess.Open(SaveDir);
+        if (dir == null) return null;
+        string best = null;
+        dir.ListDirBegin();
+        for (string name = dir.GetNext(); name != ""; name = dir.GetNext())
+            if (!dir.CurrentIsDir() && name.EndsWith(".khsave") &&
+                (best == null || string.CompareOrdinal(name, best) > 0))
+                best = name;
+        dir.ListDirEnd();
+        return best == null ? null : $"{SaveDir}/{best}";
     }
 
     void ToggleGoals() => _showGoals = !_showGoals;

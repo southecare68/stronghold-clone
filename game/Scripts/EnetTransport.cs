@@ -151,6 +151,21 @@ public sealed class EnetTransport : ITransport
         return true;
     }
 
+    // Push a SPECIFIC snapshot to every connected peer, now. Used when the host
+    // loads a saved game from the pause menu: the peers adopt it through the very
+    // same Kind.Snapshot path a rejoiner uses (Poll → AdoptSnapshot), so no new
+    // sync route is introduced. Safe mid-match ONLY because a load is done while
+    // paused — the turn stream is empty and the world frozen, so re-seeding every
+    // peer to the saved tick cannot diverge.
+    public void BroadcastSnapshot(MatchSnapshot snap)
+    {
+        if (Failed || snap == null) return;
+        byte[] bytes = Wire.Serialize(snap);
+        _peer.SetTargetPeer(0);                      // 0 = every connected peer
+        _peer.PutPacket(bytes);
+        GD.Print($"[net] pushed a loaded save to all peers: tick {snap.Tick}, checksum 0x{snap.Checksum:X8}");
+    }
+
     // The Client this transport delivers into. Set once, right after construction.
     public void Attach(Client local) => _local = local;
 

@@ -33,6 +33,7 @@ static class Program
         TakeoverGrantsNoHandicap();
         AiOwnershipSurvivesTheWire();
         HostMigrationSeatSwap();
+        SaveLoadReseedsInLockstep();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -588,6 +589,51 @@ static class Program
     {
         Type = CommandType.LeaveToAi, X = (int)level, Y = (int)path,
     };
+
+    // Save/load from the pause menu. A save is one MatchSnapshot in the wire format;
+    // loading has EVERY client adopt the same saved bytes (solo does it locally, a
+    // networked host re-distributes them through the snapshot handshake). Both must
+    // land on the saved tick byte-identically and resume in perfect lockstep — the
+    // same guarantee a rejoin gives, which is why loading rides that machinery.
+    static void SaveLoadReseedsInLockstep()
+    {
+        Console.WriteLine("\nsave / load re-seed:");
+        var (a, b, net) = StartMatch();
+        a.Issue(Move(unit: 1, x: 30, y: 30));
+        b.Issue(Move(unit: 4, x: 20, y: 20));
+        Advance(a, b, net, 50);
+
+        // "Save" — the exact bytes a .khsave file would hold.
+        byte[] saveBytes = Wire.Serialize(a.Sim.Snapshot());
+        int savedTick = a.Sim.TickNumber;
+
+        // Play well past the save so the live match has clearly moved on.
+        Advance(a, b, net, 120);
+        Check($"the match moved past the save ({a.Sim.TickNumber} vs saved {savedTick})",
+              a.Sim.TickNumber == savedTick + 120);
+
+        // "Load" — every client adopts the saved bytes (each deserializes its own copy,
+        // as a host and a joiner would off the wire).
+        var loaded = Wire.DeserializeSnapshot(saveBytes);
+        Check("the save round-trips through the wire format", loaded != null);
+        bool aOk = a.AdoptSnapshot(loaded);
+        bool bOk = b.AdoptSnapshot(Wire.DeserializeSnapshot(saveBytes));
+        Check("both clients adopt the save", aOk && bOk);
+        Check($"both rewound to the saved tick ({a.Sim.TickNumber})",
+              a.Sim.TickNumber == savedTick && b.Sim.TickNumber == savedTick);
+        Check("both reproduce the saved world exactly",
+              a.Sim.StateChecksum() == loaded.Checksum && b.Sim.StateChecksum() == loaded.Checksum);
+
+        // And the match carries on from the loaded point, in perfect lockstep.
+        int desyncs = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            a.SendInput(); b.SendInput(); net.Flush(); a.TryStep(); b.TryStep();
+            if (a.Sim.Checksum() != b.Sim.Checksum()) desyncs++;
+        }
+        Check("play resumes from the load, in sync every tick", desyncs == 0);
+        Check("no desync reported by either side", a.Desync == null && b.Desync == null);
+    }
 
     // Host migration's deterministic core. When the HOST drops, the surviving JOINER
     // (player 2) becomes the source of truth and the returning host (player 1) rejoins
