@@ -256,6 +256,7 @@ public partial class World3D : Node3D
     bool _leaving;                     // true once we've committed to go
     float _leaveCountdown;             // seconds to keep ticking so the LeaveToAi turn reaches the peer, then quit
     Control _dropPanel;                // fallback: shown when the opponent stops responding
+    bool _dropShown;                   // was the drop prompt up last frame (to notice a reconnect)
     float _stallSeconds;               // how long we've been stalled waiting for a peer
     readonly HashSet<int> _aiAnnounced = new();   // opponents we've already toasted as AI-controlled
 
@@ -4123,17 +4124,28 @@ public partial class World3D : Node3D
             var dBox = new VBoxContainer();
             dBox.AddThemeConstantOverride("separation", 10);
             dMargin.AddChild(dBox);
-            var dTitle = new Label { Text = "Opponent not responding", HorizontalAlignment = HorizontalAlignment.Center };
+            var dTitle = new Label { Text = "⏸   Opponent disconnected", HorizontalAlignment = HorizontalAlignment.Center };
             dTitle.AddThemeColorOverride("font_color", new Color(0.98f, 0.85f, 0.72f));
             dTitle.AddThemeFontSizeOverride("font_size", 22);
             dBox.AddChild(dTitle);
-            var dSub = new Label { Text = "They may have lost connection. Let the AI take their realm so the match can go on?", HorizontalAlignment = HorizontalAlignment.Center };
+            // The wait is the DEFAULT: the match is frozen and will resume by itself the
+            // moment they reconnect (they relaunch and re-join the host). The button is
+            // the other choice — don't wait, hand their realm to the AI and play on.
+            var dSub = new Label
+            {
+                Text = "The match is paused, holding their place.\nWait for them to reconnect — or hand their realm to the AI and carry on.",
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
             dSub.AddThemeColorOverride("font_color", new Color(0.82f, 0.78f, 0.72f));
             dSub.AddThemeFontSizeOverride("font_size", 14);
             dSub.AutowrapMode = TextServer.AutowrapMode.Word;
-            dSub.CustomMinimumSize = new Vector2(360, 0);
+            dSub.CustomMinimumSize = new Vector2(380, 0);
             dBox.AddChild(dSub);
-            var dBtn = new Button { Text = "Let a Normal AI take over", FocusMode = Control.FocusModeEnum.None };
+            var dWaiting = new Label { Text = "· waiting for them to return ·", HorizontalAlignment = HorizontalAlignment.Center };
+            dWaiting.AddThemeColorOverride("font_color", new Color(0.62f, 0.60f, 0.55f));
+            dWaiting.AddThemeFontSizeOverride("font_size", 12);
+            dBox.AddChild(dWaiting);
+            var dBtn = new Button { Text = "Don't wait — let a Normal AI take over", FocusMode = Control.FocusModeEnum.None };
             dBtn.AddThemeFontSizeOverride("font_size", 15);
             dBtn.CustomMinimumSize = new Vector2(0, 40);
             dBtn.Pressed += TakeOverDroppedOpponent;
@@ -4191,7 +4203,14 @@ public partial class World3D : Node3D
         if (_me.Stalled) _stallSeconds += (float)delta;
         else _stallSeconds = 0f;
         bool opponentIsAi = _sim.IsAi(MyPlayer == 1 ? 2 : 1);
-        _dropPanel.Visible = _stallSeconds > 4f && !opponentIsAi;
+        bool show = _stallSeconds > 4f && !opponentIsAi;
+
+        // If the prompt was up and we're now un-stalled without having handed the seat
+        // to the AI, the waiting paid off — the peer reconnected and we're running again.
+        if (_dropShown && !show && !opponentIsAi && !_me.Stalled)
+            ShowRealmToast("↩   Opponent reconnected — the match resumes");
+        _dropShown = show;
+        _dropPanel.Visible = show;
     }
 
     void TakeOverDroppedOpponent()
