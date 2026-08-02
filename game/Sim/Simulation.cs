@@ -591,7 +591,8 @@ namespace Sim
         // caller and the AiSim gradient are unchanged). A match setting like the
         // level, not evolving state — not hashed, agreed at setup on every machine.
         readonly SortedDictionary<int, VictoryPath> _aiPath = new();
-        VictoryPath AiPathOf(int owner) => _aiPath.TryGetValue(owner, out var p) ? p : VictoryPath.Religious;
+        public VictoryPath AiPathOf(int owner) => _aiPath.TryGetValue(owner, out var p) ? p : VictoryPath.Religious;
+        public AiLevel AiLevelOf(int owner) => _aiOwners.TryGetValue(owner, out var l) ? l : AiLevel.Normal;
         public void EnableAi(int owner, AiLevel level = AiLevel.Normal, VictoryPath path = VictoryPath.Religious)
         {
             _aiOwners[owner] = level;

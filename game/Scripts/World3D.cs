@@ -246,8 +246,10 @@ public partial class World3D : Node3D
     bool _paused;
     Control _pauseBannerPanel;
     Label _pauseBanner;
-    Control _saveLoadRow;              // Save / Load buttons, shown only while fully paused
-    Button _saveButton, _loadButton;
+    Control _saveLoadRow;              // Save / Load / Restart buttons, shown only while fully paused
+    Button _saveButton, _loadButton, _restartButton;
+    bool _restartArmed;                // first click arms, second within a few seconds confirms
+    float _restartArmLeft;             // seconds left on the arm before it disarms itself
     const string SaveDir = "user://saves";
 
     // Leaving a networked match. Rather than abandon a lifeless realm, a departing
@@ -2064,6 +2066,7 @@ public partial class World3D : Node3D
         UpdateTakeoverNotices();
         UpdateDropPrompt(delta);
         UpdateLeave(delta);
+        UpdateRestartArm(delta);
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -4091,6 +4094,12 @@ public partial class World3D : Node3D
         _loadButton.Pressed += QuickLoad;
         _loadButton.Visible = _mode == "LOCAL" || MyPlayer == 1;   // host (or solo) loads; a joiner receives it
         slRow.AddChild(_loadButton);
+        _restartButton = new Button { Text = "Restart match", FocusMode = Control.FocusModeEnum.None };
+        _restartButton.AddThemeFontSizeOverride("font_size", 15);
+        _restartButton.CustomMinimumSize = new Vector2(140, 38);
+        _restartButton.Pressed += RestartClicked;
+        _restartButton.Visible = _mode == "LOCAL" || MyPlayer == 1;   // host (or solo) restarts; re-seeds everyone
+        slRow.AddChild(_restartButton);
 
         // ── Leaving a networked match ────────────────────────────────────────────
         // Only meaningful with a real opponent, so the button and its panels never
@@ -4370,6 +4379,70 @@ public partial class World3D : Node3D
         _aiAnnounced.Clear();
         foreach (int o in _sim.AiOwners) _aiAnnounced.Add(o);
         _stallSeconds = 0f;
+    }
+
+    // Restart is destructive — it wipes a match that may be hours old — so the first
+    // click only ARMS it (relabelling the button); a second click within a few seconds
+    // confirms. The arm disarms itself on a timeout or when the pause panel closes.
+    void RestartClicked()
+    {
+        if (!_restartArmed)
+        {
+            _restartArmed = true;
+            _restartArmLeft = 4f;
+            _restartButton.Text = "⚠  Confirm restart";
+            return;
+        }
+        DisarmRestart();
+        RestartMatch();
+    }
+
+    void DisarmRestart()
+    {
+        _restartArmed = false;
+        _restartArmLeft = 0f;
+        if (_restartButton != null) _restartButton.Text = "Restart match";
+    }
+
+    // The armed restart disarms itself after a few seconds, or the moment the pause
+    // panel closes (e.g. the game resumed), so a stale "confirm" never lingers.
+    void UpdateRestartArm(double delta)
+    {
+        if (!_restartArmed) return;
+        if (_saveLoadRow == null || !_saveLoadRow.Visible) { DisarmRestart(); return; }
+        _restartArmLeft -= (float)delta;
+        if (_restartArmLeft <= 0f) DisarmRestart();
+    }
+
+    // Begin the match again from a fresh opening. It's a re-seed just like Load, but
+    // the snapshot is a newly-built starting world rather than a file — so every
+    // client lands on an identical tick-0, and (in multiplayer) the host distributes
+    // it so both sides restart the same game. Match settings (pace, fog, the AI
+    // opponents) carry over so the rematch is the one you set up.
+    void RestartMatch()
+    {
+        var fresh = new Simulation(Sim.TileMap.Skirmish(MapSize));
+        Skirmish.Setup(fresh, MapSize);
+        fresh.PaceScale = _sim.PaceScale;
+        fresh.PauseRoster = _sim.PauseRoster;
+        fresh.MatchClockTicks = _sim.MatchClockTicks;
+        fresh.FogEnabled = _sim.FogEnabled;
+        foreach (int o in _sim.AiOwners)      // reproduce the match's AI opponents (with their opening handicap)
+            fresh.EnableAi(o, _sim.AiLevelOf(o), _sim.AiPathOf(o));
+        var snap = fresh.Snapshot();
+
+        foreach (var c in Clients())
+            c.AdoptSnapshot(Wire.DeserializeSnapshot(Wire.Serialize(snap)));
+        _enet?.BroadcastSnapshot(snap);
+
+        AfterLoad();
+        // A fresh world is not paused, so the match simply begins again — in solo we
+        // lift the render freeze, and in multiplayer the cleared pause state re-seeds
+        // to every client, so both start the rematch together.
+        _paused = false;
+        _pauseBannerPanel.Visible = false;
+        _saveLoadRow.Visible = false;
+        ShowRealmToast("↺   Match restarted");
     }
 
     // Newest *.khsave by name — the timestamped names sort lexically, so the last is

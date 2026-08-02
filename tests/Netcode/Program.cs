@@ -34,6 +34,7 @@ static class Program
         AiOwnershipSurvivesTheWire();
         HostMigrationSeatSwap();
         SaveLoadReseedsInLockstep();
+        RestartReseedsToFreshOpening();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -773,6 +774,48 @@ static class Program
         Check($"the AI seat survives the wire (IsAi(2) = {back.IsAi(2)})", back.IsAi(2));
         Check("a rejoiner reproduces the world exactly, bot and all",
               back.StateChecksum() == host.Snapshot().Checksum);
+    }
+
+    // Restart is a re-seed like Load, but the snapshot is a freshly-built opening
+    // rather than a file: every client jumps back to an identical tick 0 and the
+    // rematch runs in lockstep. (Clients keep their map across an adopt, so both must
+    // hold the same Skirmish map — as they do in a real match — hence the setup here.)
+    static void RestartReseedsToFreshOpening()
+    {
+        Console.WriteLine("\nrestart match re-seed:");
+        var net = new RelayTransport();
+        var a = new Client(1, net, TileMap.Skirmish(128));
+        var b = new Client(2, net, TileMap.Skirmish(128));
+        Skirmish.Setup(a.Sim, 128);
+        Skirmish.Setup(b.Sim, 128);
+        net.Join(a);
+        net.Join(b);
+
+        Advance(a, b, net, 80);
+        Check($"the match is underway (tick {a.Sim.TickNumber})", a.Sim.TickNumber == 80);
+
+        // "Restart" — build a fresh opening world and have every client adopt it.
+        var fresh = new Simulation(TileMap.Skirmish(128));
+        Skirmish.Setup(fresh, 128);
+        var snap = fresh.Snapshot();
+        Check("the fresh opening differs from the played-on match", a.Sim.StateChecksum() != snap.Checksum);
+
+        bool aOk = a.AdoptSnapshot(Wire.DeserializeSnapshot(Wire.Serialize(snap)));
+        bool bOk = b.AdoptSnapshot(Wire.DeserializeSnapshot(Wire.Serialize(snap)));
+        Check("both clients adopt the fresh opening", aOk && bOk);
+        Check($"both restart at tick 0 (a={a.Sim.TickNumber}, b={b.Sim.TickNumber})",
+              a.Sim.TickNumber == 0 && b.Sim.TickNumber == 0);
+        Check("both hold the identical fresh world",
+              a.Sim.StateChecksum() == snap.Checksum && b.Sim.StateChecksum() == snap.Checksum);
+
+        int desyncs = 0;
+        for (int i = 0; i < 200; i++)
+        {
+            a.SendInput(); b.SendInput(); net.Flush(); a.TryStep(); b.TryStep();
+            if (a.Sim.Checksum() != b.Sim.Checksum()) desyncs++;
+        }
+        Check("the rematch runs from the top, in sync every tick", desyncs == 0);
+        Check("no desync reported by either side", a.Desync == null && b.Desync == null);
     }
 
     static void Check(string what, bool ok)
