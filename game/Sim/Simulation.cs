@@ -196,6 +196,12 @@ namespace Sim
         public int TargetBuildingId;
         public int AttackTimer;
 
+        // Veterancy: enemy UNITS this unit has slain. It hardens with each kill (see
+        // Veterancy.cs) — tougher and hitting harder at Veteran and Elite. Post-freeze
+        // unit state: hashed and snapshotted, never in the frozen units-only Checksum
+        // (the parity scenario is Move-only, so nothing ever kills).
+        public int Kills;
+
         // Garrison. The id of a friendly wall/gatehouse this unit mans; 0 when it
         // is a field unit. A garrisoned unit climbs onto the wall and holds there,
         // auto-firing at any enemy in reach — it shoots further (height) and takes
@@ -253,7 +259,7 @@ namespace Sim
             {
                 Id = Id, Owner = Owner, DesignId = DesignId, X = X, Y = Y, Tx = Tx, Ty = Ty,
                 Hp = Hp, MaxHp = MaxHp, TargetId = TargetId,
-                TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer,
+                TargetBuildingId = TargetBuildingId, AttackTimer = AttackTimer, Kills = Kills,
                 GarrisonId = GarrisonId,
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant, IsMercenary = IsMercenary,
@@ -2376,8 +2382,9 @@ namespace Sim
 
                     if (u.AttackTimer == 0)
                     {
-                        int dmg = DamageTo(target, _rng.NextInt(d.Damage - 2, d.Damage + 3));
-                        if (target.Hp > 0 && target.Hp <= dmg) WarPayoff(u.Owner);   // this blow fells it → war-tool loot
+                        int blow = VetDamage(u, d.Damage);   // veterancy hardens the strike
+                        int dmg = DamageTo(target, _rng.NextInt(blow - 2, blow + 3));
+                        if (target.Hp > 0 && target.Hp <= dmg) { WarPayoff(u.Owner); RegisterKill(u); }   // this blow fells it → war-tool loot + a veteran's kill
                         target.Hp -= dmg;
                         u.AttackTimer = d.Cooldown;
                         ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = target.X, ToY = target.Y });
@@ -2468,8 +2475,9 @@ namespace Sim
             u.TargetId = best?.Id ?? 0;
             if (best != null && u.AttackTimer == 0)
             {
-                int dmg = DamageTo(best, _rng.NextInt(d.Damage - 2, d.Damage + 3));
-                if (best.Hp > 0 && best.Hp <= dmg) WarPayoff(u.Owner);   // a rampart kill loots too
+                int blow = VetDamage(u, d.Damage);   // veterans fire harder from the wall too
+                int dmg = DamageTo(best, _rng.NextInt(blow - 2, blow + 3));
+                if (best.Hp > 0 && best.Hp <= dmg) { WarPayoff(u.Owner); RegisterKill(u); }   // a rampart kill loots too
                 best.Hp -= dmg;
                 u.AttackTimer = d.Cooldown;
                 ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = best.X, ToY = best.Y });
@@ -2761,6 +2769,7 @@ namespace Sim
                 Mix((int)u.CarryType); Mix(u.CarryAmount); Mix(u.GatherTimer);
                 Mix(u.IsPeasant ? 1 : 0);
                 Mix(u.IsMercenary ? 1 : 0);
+                Mix(u.Kills);
                 Mix(u.GarrisonId);
 
                 // The route still to walk. Two units in identical positions with

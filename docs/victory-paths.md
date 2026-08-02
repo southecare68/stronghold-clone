@@ -248,6 +248,15 @@ spine and the Religious branch are in and tested (`tests/Tech`, `game/Sim/TechTr
   compounds with the cautious march — enemies it reveals feed the danger field every
   friendly unit routes around — and its own stealth means the enemy's cautious armies
   never route around IT (they can't see it to fear it).
+- **Veterancy** (`Veterancy.cs`, `Unit.Kills`): a unit hardens as it slays foes.
+  Each enemy UNIT it fells is a kill (both combat sites — field & rampart — call
+  `RegisterKill` on the killing blow, beside the war-tool `WarPayoff`); at `VeteranAt`
+  kills it is a Veteran, at `EliteAt` an Elite, each rank adding `RankBonusPct` to hp
+  & damage (`VetDamage` scales every blow, `RegisterKill` grows `MaxHp` and heals the
+  gain on promotion). A rank-0 unit's damage is byte-identical to before, and the
+  Move-only parity scenario never kills, so the frozen `Checksum` is untouched; `Kills`
+  rides the hash & snapshot. HUD: a gold ★ (or ★★) over the unit and its rank in the
+  selection readout. `tests/Combat` (a unit fed kills rises to Elite, tougher).
 - **Siege engines** (`Skirmish` designs 6-8, `BuildingType.SiegeWorkshop`): Ram,
   Catapult, Trebuchet — gated behind **Siege Engineering** (`TechTree.SiegeEngineering`,
   a Muster/War-branch node reachable by any path; the Build command refuses the

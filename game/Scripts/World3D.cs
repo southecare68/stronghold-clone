@@ -85,6 +85,10 @@ public partial class World3D : Node3D
     // A floating "⚠ no worker" marker over each of your own work buildings that has
     // no one staffing it (unhired, or a workshop no one can reach), keyed by id.
     readonly Dictionary<int, Node3D> _workerWarn = new();
+
+    // A gold star (or two) floating over a veteran/elite unit, so their rank reads at
+    // a glance. Pooled by unit id; created when a unit is promoted, freed when it dies.
+    readonly Dictionary<int, Label3D> _rankPip = new();
     readonly Dictionary<int, int> _turretMask = new();   // a turret's rampart-neighbour bits, to rebuild its spurs
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
     PackedScene _mTree, _mRock, _mWheat;
@@ -1087,6 +1091,33 @@ public partial class World3D : Node3D
 
     // The health bar over a hurt unit. Hidden at full health and when the unit is
     // fogged; freed when the unit heals up or dies.
+    // A gold star per rank above a veteran/elite unit — one for Veteran, two for Elite.
+    void UpdateRankPip(Unit u, Vector3 pos, bool visible)
+    {
+        int rank = visible && u.Alive ? _sim.RankOf(u) : 0;
+        if (rank > 0)
+        {
+            if (!_rankPip.TryGetValue(u.Id, out var lbl))
+            {
+                lbl = new Label3D
+                {
+                    Modulate = new Color(0.97f, 0.83f, 0.36f),          // gold
+                    OutlineModulate = new Color(0.14f, 0.09f, 0f),
+                    FontSize = 34, OutlineSize = 7,
+                    Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                    NoDepthTest = true, FixedSize = true, PixelSize = 0.0032f,
+                };
+                AddChild(lbl); _rankPip[u.Id] = lbl;
+            }
+            lbl.Text = rank == 2 ? "★★" : "★";
+            lbl.Position = pos + new Vector3(0, 1.9f, 0);
+        }
+        else if (_rankPip.TryGetValue(u.Id, out var old))
+        {
+            old.QueueFree(); _rankPip.Remove(u.Id);
+        }
+    }
+
     void UpdateBar(Unit u, Vector3 pos, bool visible)
     {
         float frac = u.MaxHp > 0 ? Mathf.Clamp(u.Hp / (float)u.MaxHp, 0f, 1f) : 1f;
@@ -1593,7 +1624,10 @@ public partial class World3D : Node3D
                         : u.DesignId >= 0 && u.DesignId < Skirmish.DesignNames.Length ? Skirmish.DesignNames[u.DesignId]
                         : "Soldier";
                     string where = u.GarrisonId != 0 ? ", on the wall" : "";
-                    return $"{kind}  ·  {u.Hp} hp{where}";
+                    int rank = _sim.RankOf(u);
+                    string vet = rank == 2 ? "  ·  ⟨Elite⟩" : rank == 1 ? "  ·  ⟨Veteran⟩" : "";
+                    string kills = u.Kills > 0 ? $"  ·  {u.Kills} kill{(u.Kills == 1 ? "" : "s")}" : "";
+                    return $"{kind}  ·  {u.Hp}/{u.MaxHp} hp{vet}{kills}{where}";
                 }
         return "No selection";
     }
@@ -2216,9 +2250,12 @@ public partial class World3D : Node3D
 
             UpdateBar(u, pos, node.Visible);
             UpdateCarry(u, pos, node.Visible);
+            UpdateRankPip(u, pos, node.Visible);
             _lastSeen[u.Id] = (pos, u.IsPeasant);
         }
         Prune(_unitNodes, live);
+        foreach (var id in new List<int>(_rankPip.Keys))
+            if (!live.Contains(id)) { _rankPip[id].QueueFree(); _rankPip.Remove(id); }
         foreach (var id in new List<int>(_carryProp.Keys))
             if (!live.Contains(id)) { _carryProp[id].QueueFree(); _carryProp.Remove(id); }
         foreach (var id in new List<int>(_skel.Keys))

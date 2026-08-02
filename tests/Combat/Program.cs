@@ -16,6 +16,7 @@ static class Program
         AFightResolves();
         TheOutnumberedSideLoses();
         AcquiresTheNextFoeAfterAKill();
+        AVeteranHardensWithKills();
         MoveBreaksOffCombat();
         TwoClientsAgreeOnTheWholeFight();
         RngSurvivesARejoinMidFight();
@@ -226,6 +227,29 @@ static class Program
     // ---- helpers -----------------------------------------------------------
     // Owner is read from the Unit, so an order can never be aimed at the wrong
     // player by a bookkeeping slip.
+
+    // Veterancy: a unit that slays foes hardens — it ranks up, growing tougher (a
+    // bigger max hp) and hitting harder. Fed six hapless dummies to fell in a row.
+    static void AVeteranHardensWithKills()
+    {
+        Console.WriteLine("\na unit that slays foes hardens into a veteran:");
+        var sim = new Simulation(TileMap.Open(24));
+        int dummy = sim.RegisterDesign(new UnitDesign { Hp = 5, Damage = 0, SpeedStat = 5, RangeStat = 3, Cooldown = 10 });   // harmless, one-shot fodder
+        var hero = sim.SpawnUnit(1, 8, 8);                 // a plain soldier (design 0)
+        int baseMax = hero.MaxHp;
+        Check("it starts a Regular", sim.RankOf(hero) == 0);
+
+        var foes = new List<Unit>();
+        foreach (var off in new[] { (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1) })
+            foes.Add(sim.SpawnUnit(2, 8 + off.Item1, 8 + off.Item2, dummy));
+        Order(sim, Atk(hero, foes[0]));                    // strike the first; it acquires the rest as they fall
+        for (int i = 0; i < 3000 && sim.Units.Count > 1; i++) sim.Tick(Array.Empty<Command>());
+
+        Check($"it racked up kills ({hero.Kills})", hero.Kills >= 5);
+        Check("and rose to Elite", sim.RankOf(hero) == 2);
+        Check($"growing tougher ({hero.MaxHp} > {baseMax})", hero.MaxHp > baseMax);
+        Check("unharmed by the harmless fodder", hero.Hp > baseMax);   // healed past its old max by the promotions
+    }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
 
