@@ -176,6 +176,13 @@ public partial class World3D : Node3D
     Mesh _poleMesh, _flagMesh;
     Material _poleMat, _flagMatDirect, _flagMatCautious;
 
+    // Scout report pings — a beacon dropped where a roaming scout spotted the enemy,
+    // fading over a few seconds. Purely visual; the sighting itself is deterministic.
+    sealed class Ping { public Node3D Node; public StandardMaterial3D Mat; public float Life; }
+    readonly List<Ping> _pings = new();
+    Mesh _pingMesh;
+    const float PingLife = 9f;
+
     bool _boxing;
     Vector2 _boxStart, _boxEnd;
     ColorRect _box;
@@ -1350,6 +1357,7 @@ public partial class World3D : Node3D
         _ringMine = Unshaded(new Color(0.35f, 0.75f, 1f));
         _ringEnemy = Unshaded(new Color(1f, 0.45f, 0.35f));
 
+        _pingMesh = new BoxMesh { Size = new Vector3(0.45f, 7f, 0.45f) };   // a tall thin signal beacon
         _poleMesh = new CylinderMesh { TopRadius = 0.035f, BottomRadius = 0.05f, Height = 1.8f, RadialSegments = 6 };
         _flagMesh = new BoxMesh { Size = new Vector3(0.55f, 0.36f, 0.03f) };
         _poleMat = Unshaded(new Color(0.20f, 0.16f, 0.12f));   // dark timber
@@ -2067,6 +2075,8 @@ public partial class World3D : Node3D
         UpdateDropPrompt(delta);
         UpdateLeave(delta);
         UpdateRestartArm(delta);
+        PollScoutSightings();
+        UpdatePings(delta);
         PollVictoryEvents();
         if (_dumpDesync && !_dumpDone && _me.Desync != null) { WriteDesyncDump(_me.Desync); _dumpDone = true; }
         CameraInput(delta);
@@ -3275,6 +3285,15 @@ public partial class World3D : Node3D
                 bool want = !_sim.PauseVoteOf(MyPlayer);
                 _me.Issue(new Command { Type = CommandType.SetPauseVote, X = want ? 1 : 0 });
             }
+            return;
+        }
+
+        // N toggles free-roam on the selected scout(s) — it wanders, reveals fog, and
+        // calls out any enemy it spots. A sim order (SetRoam), so it works in any mode.
+        if (e is InputEventKey roam && roam.Pressed && roam.Keycode == Key.N &&
+            !roam.CtrlPressed && !roam.MetaPressed && !roam.AltPressed)
+        {
+            ToggleRoam();
             return;
         }
 
@@ -5006,6 +5025,90 @@ public partial class World3D : Node3D
         m.Node.Position = new Vector3(t.X, 0f, t.Y);
         m.Node.Visible = true;
         used++;
+    }
+
+    // Toggle free-roam on the selected scouts. Only scouts obey (the sim filters the
+    // rest), so this reads which of the selection are scouts and flips them together.
+    void ToggleRoam()
+    {
+        var scoutIds = new List<int>();
+        bool anyRoaming = false;
+        foreach (var u in _sim.Units)
+            if (_selected.Contains(u.Id) && u.Owner == MyPlayer && _sim.DesignOf(u.DesignId).Stealth)
+            {
+                scoutIds.Add(u.Id);
+                if (u.Roaming) anyRoaming = true;
+            }
+        if (scoutIds.Count == 0) { ShowRealmToast("Select a scout to send it roaming  (N)"); return; }
+        _me.Issue(new Command { Type = CommandType.SetRoam, UnitIds = scoutIds.ToArray(), X = anyRoaming ? 0 : 1 });
+        ShowRealmToast(anyRoaming ? "Scout roam — off" : "⚑   Scout roaming — it will report what it finds");
+    }
+
+    // Show this player's scout callouts: a toast naming the find and its bearing, and
+    // a fading beacon dropped where it was seen. The sightings are computed identically
+    // on every client (deterministic), so we only surface our own and drain them all.
+    void PollScoutSightings()
+    {
+        var sightings = _sim.ScoutSightings;
+        if (sightings.Count > 0)
+        {
+            foreach (var s in sightings)
+            {
+                if (s.Owner != MyPlayer) continue;
+                (string what, Color col) = s.Kind switch
+                {
+                    Sim.SightingKind.Stronghold => ("the enemy stronghold", new Color(1f, 0.32f, 0.26f)),
+                    Sim.SightingKind.Structure  => ("an enemy building",    new Color(1f, 0.70f, 0.26f)),
+                    _                           => ("enemy forces",         new Color(1f, 0.86f, 0.36f)),
+                };
+                ShowRealmToast($"⚑   Scout spotted {what} — {Compass(s.X, s.Y)}");
+                DropPing(s.X, s.Y, col);
+            }
+            foreach (var c in Clients()) c.Sim.ClearScoutSightings();
+        }
+    }
+
+    void DropPing(int tx, int ty, Color col)
+    {
+        Ping p = null;
+        foreach (var q in _pings) if (q.Life <= 0f) { p = q; break; }
+        if (p == null)
+        {
+            p = new Ping { Mat = (StandardMaterial3D)Unshaded(col) };
+            p.Node = new MeshInstance3D { Mesh = _pingMesh, MaterialOverride = p.Mat };
+            AddChild(p.Node);
+            _pings.Add(p);
+        }
+        p.Mat.AlbedoColor = col;
+        p.Node.Position = new Vector3(tx, 3.5f, ty);   // beacon base on the ground (mesh is 7 tall)
+        p.Node.Visible = true;
+        p.Life = PingLife;
+    }
+
+    void UpdatePings(double delta)
+    {
+        foreach (var p in _pings)
+        {
+            if (p.Life <= 0f) continue;
+            p.Life -= (float)delta;
+            if (p.Life <= 0f) { p.Node.Visible = false; continue; }
+            var c = p.Mat.AlbedoColor;
+            c.A = Mathf.Clamp(p.Life / PingLife, 0f, 1f) * 0.9f;   // fade out over its life
+            p.Mat.AlbedoColor = c;
+        }
+    }
+
+    // A rough 8-point bearing from my keep to a tile, for a scout's callout.
+    string Compass(int tx, int ty)
+    {
+        int fx = MapSize / 2, fy = MapSize / 2;
+        foreach (var b in _sim.Buildings)
+            if (b.Alive && b.Owner == MyPlayer && b.Type == BuildingType.Keep) { fx = b.CenterX; fy = b.CenterY; break; }
+        int dx = tx - fx, dy = ty - fy, tol = 10;
+        string ns = dy < -tol ? "north" : dy > tol ? "south" : "";
+        string ew = dx > tol ? "east" : dx < -tol ? "west" : "";
+        string dir = ns + (ns != "" && ew != "" ? "-" : "") + ew;
+        return dir == "" ? "close to your keep" : "to the " + dir;
     }
 
     // A pole with a banner flying from its top — the pole plants on the ground, the

@@ -35,6 +35,8 @@ static class Program
         HostMigrationSeatSwap();
         SaveLoadReseedsInLockstep();
         RestartReseedsToFreshOpening();
+        RoamingScoutStaysDeterministic();
+        ScoutReportsWhatItFinds();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -816,6 +818,69 @@ static class Program
         }
         Check("the rematch runs from the top, in sync every tick", desyncs == 0);
         Check("no desync reported by either side", a.Desync == null && b.Desync == null);
+    }
+
+    // A roaming scout picks its own targets (rings outward for dark ground, a seeded
+    // wander as fallback) and uses the RNG — all of which must be byte-identical on
+    // every machine, or a free-roaming unit would silently desync the match.
+    static void RoamingScoutStaysDeterministic()
+    {
+        Console.WriteLine("\nroaming scout determinism:");
+        var net = new RelayTransport();
+        var a = new Client(1, net, TileMap.Skirmish(128));
+        var b = new Client(2, net, TileMap.Skirmish(128));
+        Skirmish.Setup(a.Sim, 128);
+        Skirmish.Setup(b.Sim, 128);
+        net.Join(a);
+        net.Join(b);
+
+        // Same scout on both sims (identical worlds → identical id), then set it roaming.
+        var s = a.Sim.SpawnUnit(1, 40, 40, 4);
+        b.Sim.SpawnUnit(1, 40, 40, 4);
+        var start = (s.X, s.Y);
+        a.Issue(new Command { Type = CommandType.SetRoam, UnitIds = new[] { s.Id }, X = 1 });
+
+        int desyncs = 0;
+        for (int i = 0; i < 400; i++)
+        {
+            a.SendInput(); b.SendInput(); net.Flush(); a.TryStep(); b.TryStep();
+            if (a.Sim.StateChecksum() != b.Sim.StateChecksum()) desyncs++;
+        }
+        Check("a free-roaming scout stays in perfect lockstep", desyncs == 0);
+        var now = a.Sim.Units.Find(u => u.Id == s.Id);
+        Check("and it actually roamed off on its own", now != null && (now.X, now.Y) != start);
+    }
+
+    // The report half: a roaming scout calls out the enemy — a keep as a stronghold —
+    // and a non-scout ignores the order entirely.
+    static void ScoutReportsWhatItFinds()
+    {
+        Console.WriteLine("\nscout roam & report:");
+        var sim = new Simulation(TileMap.Skirmish(128));
+        Skirmish.Setup(sim, 128);
+        sim.FogEnabled = true;
+
+        int kx = -1, ky = -1;
+        foreach (var b in sim.Buildings)
+            if (b.Type == BuildingType.Keep && b.Owner == 2) { kx = b.CenterX; ky = b.CenterY; break; }
+        Check("found the enemy keep to spot", kx >= 0);
+
+        var scout = sim.SpawnUnit(1, kx - 6, ky, 4);
+        var soldier = sim.SpawnUnit(1, kx - 6, ky + 2, 0);
+        scout.Roaming = true;
+
+        sim.Tick(new[] { new Command { Owner = 1, Seq = 1, Type = CommandType.SetRoam, UnitIds = new[] { soldier.Id }, X = 1 } });
+        Check("a non-scout ignores the roam order", !soldier.Roaming);
+        Check("the scout is roaming", scout.Roaming);
+
+        bool reported = false;
+        for (int i = 0; i < 12 && !reported; i++)
+        {
+            sim.Tick(Array.Empty<Command>());
+            foreach (var s in sim.ScoutSightings)
+                if (s.Owner == 1 && s.Enemy == 2 && s.Kind == SightingKind.Stronghold) reported = true;
+        }
+        Check("the roaming scout reported the enemy stronghold", reported);
     }
 
     static void Check(string what, bool ok)

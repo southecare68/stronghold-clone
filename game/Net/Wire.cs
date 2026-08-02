@@ -169,6 +169,8 @@ namespace Netcode
                 PutInt(buf, u.Waypoints.Count);
                 foreach (var w in u.Waypoints) { PutInt(buf, w.X); PutInt(buf, w.Y); }
                 PutInt(buf, u.Cautious ? 1 : 0);
+                PutInt(buf, u.Roaming ? 1 : 0);
+                PutInt(buf, u.RoamReportCd);
             }
 
             PutInt(buf, snap.Nodes.Length);
@@ -347,6 +349,8 @@ namespace Netcode
                     for (int j = 0; j < stops; j++)
                         u.Waypoints.Add(new Tile(GetInt(data, ref p), GetInt(data, ref p)));
                     u.Cautious = GetInt(data, ref p) != 0;
+                    u.Roaming = GetInt(data, ref p) != 0;
+                    u.RoamReportCd = GetInt(data, ref p);
                     units[i] = u;
                 }
                 snap.Units = units;

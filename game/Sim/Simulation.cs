@@ -21,6 +21,7 @@ namespace Sim
         SetTax = 9, SetRations = 10, Research = 11, Spy = 12, Trade = 13, SetTradePolicy = 14, HireMercenary = 15,
         SetPauseVote = 16,   // X = 1 (this player votes to pause) / 0 (votes to run); unanimity toggles GamePaused
         LeaveToAi = 17,      // a player is leaving: X = AiLevel, Y = VictoryPath — the AI inherits their realm as-is
+        SetRoam = 18,        // X = 1 (scouts in UnitIds start free-roaming) / 0 (stop) — the reconnaissance mode
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18 }
@@ -40,6 +41,22 @@ namespace Sim
     // building converts goods only while manned. Gathering and Working share the
     // walk/harvest/haul cycle; Manning does not (nothing to haul).
     public enum Job { None = 0, Gathering = 1, Working = 2, Manning = 3 }
+
+    // What a roaming scout called out. Deterministic like a VictoryEvent — every
+    // client computes the same sightings for every owner; the renderer shows only
+    // its own player's. Kind ranks the find so the HUD can headline the scariest.
+    public enum SightingKind { Forces = 0, Structure = 1, Stronghold = 2 }
+    public readonly struct ScoutSighting
+    {
+        public readonly int Owner;   // whose scout saw it
+        public readonly int Enemy;   // whose thing it is
+        public readonly int X, Y;    // where, in tiles
+        public readonly SightingKind Kind;
+        public ScoutSighting(int owner, int enemy, int x, int y, SightingKind kind)
+        {
+            Owner = owner; Enemy = enemy; X = x; Y = y; Kind = kind;
+        }
+    }
 
     // A harvestable deposit sitting on a tile. Depletes as it is gathered and is
     // removed when empty. Position is in whole tiles (a node occupies a cell),
@@ -255,6 +272,14 @@ namespace Sim
         public List<Tile> Waypoints = new();
         public bool Cautious;
 
+        // Free-roaming reconnaissance (the Scout). A roaming scout picks its own
+        // exploration targets — heading for the nearest dark ground — and calls out
+        // when it spots the enemy. RoamReportCd throttles those callouts. Post-freeze
+        // state like Cautious: hashed in StateChecksum, carried in the snapshot, and
+        // never touched by the parity scenario (which issues no roam orders).
+        public bool Roaming;
+        public int RoamReportCd;   // ticks until this scout may report again
+
         public Unit Clone()
         {
             var copy = new Unit
@@ -266,7 +291,7 @@ namespace Sim
                 Job = Job, GatherNodeId = GatherNodeId, CarryType = CarryType,
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant, IsMercenary = IsMercenary,
                 PathIndex = PathIndex,
-                Cautious = Cautious,
+                Cautious = Cautious, Roaming = Roaming, RoamReportCd = RoamReportCd,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
             copy.Waypoints = new List<Tile>(Waypoints);
@@ -1181,6 +1206,7 @@ namespace Sim
                         if (u == null || u.Owner != cmd.Owner) continue;
                         if (u.GarrisonId != 0) Ungarrison(u);   // climb down off the wall first
                         StopWork(u);             // a plain move breaks off fighting AND gathering
+                        u.Roaming = false;       // taking manual control ends a scout's free roam
 
                         if (append && (u.HasPath || u.Waypoints.Count > 0))
                         {
@@ -1428,6 +1454,16 @@ namespace Sim
 
                 case CommandType.LeaveToAi:       // player left: X = AiLevel, Y = VictoryPath — AI inherits their realm
                     TakeOverWithAi(cmd.Owner, (AiLevel)cmd.X, (VictoryPath)Math.Clamp(cmd.Y, 0, 3));
+                    break;
+
+                case CommandType.SetRoam:         // X = 1 roam / 0 stop; only scouts obey
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u == null || u.Owner != cmd.Owner || !IsScout(u)) continue;
+                        u.Roaming = cmd.X != 0;
+                        if (!u.Roaming) u.RoamReportCd = 0;
+                    }
                     break;
             }
         }
@@ -1706,6 +1742,99 @@ namespace Sim
             }
         }
 
+        // ── Scouting: free roam + reports ────────────────────────────────────
+        bool IsScout(Unit u) => DesignOf(u.DesignId).Stealth;   // only the Scout design carries Stealth
+
+        const int RoamRadius = 60;                          // how far out a roamer looks for dark ground
+        const int ScoutReportInterval = 12 * TickRate;      // a scout calls out at most this often
+
+        readonly List<ScoutSighting> _scoutSightings = new();
+        public IReadOnlyList<ScoutSighting> ScoutSightings => _scoutSightings;
+        public void ClearScoutSightings() => _scoutSightings.Clear();
+
+        // Send a roaming scout toward the nearest UNEXPLORED, reachable ground — rings
+        // outward from where it stands, scanned in a fixed order so every machine picks
+        // the same tile. Falls back to a seeded-random wander once no reachable dark
+        // ground is left, so a fully-scouted map keeps the scout moving, not idle.
+        void RoamNext(Unit u)
+        {
+            int cx = Fixed.ToInt(u.X), cy = Fixed.ToInt(u.Y);
+            for (int r = 2; r <= RoamRadius; r++)
+            {
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    if (TryRoamTo(u, cx + dx, cy - r)) return;
+                    if (TryRoamTo(u, cx + dx, cy + r)) return;
+                }
+                for (int dy = -r + 1; dy <= r - 1; dy++)
+                {
+                    if (TryRoamTo(u, cx - r, cy + dy)) return;
+                    if (TryRoamTo(u, cx + r, cy + dy)) return;
+                }
+            }
+            for (int tries = 0; tries < 24; tries++)
+                if (TryRoamTo(u, _rng.NextInt(Map.Width), _rng.NextInt(Map.Height), requireDark: false)) return;
+        }
+
+        bool TryRoamTo(Unit u, int tx, int ty, bool requireDark = true)
+        {
+            if (tx < 0 || ty < 0 || tx >= Map.Width || ty >= Map.Height) return false;
+            if (!Map.Passable(tx, ty)) return false;
+            if (requireDark && HasExplored(u.Owner, tx, ty)) return false;
+            Order(u, tx, ty);
+            return u.HasPath;
+        }
+
+        // Each roaming scout, off cooldown, calls out the most important enemy inside
+        // its own sight — a keep outranks a lesser building outranks loose forces.
+        // Deterministic: same scouts, enemies and fog on every machine, id order.
+        void ResolveScouting()
+        {
+            foreach (var u in Units)
+            {
+                if (!u.Roaming || !u.Alive) continue;
+                if (u.RoamReportCd > 0) { u.RoamReportCd--; continue; }
+                if (TryReport(u)) u.RoamReportCd = ScoutReportInterval;
+            }
+        }
+
+        bool TryReport(Unit scout)
+        {
+            int sx = Fixed.ToInt(scout.X), sy = Fixed.ToInt(scout.Y);
+            int sight = DesignOf(scout.DesignId).Sight, r2 = sight * sight;
+
+            // Buildings first — and a keep is the headline over any other structure.
+            Building best = null;
+            SightingKind bestKind = SightingKind.Structure;
+            foreach (var b in Buildings)
+            {
+                if (!b.Alive || b.Owner == scout.Owner) continue;
+                int dx = b.CenterX - sx, dy = b.CenterY - sy;
+                if (dx * dx + dy * dy > r2) continue;
+                if (!CanSee(scout.Owner, b.CenterX, b.CenterY)) continue;
+                var kind = b.Type == BuildingType.Keep ? SightingKind.Stronghold : SightingKind.Structure;
+                if (best == null || kind > bestKind) { best = b; bestKind = kind; }
+                if (bestKind == SightingKind.Stronghold) break;   // nothing outranks a keep
+            }
+            if (best != null)
+            {
+                _scoutSightings.Add(new ScoutSighting(scout.Owner, best.Owner, best.CenterX, best.CenterY, bestKind));
+                return true;
+            }
+
+            // Otherwise the first enemy unit it can actually make out (id order).
+            foreach (var e in Units)
+            {
+                if (e.Owner == scout.Owner || !e.Alive) continue;
+                int dx = Fixed.ToInt(e.X) - sx, dy = Fixed.ToInt(e.Y) - sy;
+                if (dx * dx + dy * dy > r2) continue;
+                if (!CanSeeUnit(scout.Owner, e)) continue;
+                _scoutSightings.Add(new ScoutSighting(scout.Owner, e.Owner, Fixed.ToInt(e.X), Fixed.ToInt(e.Y), SightingKind.Forces));
+                return true;
+            }
+            return false;
+        }
+
         // The danger field a cautious march avoids: every enemy the owner can SEE
         // stamps a cost bubble on the tiles around it, stacking where threats overlap.
         // The cost falls off with distance (Chebyshev), so A* prefers to skirt wide
@@ -1803,14 +1932,17 @@ namespace Sim
                     else
                     {
                         // The route is walked. If more stops are queued, march to the
-                        // next; otherwise the journey is over.
+                        // next; otherwise the journey is over — unless this is a roaming
+                        // scout, which picks its own next patch of dark ground.
                         u.Path = null;
                         u.PathIndex = 0;
                         AdvanceToNextStop(u);
+                        if (u.Roaming && !u.HasPath) RoamNext(u);
                     }
                 }
             }
 
+            ResolveScouting();      // roaming scouts call out any enemy they've spotted
             ResolveGarrison();      // station soldiers on their ramparts...
             ResolveCombat();        // ...then let the garrison and the field fight
             RemoveDead();
@@ -2891,6 +3023,7 @@ namespace Sim
                 Mix(u.Waypoints.Count);
                 foreach (var w in u.Waypoints) { Mix(w.X); Mix(w.Y); }
                 Mix(u.Cautious ? 1 : 0);
+                Mix(u.Roaming ? 1 : 0); Mix(u.RoamReportCd);
             }
 
             foreach (var n in Nodes)                 // id order
