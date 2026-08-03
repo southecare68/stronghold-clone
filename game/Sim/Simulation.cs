@@ -357,7 +357,7 @@ namespace Sim
         readonly List<UnitDesign> _designs = new();
 
         // --- Combat tuning that is NOT per-design ------------------------------
-        static readonly int AggroRange = Fixed.FromInt(7);      // acquire the next foe within this
+        static readonly int AggroRange = Fixed.FromInt(10);     // acquire the next foe within this (10-tile radius)
         const int ChaseRepathEvery = 6;                         // ticks between chase re-paths
 
         // A unit stationed on a wall shoots two tiles further (height) and takes
