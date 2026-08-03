@@ -23,6 +23,7 @@ static class Program
         TheWorkshopNeedsSiegeEngineering();
         TwoClientsAgreeOnTheSiege();
         SiegeSurvivesARejoin();
+        ALaddermanScalesAWall();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -296,6 +297,34 @@ static class Program
     { Owner = u.Owner, Type = CommandType.Attack, UnitIds = new[] { u.Id }, TargetId = target.Id };
     static Command Train(int owner, int buildingId, int design) => new Command
     { Owner = owner, Type = CommandType.Train, TargetId = buildingId, X = design };
+
+    // A Ladderman climbs OVER an enemy wall to the far side instead of battering it —
+    // and it takes time, so it's defenceless mid-climb. A regular soldier still batters.
+    static void ALaddermanScalesAWall()
+    {
+        Console.WriteLine("\na ladderman scales an enemy wall:");
+        var sim = new Simulation(TileMap.Open(64));
+        foreach (var d in Skirmish.Designs()) sim.RegisterDesign(d);   // registers the Ladderman (design 10)
+        Building mid = null;
+        for (int y = 19; y <= 21; y++) { var w = sim.PlaceBuilding(BuildingType.Wall, 2, 30, y); if (y == 20) mid = w; }
+        var lad = sim.SpawnUnit(1, 26, 20, 10);   // ladderman, WEST of the wall line
+        Check("the ladderman starts west of the wall", Fixed.ToInt(lad.X) < 30);
+
+        int wallHp = mid.Hp;
+        Order(sim, AttackBuilding(new[] { lad }, mid));
+        for (int i = 0; i < 500; i++) sim.Tick(Array.Empty<Command>());
+        Check($"it climbed over to the far (east) side (x={Fixed.ToInt(lad.X)})", Fixed.ToInt(lad.X) > 30);
+        Check("the wall still stands — it was scaled, not battered", mid.Alive && mid.Hp == wallHp);
+
+        // By contrast a plain soldier batters the wall down rather than scaling it.
+        var sim2 = new Simulation(TileMap.Open(64));
+        var w2 = sim2.PlaceBuilding(BuildingType.Wall, 2, 30, 20);
+        var soldier = sim2.SpawnUnit(1, 28, 20, 0);
+        int hp0 = w2.Hp;
+        Order(sim2, AttackBuilding(new[] { soldier }, w2));
+        for (int i = 0; i < 300; i++) sim2.Tick(Array.Empty<Command>());
+        Check("a soldier batters the same wall instead of scaling", !w2.Alive || w2.Hp < hp0);
+    }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });
 

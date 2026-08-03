@@ -102,6 +102,7 @@ namespace Sim
         public int Cooldown;    // ticks between blows
         public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
         public bool Stealth;    // a scout skill: enemies spot it only at close range (see CanSeeUnit); NOT point-bought
+        public bool CanScale;   // an assault skill (the Ladderman): climbs OVER an enemy wall/tower to the far side; NOT point-bought
         public bool Trainable = true;   // false for special units (the exile Avenger): off the barracks roster, and exempt from the point budget
         public int SiegeDamage;         // damage dealt to BUILDINGS (0 = a normal unit, which uses Damage vs buildings). A siege engine: huge here, feeble in Damage. NOT point-bought.
         public int CostWood, CostIron;  // build cost of a siege engine at the Siege Workshop (soldiers ignore these and pay the flat barracks cost)
@@ -120,7 +121,7 @@ namespace Sim
 
         public UnitDesign Clone() => new UnitDesign
         {
-            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, Trainable = Trainable,
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, CanScale = CanScale, Trainable = Trainable,
             SiegeDamage = SiegeDamage, CostWood = CostWood, CostIron = CostIron,
         };
         public bool IsSiege => SiegeDamage > 0;
@@ -297,6 +298,11 @@ namespace Sim
         public bool Guarding;
         public int GuardX, GuardY;   // the post to hold and return to
 
+        // Escalade (the Ladderman): ticks left hauling itself up an enemy wall. > 0
+        // means mid-climb — held fast at the wall foot and exposed — and at zero it
+        // drops onto the far side. Post-freeze state, hashed & wired like the rest.
+        public int ClimbTimer;
+
         public Unit Clone()
         {
             var copy = new Unit
@@ -309,7 +315,7 @@ namespace Sim
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant, IsMercenary = IsMercenary,
                 PathIndex = PathIndex,
                 Cautious = Cautious, Roaming = Roaming, RoamReportCd = RoamReportCd,
-                Guarding = Guarding, GuardX = GuardX, GuardY = GuardY,
+                Guarding = Guarding, GuardX = GuardX, GuardY = GuardY, ClimbTimer = ClimbTimer,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
             copy.Waypoints = new List<Tile>(Waypoints);
@@ -2645,7 +2651,14 @@ namespace Sim
                 // A garrisoned soldier fights defensively: it needs no order, holds
                 // its rampart, and shoots anything that wanders into reach.
                 if (u.GarrisonId != 0) { GarrisonFire(u); continue; }
-                if (u.TargetBuildingId != 0) { SiegeBuilding(u); continue; }
+                if (u.TargetBuildingId != 0)
+                {
+                    // A Ladderman SCALES a wall or tower it's ordered against — climbs
+                    // over rather than battering it down; everyone else besieges.
+                    if (DesignOf(u.DesignId).CanScale) ScaleBuilding(u);
+                    else SiegeBuilding(u);
+                    continue;
+                }
                 if (u.TargetId == 0) continue;
 
                 var target = Units.Find(v => v.Id == u.TargetId);
@@ -2839,6 +2852,86 @@ namespace Sim
                 var spot = SpawnPointAround(b);
                 if (spot.HasValue) Order(u, spot.Value.X, spot.Value.Y);
             }
+        }
+
+        // ── Escalade: the Ladderman scales an enemy wall or tower ────────────────
+        const int ScaleReach = 2;              // tiles: how close before it can start climbing
+        const int ScaleTicks = 3 * 20;         // ticks (~3s) to haul up and over — long enough to counter
+
+        static bool IsScalable(BuildingType t) =>   // the walls & towers, not solid keeps or huts
+            t == BuildingType.Wall || t == BuildingType.Turret || t == BuildingType.Gatehouse;
+
+        // Climb an enemy wall/tower and drop on the far side. Approach the foot, then
+        // hang there for ScaleTicks (defenceless — this is the window to shoot it down),
+        // then pop over to the nearest passable tile beyond the wall.
+        void ScaleBuilding(Unit u)
+        {
+            var b = Buildings.Find(x => x.Id == u.TargetBuildingId);
+            if (b == null || !b.Alive || b.Owner == u.Owner || !IsScalable(b.Type))
+            { u.TargetBuildingId = 0; u.ClimbTimer = 0; return; }
+
+            if (u.ClimbTimer > 0)
+            {
+                // Mid-climb: cling to the wall (exposed) and count down.
+                u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
+                u.ClimbTimer--;
+                if (u.ClimbTimer == 0)
+                {
+                    var over = FarSideTile(u, b);
+                    if (over.HasValue)
+                    { u.X = Fixed.FromInt(over.Value.X); u.Y = Fixed.FromInt(over.Value.Y); u.Tx = u.X; u.Ty = u.Y; }
+                    u.TargetBuildingId = 0;   // over the wall — free to be ordered on
+                }
+                return;
+            }
+
+            if (DistToBuilding(u, b) <= Fixed.FromInt(ScaleReach))
+            {
+                // At the foot — start hauling up.
+                u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;
+                u.ClimbTimer = ScaleTicks;
+                return;
+            }
+
+            // Still approaching — march to the wall's foot on THIS side (the passable
+            // ring tile nearest the climber), so it climbs from where it stands.
+            var foot = NearFootTile(u, b);
+            if (foot.HasValue && (!u.HasPath || TickNumber % ChaseRepathEvery == 0)) Order(u, foot.Value.X, foot.Value.Y);
+        }
+
+        // The passable neighbour of the wall NEAREST the climber — the foot on its own
+        // side, where it starts the climb.
+        Tile? NearFootTile(Unit u, Building b)
+        {
+            int ux = Fixed.ToInt(u.X), uy = Fixed.ToInt(u.Y);
+            Tile? best = null; long bestD = long.MaxValue;
+            for (int ty = b.Y - 1; ty <= b.Y + b.H; ty++)
+                for (int tx = b.X - 1; tx <= b.X + b.W; tx++)
+                {
+                    if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) continue;   // ring only
+                    if (!Map.Passable(tx, ty)) continue;
+                    long dx = tx - ux, dy = ty - uy, d = dx * dx + dy * dy;
+                    if (d < bestD) { bestD = d; best = new Tile(tx, ty); }
+                }
+            return best;
+        }
+
+        // The tile on the far side of a wall from a climber: the passable neighbour of
+        // the wall's footprint FARTHEST from the climber — i.e. across it, toward the
+        // castle interior. Null if the wall is boxed in on the far face.
+        Tile? FarSideTile(Unit u, Building b)
+        {
+            int ux = Fixed.ToInt(u.X), uy = Fixed.ToInt(u.Y);
+            Tile? best = null; long bestD = -1;
+            for (int ty = b.Y - 1; ty <= b.Y + b.H; ty++)
+                for (int tx = b.X - 1; tx <= b.X + b.W; tx++)
+                {
+                    if (tx >= b.X && tx < b.X + b.W && ty >= b.Y && ty < b.Y + b.H) continue;   // ring only
+                    if (!Map.Passable(tx, ty)) continue;
+                    long dx = tx - ux, dy = ty - uy, d = dx * dx + dy * dy;
+                    if (d > bestD) { bestD = d; best = new Tile(tx, ty); }
+                }
+            return best;
         }
 
         // Distance from a unit to the nearest tile of a building's footprint, in
@@ -3044,7 +3137,7 @@ namespace Sim
             Mix(_designs.Count);
             foreach (var d in _designs)
             {
-                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.Trainable ? 1 : 0);
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.CanScale ? 1 : 0); Mix(d.Trainable ? 1 : 0);
                 Mix(d.SiegeDamage); Mix(d.CostWood); Mix(d.CostIron);
             }
 
@@ -3079,6 +3172,7 @@ namespace Sim
                 Mix(u.Cautious ? 1 : 0);
                 Mix(u.Roaming ? 1 : 0); Mix(u.RoamReportCd);
                 Mix(u.Guarding ? 1 : 0); Mix(u.GuardX); Mix(u.GuardY);
+                Mix(u.ClimbTimer);
             }
 
             foreach (var n in Nodes)                 // id order

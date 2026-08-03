@@ -174,6 +174,7 @@ namespace Netcode
                 PutInt(buf, u.Guarding ? 1 : 0);
                 PutInt(buf, u.GuardX);
                 PutInt(buf, u.GuardY);
+                PutInt(buf, u.ClimbTimer);
             }
 
             PutInt(buf, snap.Nodes.Length);
@@ -218,6 +219,7 @@ namespace Netcode
                 PutInt(buf, d.Cooldown);
                 PutInt(buf, d.Sight);
                 PutInt(buf, d.Stealth ? 1 : 0);
+                PutInt(buf, d.CanScale ? 1 : 0);
                 PutInt(buf, d.Trainable ? 1 : 0);
                 PutInt(buf, d.SiegeDamage);
                 PutInt(buf, d.CostWood);
@@ -359,6 +361,7 @@ namespace Netcode
                     u.Guarding = GetInt(data, ref p) != 0;
                     u.GuardX = GetInt(data, ref p);
                     u.GuardY = GetInt(data, ref p);
+                    u.ClimbTimer = GetInt(data, ref p);
                     units[i] = u;
                 }
                 snap.Units = units;
@@ -422,6 +425,7 @@ namespace Netcode
                         Cooldown = GetInt(data, ref p),
                         Sight = GetInt(data, ref p),
                         Stealth = GetInt(data, ref p) != 0,
+                        CanScale = GetInt(data, ref p) != 0,
                         Trainable = GetInt(data, ref p) != 0,
                         SiegeDamage = GetInt(data, ref p),
                         CostWood = GetInt(data, ref p),

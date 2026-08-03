@@ -44,7 +44,7 @@ namespace Sim
         // and feeble in a fight, sent to find the enemy, not to trade blows. Its long
         // sight also feeds the cautious march: what a scout reveals, your armies will
         // route around.
-        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet", "Champion" };
+        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet", "Champion", "Ladderman" };
 
         public static IEnumerable<UnitDesign> Designs()
         {
@@ -75,6 +75,14 @@ namespace Sim
             // hitting, well above a soldier though short of the exile Avenger — the reward
             // for a court that wins its battles and feasts on the glory (Prestige.cs).
             yield return new UnitDesign { Hp = 420, Damage = 26, SpeedStat = 11, RangeStat = 3, Cooldown = 9, Sight = 9, Trainable = false };  // Champion
+
+            // The Ladderman (design 10): an assault trooper trained at the barracks like
+            // any soldier, but it can SCALE an enemy wall or tower — haul itself over to
+            // the far side, even where there are no steps down, delivering your troops
+            // into the castle without a breach. Feeble in a straight fight and defenceless
+            // while it climbs, so it must be escorted and its climb covered (Simulation
+            // ScaleBuilding). Light stats, well inside the point budget.
+            yield return new UnitDesign { Hp = 70, Damage = 5, SpeedStat = 12, RangeStat = 2, Cooldown = 14, Sight = 7, CanScale = true };  // Ladderman
         }
 
         // Where the resource nodes go. Two safe patches behind each base, and a

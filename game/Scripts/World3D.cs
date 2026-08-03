@@ -3582,6 +3582,17 @@ public partial class World3D : Node3D
             return;
         }
 
+        // An enemy building under the cursor: assault it. Siege engines & soldiers
+        // batter it down; a Ladderman scales it (the sim routes each unit — see
+        // ScaleBuilding). This is also the general "besiege that wall/keep" order.
+        var foeBld = EnemyBuildingAtScreen(screen);
+        if (foeBld != null)
+        {
+            _me.Issue(new Command { Type = CommandType.AttackBuilding, UnitIds = ids, TargetId = foeBld.Id });
+            _sound.PlayUi(Sfx.AttackOrder);
+            return;
+        }
+
         // Clicking on your own rampart mans it — tested against the wall's RAISED
         // body on screen, not the ground behind it, so clicking the wall itself
         // works rather than reading as the tile beyond it.
@@ -3643,6 +3654,25 @@ public partial class World3D : Node3D
     // manned by right-click, not inspected). Tested against the model's mid-height
     // centre (not its ground tile, which the tall body hides behind it), nearest
     // within a generous radius so clicking anywhere on the building picks it.
+    // The nearest ENEMY building under the cursor that you've scouted — the target of
+    // an assault (siege or escalade). Mirrors BuildingAtScreen but for foes you've seen.
+    Building EnemyBuildingAtScreen(Vector2 screen)
+    {
+        Building best = null;
+        float bestD = 90f * 90f;
+        foreach (var b in _sim.Buildings)
+        {
+            if (b.Owner == MyPlayer || !b.Alive || !_sim.HasExploredBuilding(MyPlayer, b)) continue;
+            float reach = b.Type == BuildingType.Wall ? 42f * 42f : 90f * 90f;
+            var c = new Vector3(b.X + (b.W - 1) / 2f, 0f, b.Y + (b.H - 1) / 2f);
+            float d = Mathf.Min(
+                _cam.UnprojectPosition(c + Vector3.Up * 0.6f).DistanceSquaredTo(screen),
+                _cam.UnprojectPosition(c + Vector3.Up * 1.6f).DistanceSquaredTo(screen));
+            if (d < reach && d < bestD) { bestD = d; best = b; }
+        }
+        return best;
+    }
+
     Building BuildingAtScreen(Vector2 screen)
     {
         Building best = null;
