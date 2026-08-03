@@ -494,10 +494,11 @@ static class Program
 
         // The match-length dial rides the snapshot, so a rejoiner paces its game the
         // same as the host (a mismatch would silently desync every hold and cost).
-        var epic = new Simulation(TileMap.Open(48)) { PaceScale = 6 };
+        var epic = new Simulation(TileMap.Open(48)) { PaceScale = 6, ResearchScale = 18 };
         var rejoin = new Simulation(TileMap.Open(48));
         rejoin.Restore(Wire.DeserializeSnapshot(Wire.Serialize(epic.Snapshot())));
         Check($"the PaceScale dial survives the wire (got {rejoin.PaceScale})", rejoin.PaceScale == 6);
+        Check($"the ResearchScale dial survives the wire (got {rejoin.ResearchScale})", rejoin.ResearchScale == 18);
     }
 
     static Command Vote(bool pause) => new Command

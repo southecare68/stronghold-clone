@@ -481,6 +481,14 @@ namespace Sim
         // ~2-hour matches (World3D at setup). Carried in the snapshot & hash so a
         // rejoiner and desync-detection agree on it. Raise for longer games.
         public int PaceScale = 1;
+
+        // The RESEARCH-length dial, separate from PaceScale (which paces the victory
+        // HOLDS): it multiplies every tech's cost, so the whole tree is a longer climb
+        // without lengthening the vigils. Default 1 — every test and the AI research at
+        // full speed — and the game sets it high (World3D) so reaching a capstone takes
+        // the better part of an hour and a half. Hashed & snapshotted like PaceScale so
+        // a rejoiner and desync-detection agree on it.
+        public int ResearchScale = 1;
         const int StartPopularity = 55;                        // a new camp opens content, so it grows
 
         // ── Multiplayer consent-pause ───────────────────────────────────────────
@@ -912,6 +920,7 @@ namespace Sim
             VictoryPathIdx = s.VictoryPathIdx;
             MatchClockTicks = s.MatchClockTicks;
             PaceScale = s.PaceScale;
+            ResearchScale = s.ResearchScale;
             PausedTicks = s.PausedTicks;
             GamePaused = s.GamePaused;
             PauseRoster = s.PauseRoster;
@@ -964,6 +973,7 @@ namespace Sim
                 VictoryPathIdx = VictoryPathIdx,
                 MatchClockTicks = MatchClockTicks,
                 PaceScale = PaceScale,
+                ResearchScale = ResearchScale,
                 PausedTicks = PausedTicks,
                 GamePaused = GamePaused,
                 PauseRoster = PauseRoster,
@@ -3242,7 +3252,7 @@ namespace Sim
             // Victory: the crown (or -1), the path it was won by, and the match-clock
             // length two machines must agree on. The per-owner hold/latch slots are
             // already hashed above as part of the stock array.
-            Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks); Mix(PaceScale);
+            Mix(VictoryOwner); Mix(VictoryPathIdx); Mix(MatchClockTicks); Mix(PaceScale); Mix(ResearchScale);
 
             // Consent-pause: the frozen flag and the accumulated paused-tick count
             // (which drives GameClock). The per-owner pause votes are already hashed

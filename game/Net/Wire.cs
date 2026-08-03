@@ -254,6 +254,7 @@ namespace Netcode
             PutInt(buf, snap.VictoryPathIdx);
             PutInt(buf, snap.MatchClockTicks);
             PutInt(buf, snap.PaceScale);
+            PutInt(buf, snap.ResearchScale);
             PutInt(buf, snap.PausedTicks);
             PutInt(buf, snap.GamePaused ? 1 : 0);
             PutInt(buf, snap.PauseRoster);
@@ -465,6 +466,7 @@ namespace Netcode
                 snap.VictoryPathIdx = GetInt(data, ref p);
                 snap.MatchClockTicks = GetInt(data, ref p);
                 snap.PaceScale = GetInt(data, ref p);
+                snap.ResearchScale = GetInt(data, ref p);
                 snap.PausedTicks = GetInt(data, ref p);
                 snap.GamePaused = GetInt(data, ref p) != 0;
                 snap.PauseRoster = GetInt(data, ref p);

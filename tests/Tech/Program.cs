@@ -43,6 +43,7 @@ static class Program
         HomesteadsRaiseThePopulationCap();
         TheSovereignsCourtGatesTheDomainHigh();
         TheResearchCommandTakes();
+        TheResearchDialStretchesTheClimb();
         TwoClientsAgreeOnResearch();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -341,6 +342,21 @@ static class Program
         sim.Tick(new[] { new Command { Owner = 1, Type = CommandType.Research, X = TechTree.Shrine } });
         Check("an illegal node (prereqs unmet) is refused", !sim.IsTechResearched(1, TechTree.Shrine));
         Check("and a refused research spends nothing", sim.ResearchPoints(1) == before);
+    }
+
+    // The ResearchScale dial multiplies every node's cost, stretching the whole tech
+    // climb without touching the victory holds. Default 1, so it changes nothing for
+    // the tests above or the AI; the game sets it high for a ~90-minute climb.
+    static void TheResearchDialStretchesTheClimb()
+    {
+        Console.WriteLine("\nthe research dial stretches the tech climb:");
+        var normal = new Simulation(TileMap.Open(48));
+        int baseCost = normal.ResearchCostFor(1, TechTree.Academy);
+        Check($"the dial defaults to 1 — full-speed research (cost {baseCost})", normal.ResearchScale == 1);
+
+        var slow = new Simulation(TileMap.Open(48)) { ResearchScale = 18 };
+        Check($"ResearchScale ×18 makes every node cost 18× more ({slow.ResearchCostFor(1, TechTree.Academy)} == {baseCost * 18})",
+              slow.ResearchCostFor(1, TechTree.Academy) == baseCost * 18);
     }
 
     // Two clients researching the same nodes stay bit-for-bit identical.
