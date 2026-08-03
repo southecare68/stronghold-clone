@@ -30,6 +30,7 @@ static class Program
         AStorehouseByTheForestDoesNotStrandTheWorker();
         ABuildingDroppedOnAUnitDoesNotTrapIt();
         AQuarryMinesStoneTheSameWay();
+        CrowdingADepositThrottlesEachMine();
         TwoClientsAgreeOnTheWoodChain();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -281,6 +282,30 @@ static class Program
         Check($"stone is accumulating on its own ({sim.Stockpile(1, ResourceType.Stone)})",
               sim.Stockpile(1, ResourceType.Stone) > 0);
         Check("and it left the wood alone", sim.Stockpile(1, ResourceType.Wood) == 0);
+    }
+
+    // Crowding a stone deposit with several quarries throttles each one — so two mines
+    // on one rock out-produce one, but nowhere near double: packing them is wasteful.
+    static void CrowdingADepositThrottlesEachMine()
+    {
+        Console.WriteLine("\ncrowding a deposit throttles each mine:");
+        int solo = QuarryStoneOver(1, 1500);
+        int pair = QuarryStoneOver(2, 1500);
+        Check($"two crowded quarries still out-produce one ({pair} > {solo})", pair > solo);
+        Check($"but well short of double — each mines less when crowded ({pair} < {2 * solo})", pair < 2 * solo);
+    }
+
+    static int QuarryStoneOver(int quarries, int ticks)
+    {
+        var sim = new Simulation(TileMap.Open(48));
+        sim.PlaceBuilding(BuildingType.Keep, 1, 2, 2);
+        Seed(sim, 1, quarries + 1);                             // a worker to spare per quarry
+        sim.SpawnNode(ResourceType.Stone, 22, 20, 1000000);    // one rich deposit, won't run dry
+        sim.PlaceBuilding(BuildingType.Storehouse, 1, 24, 22); // a drop-off right by it, so harvest rate is the bottleneck
+        for (int i = 0; i < quarries; i++) sim.PlaceBuilding(BuildingType.Quarry, 1, 18 + i * 2, 22);   // crammed onto the same rock
+        Settle(sim);
+        for (int i = 0; i < ticks; i++) sim.Tick(Array.Empty<Command>());
+        return sim.Stockpile(1, ResourceType.Stone);
     }
 
     // The one that matters most: the whole self-running chain, computed twice,
