@@ -89,6 +89,7 @@ public partial class World3D : Node3D
     // A gold star (or two) floating over a veteran/elite unit, so their rank reads at
     // a glance. Pooled by unit id; created when a unit is promoted, freed when it dies.
     readonly Dictionary<int, Label3D> _rankPip = new();
+    readonly Dictionary<int, Label3D> _guardPip = new();   // 🛡 over your own guarding troops
     readonly Dictionary<int, int> _turretMask = new();   // a turret's rampart-neighbour bits, to rebuild its spurs
     readonly Dictionary<int, Node3D> _nodeNodes = new();   // resource nodes (trees, rock)
     PackedScene _mTree, _mRock, _mWheat;
@@ -1173,6 +1174,34 @@ public partial class World3D : Node3D
         else if (_rankPip.TryGetValue(u.Id, out var old))
         {
             old.QueueFree(); _rankPip.Remove(u.Id);
+        }
+    }
+
+    // A shield floating over YOUR guarding troops (your command state — not shown for
+    // the enemy's units), so a posted watch reads at a glance. Sits beside the rank pip.
+    void UpdateGuardPip(Unit u, Vector3 pos, bool visible)
+    {
+        bool on = visible && u.Alive && u.Guarding && u.Owner == MyPlayer;
+        if (on)
+        {
+            if (!_guardPip.TryGetValue(u.Id, out var lbl))
+            {
+                lbl = new Label3D
+                {
+                    Text = "🛡",
+                    Modulate = new Color(0.62f, 0.80f, 0.98f),          // steel-blue
+                    OutlineModulate = new Color(0.06f, 0.10f, 0.16f),
+                    FontSize = 30, OutlineSize = 7,
+                    Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+                    NoDepthTest = true, FixedSize = true, PixelSize = 0.0030f,
+                };
+                AddChild(lbl); _guardPip[u.Id] = lbl;
+            }
+            lbl.Position = pos + new Vector3(0.42f, 1.9f, 0);   // beside the ★ rank pip
+        }
+        else if (_guardPip.TryGetValue(u.Id, out var old))
+        {
+            old.QueueFree(); _guardPip.Remove(u.Id);
         }
     }
 
@@ -2374,11 +2403,14 @@ public partial class World3D : Node3D
             UpdateBar(u, pos, node.Visible);
             UpdateCarry(u, pos, node.Visible);
             UpdateRankPip(u, pos, node.Visible);
+            UpdateGuardPip(u, pos, node.Visible);
             _lastSeen[u.Id] = (pos, u.IsPeasant);
         }
         Prune(_unitNodes, live);
         foreach (var id in new List<int>(_rankPip.Keys))
             if (!live.Contains(id)) { _rankPip[id].QueueFree(); _rankPip.Remove(id); }
+        foreach (var id in new List<int>(_guardPip.Keys))
+            if (!live.Contains(id)) { _guardPip[id].QueueFree(); _guardPip.Remove(id); }
         foreach (var id in new List<int>(_carryProp.Keys))
             if (!live.Contains(id)) { _carryProp[id].QueueFree(); _carryProp.Remove(id); }
         foreach (var id in new List<int>(_skel.Keys))
