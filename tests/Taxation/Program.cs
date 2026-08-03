@@ -112,7 +112,7 @@ static class Program
         var sim = Realm(out _);
         Order(sim, SetRations(1, 6));   // a Feast on paper...
         Seed(sim, 1, 6);                // ...but not a scrap of food banked
-        Ticks(sim, 120);
+        Ticks(sim, 400);               // approval settles every 18s now, so give it a beat
         Check($"popularity fell despite the lavish order ({sim.Popularity(1)} < 55)",
               sim.Popularity(1) < 55);
     }
@@ -157,7 +157,7 @@ static class Program
         Seed(sim, 1, 6);
 
         int before = Peasants(sim, 1);
-        Ticks(sim, 600);
+        Ticks(sim, 900);               // two settle steps at the slower approval cadence
         Check($"popularity collapsed ({sim.Popularity(1)})", sim.Popularity(1) < 20);
         Check($"and idlers drifted off ({before} -> {Peasants(sim, 1)})", Peasants(sim, 1) < before);
     }

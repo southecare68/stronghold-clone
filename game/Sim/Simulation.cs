@@ -467,7 +467,8 @@ namespace Sim
         const int AlertCdIdx = 43;                             // ticks until this realm may raise another "enemy in your lands" alert (Guard.cs)
         const int StockWidth = 44;                             // ... + pause vote + prestige + intrusion-alert cooldown
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
-        const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
+        const int PopInterval = RealmInterval * 3;             // migration & faith settle slower than gold/food (6s)
+        const int PopSettleEvery = PopInterval * 3;            // approval drifts slower still (18s) — it shouldn't chase every tweak
 
         // The MATCH-LENGTH dial. Scales the two things that set how long a game runs:
         // the victory HOLD windows (HoldTicksFor) and the RESEARCH cost (ResearchCostFor),
@@ -2375,8 +2376,15 @@ namespace Sim
                 // ration moods (the ration one read from the outcome above) move the
                 // number, and only then do people come or go by it.
                 if (TickNumber % PopInterval != 0) continue;
-                int pop = Math.Clamp(s[PopIdx] + TaxPop[tax] + rationPop, 0, 100);
-                s[PopIdx] = pop;
+
+                // Approval drifts slower still than migration & faith: the tax and ration
+                // mood only nudges the number once every PopSettleEvery ticks (18s), so it
+                // eases toward how the realm feels instead of chasing every tweak. Faith
+                // and migration below keep the quicker PopInterval cadence, reading the
+                // current approval as it stands.
+                if (TickNumber % PopSettleEvery == 0)
+                    s[PopIdx] = Math.Clamp(s[PopIdx] + TaxPop[tax] + rationPop, 0, 100);
+                int pop = s[PopIdx];
 
                 // Conversion. A church's reach is its seats; a realm's total reach as
                 // a share of its people is the faith it is drifting toward — floored at
