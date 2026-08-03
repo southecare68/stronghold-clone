@@ -37,6 +37,7 @@ static class Program
         RestartReseedsToFreshOpening();
         RoamingScoutStaysDeterministic();
         ScoutReportsWhatItFinds();
+        GuardingStaysDeterministic();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
         Environment.Exit(_failures == 0 ? 0 : 1);
@@ -881,6 +882,39 @@ static class Program
                 if (s.Owner == 1 && s.Enemy == 2 && s.Kind == SightingKind.Stronghold) reported = true;
         }
         Check("the roaming scout reported the enemy stronghold", reported);
+    }
+
+    // A guard auto-intercepts intruders — targets picked in-sim from HomeRect + fog —
+    // so like the roaming scout it must be byte-identical on every machine.
+    static void GuardingStaysDeterministic()
+    {
+        Console.WriteLine("\nguard determinism:");
+        var net = new RelayTransport();
+        var a = new Client(1, net, TileMap.Skirmish(128));
+        var b = new Client(2, net, TileMap.Skirmish(128));
+        Skirmish.Setup(a.Sim, 128);
+        Skirmish.Setup(b.Sim, 128);
+        net.Join(a);
+        net.Join(b);
+
+        int kx = 0, ky = 0;
+        foreach (var bl in a.Sim.Buildings)
+            if (bl.Type == BuildingType.Keep && bl.Owner == 1) { kx = bl.CenterX; ky = bl.CenterY; }
+
+        // A guard and an intruder near player 1's keep, spawned identically on both sims.
+        var g = a.Sim.SpawnUnit(1, kx + 3, ky, 0); b.Sim.SpawnUnit(1, kx + 3, ky, 0);
+        var foe = a.Sim.SpawnUnit(2, kx + 6, ky, 0); b.Sim.SpawnUnit(2, kx + 6, ky, 0);
+        a.Issue(new Command { Type = CommandType.SetGuard, UnitIds = new[] { g.Id }, X = 1 });
+
+        int desyncs = 0;
+        for (int i = 0; i < 300; i++)
+        {
+            a.SendInput(); b.SendInput(); net.Flush(); a.TryStep(); b.TryStep();
+            if (a.Sim.StateChecksum() != b.Sim.StateChecksum()) desyncs++;
+        }
+        Check("a guard auto-intercepting stays in perfect lockstep", desyncs == 0);
+        var f = a.Sim.Units.Find(u => u.Id == foe.Id);
+        Check("and the guard actually engaged the intruder", f == null || f.Hp < f.MaxHp);
     }
 
     static void Check(string what, bool ok)

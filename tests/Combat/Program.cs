@@ -19,6 +19,7 @@ static class Program
         AVeteranHardensWithKills();
         PrestigeIsEarnedInBattleAndAtCourt();
         AChampionIsMusteredForPrestige();
+        GuardsHoldTheLine();
         MoveBreaksOffCombat();
         TwoClientsAgreeOnTheWholeFight();
         RngSurvivesARejoinMidFight();
@@ -308,6 +309,41 @@ static class Program
         Check($"prestige was spent ({p} → {sim.Prestige(1)})", sim.Prestige(1) == p - Simulation.ChampionCost);
         var champ = sim.Units[sim.Units.Count - 1];
         Check($"and it's a mighty unit ({champ.MaxHp} hp)", champ.MaxHp >= 400);
+    }
+
+    // A guard intercepts an enemy that enters its territory, warns the realm, and —
+    // crucially — does NOT chase a foe beyond its own land: it holds the line.
+    static void GuardsHoldTheLine()
+    {
+        Console.WriteLine("\nguards hold the territory line:");
+
+        var sim = new Simulation(TileMap.Open(64));
+        sim.FogEnabled = false;
+        sim.PlaceBuilding(BuildingType.Keep, 1, 30, 30);
+        var rect = sim.HomeRect(1).Value;
+        var guard = sim.SpawnUnit(1, 32, 32, 0);
+        Order(sim, new Command { Owner = 1, Seq = 1, Type = CommandType.SetGuard, UnitIds = new[] { guard.Id }, X = 1 });
+        Check("a guard on clear land holds no target", guard.TargetId == 0);
+
+        // An enemy steps onto the realm's land.
+        int ix = rect.minX + 3, iy = rect.minY + 3;
+        var foe = sim.SpawnUnit(2, ix, iy, 0);
+        Check("the intruder is inside the territory", ix <= rect.maxX && iy <= rect.maxY);
+        for (int i = 0; i < 15; i++) sim.Tick(Array.Empty<Command>());
+        Check("the guard locks onto the intruder", guard.TargetId == foe.Id);
+        bool alerted = false;
+        foreach (var s in sim.ScoutSightings) if (s.Owner == 1 && s.Kind == SightingKind.Intruder) alerted = true;
+        Check("and the realm is warned of the incursion", alerted);
+
+        // A separate realm: its guard must ignore an enemy well OUTSIDE the border.
+        var far = new Simulation(TileMap.Open(64));
+        far.FogEnabled = false;
+        far.PlaceBuilding(BuildingType.Keep, 1, 12, 12);
+        var g2 = far.SpawnUnit(1, 13, 13, 0);
+        Order(far, new Command { Owner = 1, Seq = 1, Type = CommandType.SetGuard, UnitIds = new[] { g2.Id }, X = 1 });
+        far.SpawnUnit(2, 60, 60, 0);   // far past the home rect
+        for (int i = 0; i < 30; i++) far.Tick(Array.Empty<Command>());
+        Check("a guard ignores enemies beyond its territory (holds the line)", g2.TargetId == 0);
     }
 
     static void Order(Simulation sim, Command cmd) => sim.Tick(new List<Command> { cmd });

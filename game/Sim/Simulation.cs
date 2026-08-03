@@ -23,6 +23,7 @@ namespace Sim
         LeaveToAi = 17,      // a player is leaving: X = AiLevel, Y = VictoryPath — the AI inherits their realm as-is
         SetRoam = 18,        // X = 1 (scouts in UnitIds start free-roaming) / 0 (stop) — the reconnaissance mode
         MusterChampion = 19, // spend Prestige at a Royal Kitchen to raise a Champion (Prestige.cs)
+        SetGuard = 20,       // X = 1 (UnitIds hold a guard post, auto-intercepting intruders) / 0 (stand down) — Guard.cs
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20 }
@@ -46,7 +47,7 @@ namespace Sim
     // What a roaming scout called out. Deterministic like a VictoryEvent — every
     // client computes the same sightings for every owner; the renderer shows only
     // its own player's. Kind ranks the find so the HUD can headline the scariest.
-    public enum SightingKind { Forces = 0, Structure = 1, Stronghold = 2 }
+    public enum SightingKind { Forces = 0, Structure = 1, Stronghold = 2, Intruder = 3 }
     public readonly struct ScoutSighting
     {
         public readonly int Owner;   // whose scout saw it
@@ -281,6 +282,13 @@ namespace Sim
         public bool Roaming;
         public int RoamReportCd;   // ticks until this scout may report again
 
+        // Guard stance: this unit watches the realm and auto-intercepts any enemy that
+        // enters its owner's territory, falling back to its post (GuardX,GuardY) once the
+        // ground is clear — so it holds the line rather than chasing off across the map.
+        // Post-freeze state like the others: hashed, snapshotted, never in the parity run.
+        public bool Guarding;
+        public int GuardX, GuardY;   // the post to hold and return to
+
         public Unit Clone()
         {
             var copy = new Unit
@@ -293,6 +301,7 @@ namespace Sim
                 CarryAmount = CarryAmount, GatherTimer = GatherTimer, IsPeasant = IsPeasant, IsMercenary = IsMercenary,
                 PathIndex = PathIndex,
                 Cautious = Cautious, Roaming = Roaming, RoamReportCd = RoamReportCd,
+                Guarding = Guarding, GuardX = GuardX, GuardY = GuardY,
             };
             if (Path != null) copy.Path = new List<Tile>(Path);
             copy.Waypoints = new List<Tile>(Waypoints);
@@ -432,7 +441,8 @@ namespace Sim
         const int ReseatTickIdx = 40;                          // >0 while a keepless realm is in exile: the tick its king refounds (Exile.cs)
         const int PauseVoteIdx = 41;                           // 1 while this player is voting to pause the match (multiplayer consent-pause)
         const int PrestigeIdx = 42;                            // court renown — earned in battle & at the Royal Kitchen, spent on Champions & Statues (Prestige.cs)
-        const int StockWidth = 43;                             // ... + weapons + 5 trade policies + ever-seated + reseat timer + pause vote + prestige
+        const int AlertCdIdx = 43;                             // ticks until this realm may raise another "enemy in your lands" alert (Guard.cs)
+        const int StockWidth = 44;                             // ... + pause vote + prestige + intrusion-alert cooldown
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // popularity & migration settle slower (6s), so approval drifts, not lurches
 
@@ -1211,6 +1221,7 @@ namespace Sim
                         if (u.GarrisonId != 0) Ungarrison(u);   // climb down off the wall first
                         StopWork(u);             // a plain move breaks off fighting AND gathering
                         u.Roaming = false;       // taking manual control ends a scout's free roam
+                        u.Guarding = false;      // ...and stands a guard down off its post
 
                         if (append && (u.HasPath || u.Waypoints.Count > 0))
                         {
@@ -1476,6 +1487,16 @@ namespace Sim
                         if (u == null || u.Owner != cmd.Owner || !IsScout(u)) continue;
                         u.Roaming = cmd.X != 0;
                         if (!u.Roaming) u.RoamReportCd = 0;
+                    }
+                    break;
+
+                case CommandType.SetGuard:        // X = 1 hold a guard post / 0 stand down (Guard.cs)
+                    foreach (var id in cmd.UnitIds)
+                    {
+                        var u = Units.Find(v => v.Id == id);
+                        if (u == null || u.Owner != cmd.Owner) continue;
+                        u.Guarding = cmd.X != 0;
+                        if (u.Guarding) { u.GuardX = Fixed.ToInt(u.X); u.GuardY = Fixed.ToInt(u.Y); }   // hold where you stand
                     }
                     break;
             }
@@ -1956,6 +1977,7 @@ namespace Sim
             }
 
             ResolveScouting();      // roaming scouts call out any enemy they've spotted
+            ResolveGuard();         // guards intercept intruders on their land, and warn of them (Guard.cs)
             ResolveGarrison();      // station soldiers on their ramparts...
             ResolveCombat();        // ...then let the garrison and the field fight
             RemoveDead();
@@ -3038,6 +3060,7 @@ namespace Sim
                 foreach (var w in u.Waypoints) { Mix(w.X); Mix(w.Y); }
                 Mix(u.Cautious ? 1 : 0);
                 Mix(u.Roaming ? 1 : 0); Mix(u.RoamReportCd);
+                Mix(u.Guarding ? 1 : 0); Mix(u.GuardX); Mix(u.GuardY);
             }
 
             foreach (var n in Nodes)                 // id order

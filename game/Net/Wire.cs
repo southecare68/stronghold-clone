@@ -171,6 +171,9 @@ namespace Netcode
                 PutInt(buf, u.Cautious ? 1 : 0);
                 PutInt(buf, u.Roaming ? 1 : 0);
                 PutInt(buf, u.RoamReportCd);
+                PutInt(buf, u.Guarding ? 1 : 0);
+                PutInt(buf, u.GuardX);
+                PutInt(buf, u.GuardY);
             }
 
             PutInt(buf, snap.Nodes.Length);
@@ -351,6 +354,9 @@ namespace Netcode
                     u.Cautious = GetInt(data, ref p) != 0;
                     u.Roaming = GetInt(data, ref p) != 0;
                     u.RoamReportCd = GetInt(data, ref p);
+                    u.Guarding = GetInt(data, ref p) != 0;
+                    u.GuardX = GetInt(data, ref p);
+                    u.GuardY = GetInt(data, ref p);
                     units[i] = u;
                 }
                 snap.Units = units;

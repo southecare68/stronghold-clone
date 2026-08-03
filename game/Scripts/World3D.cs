@@ -3308,6 +3308,15 @@ public partial class World3D : Node3D
             return;
         }
 
+        // H sets the selected troops to GUARD — hold their post and auto-intercept any
+        // enemy that enters your territory, falling back once it's clear. Sim order.
+        if (e is InputEventKey grd && grd.Pressed && grd.Keycode == Key.H &&
+            !grd.CtrlPressed && !grd.MetaPressed && !grd.AltPressed)
+        {
+            ToggleGuard();
+            return;
+        }
+
         // M musters a Champion at a Royal Kitchen, spending Prestige — a power unit,
         // not trained from a barracks. A sim order (MusterChampion), works in any mode.
         if (e is InputEventKey mus && mus.Pressed && mus.Keycode == Key.M &&
@@ -5072,6 +5081,23 @@ public partial class World3D : Node3D
         ShowRealmToast(anyRoaming ? "Scout roam — off" : "⚑   Scout roaming — it will report what it finds");
     }
 
+    // Set the selected fighting troops to guard the realm (or stand them down). Any of
+    // your soldiers can guard — peasants are left out of it.
+    void ToggleGuard()
+    {
+        var ids = new List<int>();
+        bool anyGuarding = false;
+        foreach (var u in _sim.Units)
+            if (_selected.Contains(u.Id) && u.Owner == MyPlayer && !u.IsPeasant)
+            {
+                ids.Add(u.Id);
+                if (u.Guarding) anyGuarding = true;
+            }
+        if (ids.Count == 0) { ShowRealmToast("Select troops to set a guard  (H)"); return; }
+        _me.Issue(new Command { Type = CommandType.SetGuard, UnitIds = ids.ToArray(), X = anyGuarding ? 0 : 1 });
+        ShowRealmToast(anyGuarding ? "Guard — stood down" : "🛡   Guarding — they'll intercept any enemy in your lands");
+    }
+
     // Show this player's scout callouts: a toast naming the find and its bearing, and
     // a fading beacon dropped where it was seen. The sightings are computed identically
     // on every client (deterministic), so we only surface our own and drain them all.
@@ -5083,6 +5109,13 @@ public partial class World3D : Node3D
             foreach (var s in sightings)
             {
                 if (s.Owner != MyPlayer) continue;
+                if (s.Kind == Sim.SightingKind.Intruder)
+                {
+                    // A guard/keep felt a foe cross the border — a defensive alarm, not a scout report.
+                    ShowRealmToast($"⚠   Enemy in your lands — {Compass(s.X, s.Y)}!");
+                    DropPing(s.X, s.Y, new Color(1f, 0.28f, 0.24f));
+                    continue;
+                }
                 (string what, Color col) = s.Kind switch
                 {
                     Sim.SightingKind.Stronghold => ("the enemy stronghold", new Color(1f, 0.32f, 0.26f)),
