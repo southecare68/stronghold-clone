@@ -2917,7 +2917,10 @@ public partial class World3D : Node3D
                 _nodeNodes[n.Id] = node;
             }
             if (n.Type == ResourceType.Grain) ReapField(n);   // thin the wheat as it is harvested
-            node.Visible = seen;
+            // A deposit a mine was built over is kept (not destroyed) but sits under the
+            // building's footprint — hide it so it reads as "under the mine", not clipping
+            // through it. It reappears if the mine is demolished and the tile opens up.
+            node.Visible = seen && !_sim.Map.Blocked(n.X, n.Y);
         }
         Prune(_nodeNodes, live);
         // Forget the wheat bookkeeping for fields that have been reaped away.

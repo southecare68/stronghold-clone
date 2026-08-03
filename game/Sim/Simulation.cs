@@ -1110,11 +1110,17 @@ namespace Sim
             Buildings.Add(b);
             BlockFootprint(b, true);
 
-            // Building over resources clears them — the trees you raised your hut
-            // on are gone, not buried under it where no worker could ever reach
-            // them. (That buried-tree case is exactly what froze the first
-            // woodcutter: its nearest tree sat under its own hut.)
-            Nodes.RemoveAll(n => n.X >= x && n.X < x + b.W && n.Y >= y && n.Y < y + b.H);
+            // Building over resources clears them — the trees you raised your hut on
+            // are gone. But a MINE must NOT destroy the very deposit it works: a Quarry
+            // keeps the stone under its footprint and an Iron Mine the iron, so setting
+            // one right against a rock no longer makes the rock vanish. Safe now that
+            // NearestResource skips a buried node (the stall that clearing first guarded
+            // against): the mine simply works the reachable ore around it, and the
+            // covered tile's deposit returns intact if the mine is later demolished.
+            Nodes.RemoveAll(n =>
+                n.X >= x && n.X < x + b.W && n.Y >= y && n.Y < y + b.H &&
+                !(type == BuildingType.Quarry   && n.Type == ResourceType.Stone) &&
+                !(type == BuildingType.IronMine && n.Type == ResourceType.Iron));
 
             // And shove any UNIT out of the footprint. A building blocks its
             // tiles, and a unit left standing on a blocked tile can path nowhere —

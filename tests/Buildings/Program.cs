@@ -19,6 +19,7 @@ static class Program
         ABarracksTrainsSoldiers();
         RallyPointMarchesRecruits();
         MinesAreCappedPerRealm();
+        AMineKeepsTheDepositItIsBuiltOver();
         DemolishRefundsFreesWorkerAndClearsGround();
         AnIronMineWorksAnIronSeam();
         YouCanBuildAnywhereInYourTerritory();
@@ -143,6 +144,43 @@ static class Program
         for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
         Check("and wood ends up banked at the keep", sim.Stockpile(1, ResourceType.Wood) > 100);
         _ = keep;
+    }
+
+    // A mine must not destroy the deposit it works: a quarry keeps stone under it, an
+    // iron mine keeps iron — but each still clears any OTHER resource, and other
+    // buildings clear everything as before.
+    static void AMineKeepsTheDepositItIsBuiltOver()
+    {
+        Console.WriteLine("\na mine keeps the deposit it's built over:");
+
+        var q = new Simulation(TileMap.Open(48));
+        q.SpawnNode(ResourceType.Stone, 20, 20, 500);
+        q.PlaceBuilding(BuildingType.Quarry, 1, 20, 20);       // 2x2 covers the stone tile
+        Check("the stone under a quarry survives", NodesOf(q, ResourceType.Stone) == 1);
+
+        var iron = new Simulation(TileMap.Open(48));
+        iron.SpawnNode(ResourceType.Iron, 20, 20, 500);
+        iron.PlaceBuilding(BuildingType.IronMine, 1, 20, 20);
+        Check("the iron under an iron mine survives", NodesOf(iron, ResourceType.Iron) == 1);
+
+        var qWood = new Simulation(TileMap.Open(48));
+        qWood.SpawnNode(ResourceType.Wood, 20, 20, 100);
+        qWood.PlaceBuilding(BuildingType.Quarry, 1, 20, 20);
+        Check("but a quarry still clears WOOD under it (only its own ore is spared)",
+              NodesOf(qWood, ResourceType.Wood) == 0);
+
+        var hut = new Simulation(TileMap.Open(48));
+        hut.SpawnNode(ResourceType.Stone, 20, 20, 100);
+        hut.PlaceBuilding(BuildingType.WoodcutterHut, 1, 20, 20);
+        Check("and a non-mine clears whatever it's built over, as before",
+              NodesOf(hut, ResourceType.Stone) == 0);
+    }
+
+    static int NodesOf(Simulation sim, ResourceType t)
+    {
+        int c = 0;
+        foreach (var n in sim.NodeList) if (n.Type == t && n.Amount > 0) c++;
+        return c;
     }
 
     // Quarries and iron mines are capped per realm — you can build up to the cap, and
