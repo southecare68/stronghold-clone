@@ -18,6 +18,7 @@ static class Program
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
         RallyPointMarchesRecruits();
+        MinesAreCappedPerRealm();
         DemolishRefundsFreesWorkerAndClearsGround();
         AnIronMineWorksAnIronSeam();
         YouCanBuildAnywhereInYourTerritory();
@@ -142,6 +143,38 @@ static class Program
         for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
         Check("and wood ends up banked at the keep", sim.Stockpile(1, ResourceType.Wood) > 100);
         _ = keep;
+    }
+
+    // Quarries and iron mines are capped per realm — you can build up to the cap, and
+    // the next one is refused. (Other buildings have no such cap.)
+    static void MinesAreCappedPerRealm()
+    {
+        Console.WriteLine("\nquarries and iron mines are capped per realm:");
+        var sim = new Simulation(TileMap.Open(64));
+        sim.FogEnabled = false;                       // build anywhere, unrestricted by territory
+        Give(sim, 1, wood: 2000, stone: 500);         // iron mines cost stone too
+
+        for (int i = 0; i < Simulation.MineCap + 4; i++)   // try to overbuild
+        {
+            int x = 4 + (i % 6) * 3, y = 4 + (i / 6) * 3;
+            Order(sim, Build(1, BuildingType.Quarry, x, y));
+        }
+        Check($"quarries stop at the cap of {Simulation.MineCap} ({sim.OwnedCount(1, BuildingType.Quarry)})",
+              sim.OwnedCount(1, BuildingType.Quarry) == Simulation.MineCap);
+
+        for (int i = 0; i < Simulation.MineCap + 4; i++)
+        {
+            int x = 4 + (i % 6) * 3, y = 30 + (i / 6) * 3;
+            Order(sim, Build(1, BuildingType.IronMine, x, y));
+        }
+        Check($"iron mines have their own cap of {Simulation.MineCap} ({sim.OwnedCount(1, BuildingType.IronMine)})",
+              sim.OwnedCount(1, BuildingType.IronMine) == Simulation.MineCap);
+
+        // A different building type is unaffected — no cap on huts.
+        for (int i = 0; i < Simulation.MineCap + 4; i++)
+            Order(sim, Build(1, BuildingType.WoodcutterHut, 40 + (i % 6) * 3, 4 + (i / 6) * 3));
+        Check($"other buildings aren't capped ({sim.OwnedCount(1, BuildingType.WoodcutterHut)} huts > {Simulation.MineCap})",
+              sim.OwnedCount(1, BuildingType.WoodcutterHut) > Simulation.MineCap);
     }
 
     // A rally point set on a barracks marches every recruit to it as it rolls off the

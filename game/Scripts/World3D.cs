@@ -1677,6 +1677,17 @@ public partial class World3D : Node3D
             sb.Text = unlocked ? $"Siege Wk\n{CostText(BuildingType.SiegeWorkshop)}" : "Siege Wk\n🔒 Siege Eng.";
             sb.Modulate = unlocked ? Colors.White : new Color(0.72f, 0.72f, 0.72f);
         }
+        // Quarries & Iron Mines are capped per realm — the button shows the count and
+        // locks once you're at the limit.
+        foreach (var mt in new[] { BuildingType.Quarry, BuildingType.IronMine })
+            if (_buildButtons.TryGetValue(mt, out var mb))
+            {
+                int have = _sim.OwnedCount(me, mt);
+                bool atCap = have >= Simulation.MineCap;
+                mb.Disabled = atCap;
+                mb.Text = $"{NameOf(mt)} {have}/{Simulation.MineCap}\n{CostText(mt)}";
+                mb.Modulate = atCap ? new Color(0.72f, 0.72f, 0.72f) : Colors.White;
+            }
 
         _selInfo.Text =
               _selected.Count == 1 ? DescribeUnit(_selected)

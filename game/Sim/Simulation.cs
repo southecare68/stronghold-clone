@@ -408,6 +408,15 @@ namespace Sim
         // Beyond this it sits idle — so you place a hut IN the forest and a quarry
         // ON the stone, which is the point.
         const int WorkRange = 18;                               // tiles
+        public const int MineCap = 12;                          // most Quarries / Iron Mines a realm may hold (each type, separately)
+
+        // How many live buildings of a type a realm owns — the count the mine cap checks.
+        public int OwnedCount(int owner, BuildingType type)
+        {
+            int c = 0;
+            foreach (var b in Buildings) if (b.Alive && b.Owner == owner && b.Type == type) c++;
+            return c;
+        }
 
         // --- The food chain ---------------------------------------------------
         // A farm plants a wheat field beside itself; its farmer harvests and hauls
@@ -1338,6 +1347,10 @@ namespace Sim
                     // placed at setup through PlaceBuilding, which skips all of this.)
                     if (type == BuildingType.Keep &&
                         (!IsTechResearched(cmd.Owner, TechTree.ProvincialKeeps) || !KeepFarEnough(cmd.Owner, cmd.X, cmd.Y))) break;
+                    // Stone quarries and iron mines are capped per realm, so a deposit
+                    // can't be worked by an unlimited swarm — build the 13th and it's refused.
+                    if ((type == BuildingType.Quarry || type == BuildingType.IronMine) &&
+                        OwnedCount(cmd.Owner, type) >= MineCap) break;
                     // A turret or gatehouse raised on one of your own walls replaces
                     // that segment — a tower or gateway sits IN the line, so it drops
                     // straight into a finished wall rather than being refused.
@@ -2120,16 +2133,7 @@ namespace Sim
                     if (WithinRange(u, node.X, node.Y, GatherRange))
                     {
                         u.Path = null; u.PathIndex = 0; u.Tx = u.X; u.Ty = u.Y;   // stand and work
-                        // Stone & iron are contested: the more of YOUR quarries/mines crowd
-                        // the same deposit, the slower each works it — a second pays a third
-                        // more, a third barely — so packing mines onto one rock is wasteful.
-                        int need = GatherInterval;
-                        if (node.Type == ResourceType.Stone || node.Type == ResourceType.Iron)
-                        {
-                            int crowd = MinesCrowdingNode(u.Owner, node);
-                            if (crowd > 1) need = GatherInterval * (crowd + 1) / 2;
-                        }
-                        if (++u.GatherTimer >= need)
+                        if (++u.GatherTimer >= GatherInterval)
                         {
                             u.GatherTimer = 0;
                             u.CarryType = node.Type;
@@ -2156,27 +2160,6 @@ namespace Sim
             }
 
             Nodes.RemoveAll(n => n.Amount <= 0);
-        }
-
-        // How many of `owner`'s quarries (stone) or iron mines (iron) sit close enough
-        // to a deposit to be working the same ore — the crowding that throttles each.
-        // Iterated in id order; pure integer geometry, so it's deterministic like the
-        // rest of the economy.
-        const int MineCrowdRadius = 7;   // tiles: mines this near a deposit contest it
-        int MinesCrowdingNode(int owner, ResourceNode node)
-        {
-            BuildingType mine;
-            if (node.Type == ResourceType.Stone) mine = BuildingType.Quarry;
-            else if (node.Type == ResourceType.Iron) mine = BuildingType.IronMine;
-            else return 1;
-            int c = 0;
-            foreach (var b in Buildings)
-                if (b.Alive && b.Owner == owner && b.Type == mine)
-                {
-                    int dx = b.CenterX - node.X, dy = b.CenterY - node.Y;
-                    if (dx * dx + dy * dy <= MineCrowdRadius * MineCrowdRadius) c++;
-                }
-            return c < 1 ? 1 : c;
         }
 
         // A worker's node ran out. A hand-assigned gatherer stands down; a work
