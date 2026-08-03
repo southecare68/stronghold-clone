@@ -468,7 +468,7 @@ namespace Sim
         const int StockWidth = 44;                             // ... + pause vote + prestige + intrusion-alert cooldown
         const int RealmInterval = 40;                          // ticks between gold/ration updates (2s)
         const int PopInterval = RealmInterval * 3;             // migration & faith settle slower than gold/food (6s)
-        const int PopSettleEvery = PopInterval * 3;            // approval drifts slower still (18s) — it shouldn't chase every tweak
+        const int PopSettleEvery = PopInterval * 5;            // approval drifts slower still (30s) — it shouldn't chase every tweak
 
         // The MATCH-LENGTH dial. Scales the two things that set how long a game runs:
         // the victory HOLD windows (HoldTicksFor) and the RESEARCH cost (ResearchCostFor),

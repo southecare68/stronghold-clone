@@ -75,7 +75,7 @@ static class Program
         sim.AddResource(1, ResourceType.Food, 5000);
         Seed(sim, 1, 6);
 
-        Ticks(sim, 400);
+        Ticks(sim, 700);
         Check($"the treasury floored at zero, not below ({sim.Gold(1)})", sim.Gold(1) == 0);
         Check($"and the bribe bought goodwill ({sim.Popularity(1)} > 55)", sim.Popularity(1) > 55);
     }
@@ -112,7 +112,7 @@ static class Program
         var sim = Realm(out _);
         Order(sim, SetRations(1, 6));   // a Feast on paper...
         Seed(sim, 1, 6);                // ...but not a scrap of food banked
-        Ticks(sim, 400);               // approval settles every 18s now, so give it a beat
+        Ticks(sim, 700);               // approval settles every 30s now, so give it a beat
         Check($"popularity fell despite the lavish order ({sim.Popularity(1)} < 55)",
               sim.Popularity(1) < 55);
     }
@@ -157,7 +157,7 @@ static class Program
         Seed(sim, 1, 6);
 
         int before = Peasants(sim, 1);
-        Ticks(sim, 900);               // two settle steps at the slower approval cadence
+        Ticks(sim, 3000);              // slower approval settling means it stays content a while, THEN collapses — run long enough for the decline to win
         Check($"popularity collapsed ({sim.Popularity(1)})", sim.Popularity(1) < 20);
         Check($"and idlers drifted off ({before} -> {Peasants(sim, 1)})", Peasants(sim, 1) < before);
     }
@@ -178,7 +178,7 @@ static class Program
         Check("the hut took a worker on", hut.WorkerId != 0);
         int idlersBefore = sim.IdlePeasantCount(1);
 
-        Ticks(sim, 600);
+        Ticks(sim, 2500);                               // approval settles slowly now — run long enough for the collapse to drive idlers off
         Check($"idlers left ({idlersBefore} -> {sim.IdlePeasantCount(1)})",
               sim.IdlePeasantCount(1) < idlersBefore);
         Check("but the hut kept its worker through the collapse", hut.WorkerId != 0);
