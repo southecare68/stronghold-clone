@@ -30,12 +30,12 @@ namespace Sim
         static readonly int[] GoodBasePrice = { 4,      5,       3,      12,     30 };
         static readonly string[] GoodNames  = { "Wood", "Stone", "Food", "Iron", "Weapons" };
 
-        // A ±25% spread around the reference price: you buy above it and sell
-        // below, and the gap is the merchant's cut — steep enough that idly
-        // churning a good back and forth bleeds gold, so a policy has to price
-        // in the spread to pay off.
+        // The merchant takes a wide cut: you BUY at +25% over the reference price and
+        // SELL at only HALF of it. That steep spread is deliberate — it stops a realm
+        // from turning a pile of mined stone or iron into a gold fountain by dumping it
+        // on the market, and it makes idly churning a good back and forth bleed gold.
         public int BuyPrice(int good)  => (GoodBasePrice[good] * 5 + 3) / 4;   // ceil(base * 1.25)
-        public int SellPrice(int good) => GoodBasePrice[good] * 3 / 4;         // floor(base * 0.75)
+        public int SellPrice(int good) => GoodBasePrice[good] / 2;             // half the reference price
 
         public int MarketGoodTypes => MarketGoodCount;
         public string GoodName(int good) => GoodNames[good];
