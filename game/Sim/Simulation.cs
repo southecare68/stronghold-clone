@@ -24,6 +24,7 @@ namespace Sim
         SetRoam = 18,        // X = 1 (scouts in UnitIds start free-roaming) / 0 (stop) — the reconnaissance mode
         MusterChampion = 19, // spend Prestige at a Royal Kitchen to raise a Champion (Prestige.cs)
         SetGuard = 20,       // X = 1 (UnitIds hold a guard post, auto-intercepting intruders) / 0 (stand down) — Guard.cs
+        SetRally = 21,       // TargetId = production building, X,Y = rally tile (X = int.MinValue clears) — new units march there
     }
 
     public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20 }
@@ -163,6 +164,12 @@ namespace Sim
         // building type.
         public int WorkerId;
 
+        // A production building's rally point: units spawned here march to it as they
+        // roll off the line. int.MinValue = unset (they just muster at the gate). Only
+        // a Barracks or Siege Workshop uses it.
+        public int RallyX = int.MinValue, RallyY;
+        public bool HasRally => RallyX != int.MinValue;
+
         public bool Alive => Hp > 0;
         public bool Complete => Construction <= 0;   // a finished (counting) building
         public int CenterX => X + W / 2;
@@ -173,6 +180,7 @@ namespace Sim
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
             Hp = Hp, MaxHp = MaxHp, TrainQueue = new List<int>(TrainQueue),
             BuildTimer = BuildTimer, Construction = Construction, Open = Open, WorkerId = WorkerId,
+            RallyX = RallyX, RallyY = RallyY,
         };
     }
 
@@ -1490,6 +1498,15 @@ namespace Sim
                     }
                     break;
 
+                case CommandType.SetRally:        // TargetId = production building, X,Y = rally tile (X=int.MinValue clears)
+                {
+                    var b = Buildings.Find(x => x.Id == cmd.TargetId);
+                    if (b != null && b.Owner == cmd.Owner &&
+                        (b.Type == BuildingType.Barracks || b.Type == BuildingType.SiegeWorkshop))
+                    { b.RallyX = cmd.X; b.RallyY = cmd.Y; }
+                    break;
+                }
+
                 case CommandType.SetGuard:        // X = 1 hold a guard post / 0 stand down (Guard.cs)
                     foreach (var id in cmd.UnitIds)
                     {
@@ -2036,7 +2053,8 @@ namespace Sim
                         Units.Remove(recruit);          // the peasant becomes the soldier
                         int designId = b.TrainQueue[0];
                         b.TrainQueue.RemoveAt(0);
-                        SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y, designId);
+                        var fresh = SpawnUnit(b.Owner, spot.Value.X, spot.Value.Y, designId);
+                        if (b.HasRally) Order(fresh, b.RallyX, b.RallyY);   // march to the rally point as it rolls off the line
                     }
                 }
             }
@@ -3090,6 +3108,7 @@ namespace Sim
                 Mix(b.Construction);
                 Mix(b.Open ? 1 : 0);
                 Mix(b.WorkerId);
+                Mix(b.RallyX); Mix(b.RallyY);
             }
 
             // Fog. Only the EXPLORED half — see Vision.cs for why the currently

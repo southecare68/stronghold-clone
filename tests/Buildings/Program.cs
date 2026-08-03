@@ -17,6 +17,7 @@ static class Program
         AFootprintBlocksPathing();
         AKeepBecomesTheDropOff();
         ABarracksTrainsSoldiers();
+        RallyPointMarchesRecruits();
         DemolishRefundsFreesWorkerAndClearsGround();
         AnIronMineWorksAnIronSeam();
         YouCanBuildAnywhereInYourTerritory();
@@ -141,6 +142,41 @@ static class Program
         for (int i = 0; i < 800; i++) sim.Tick(Array.Empty<Command>());
         Check("and wood ends up banked at the keep", sim.Stockpile(1, ResourceType.Wood) > 100);
         _ = keep;
+    }
+
+    // A rally point set on a barracks marches every recruit to it as it rolls off the
+    // line; without one, a recruit just musters at the barracks gate.
+    static void RallyPointMarchesRecruits()
+    {
+        Console.WriteLine("\na rally point marches new recruits to it:");
+        var sim = new Simulation(TileMap.Open(64));
+        sim.SetDropOff(1, 5, 5);
+        Give(sim, 1, wood: 200, stone: 0);
+        for (int i = 0; i < 3; i++) sim.SpawnPeasant(1);
+        var barracks = sim.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
+
+        Order(sim, new Command { Owner = 1, Seq = 1, Type = CommandType.SetRally, TargetId = barracks.Id, X = 45, Y = 45 });
+        Check("the barracks holds the rally point", barracks.HasRally && barracks.RallyX == 45 && barracks.RallyY == 45);
+
+        Order(sim, Train(1, barracks.Id));
+        for (int i = 0; i < 400; i++) sim.Tick(Array.Empty<Command>());
+        var soldier = sim.Units.Find(u => u.Owner == 1 && !u.IsPeasant);
+        Check("a soldier was produced", soldier != null);
+        if (soldier != null)
+            Check($"and it marched to the rally point ({Fixed.ToInt(soldier.X)},{Fixed.ToInt(soldier.Y)})",
+                  Math.Abs(Fixed.ToInt(soldier.X) - 45) <= 2 && Math.Abs(Fixed.ToInt(soldier.Y) - 45) <= 2);
+
+        // A rally-less barracks: the recruit just musters at the gate.
+        var plain = new Simulation(TileMap.Open(64));
+        plain.SetDropOff(1, 5, 5);
+        Give(plain, 1, wood: 200, stone: 0);
+        for (int i = 0; i < 3; i++) plain.SpawnPeasant(1);
+        var bar2 = plain.PlaceBuilding(BuildingType.Barracks, 1, 20, 20);
+        Order(plain, Train(1, bar2.Id));
+        for (int i = 0; i < 400; i++) plain.Tick(Array.Empty<Command>());
+        var s2 = plain.Units.Find(u => u.Owner == 1 && !u.IsPeasant);
+        Check("a rally-less recruit stays by the barracks",
+              s2 != null && Math.Abs(Fixed.ToInt(s2.X) - 20) <= 4 && Math.Abs(Fixed.ToInt(s2.Y) - 20) <= 4);
     }
 
     static void ABarracksTrainsSoldiers()

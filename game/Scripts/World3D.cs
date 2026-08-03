@@ -175,7 +175,8 @@ public partial class World3D : Node3D
     // pole + banner reused frame to frame, spare ones simply hidden.
     readonly List<(Node3D Node, MeshInstance3D Flag)> _wpMarkers = new();
     Mesh _poleMesh, _flagMesh;
-    Material _poleMat, _flagMatDirect, _flagMatCautious;
+    Material _poleMat, _flagMatDirect, _flagMatCautious, _flagMatRally;
+    (Node3D Node, MeshInstance3D Flag) _rallyFlag;   // green banner at a selected production building's rally point
 
     // Scout report pings — a beacon dropped where a roaming scout spotted the enemy,
     // fading over a few seconds. Purely visual; the sighting itself is deterministic.
@@ -1396,6 +1397,7 @@ public partial class World3D : Node3D
         _poleMat = Unshaded(new Color(0.20f, 0.16f, 0.12f));   // dark timber
         _flagMatDirect = Unshaded(new Color(0.40f, 0.78f, 1f));
         _flagMatCautious = Unshaded(new Color(1f, 0.72f, 0.28f));
+        _flagMatRally = Unshaded(new Color(0.38f, 0.82f, 0.46f));   // green rally banner
 
         // A 2D marquee for box-select, on its own layer above the 3D view.
         var layer = new CanvasLayer();
@@ -2097,6 +2099,7 @@ public partial class World3D : Node3D
         UpdateFog();
         UpdateRings();
         UpdateWaypointMarkers();
+        UpdateRallyMarker();
         UpdateHud();
         UpdateRealmToast(delta);
         UpdateFx(delta);
@@ -3552,7 +3555,20 @@ public partial class World3D : Node3D
     // the ground point.
     void RightClick(Vector2 screen, bool append = false, bool cautious = false)
     {
-        if (_selected.Count == 0) return;
+        // With a production building selected and no units, a right-click sets its
+        // RALLY POINT — new recruits march there as they roll off the line.
+        if (_selected.Count == 0)
+        {
+            if (_selectedBuilding != null && _selectedBuilding.Alive && _selectedBuilding.Owner == MyPlayer &&
+                (_selectedBuilding.Type == BuildingType.Barracks || _selectedBuilding.Type == BuildingType.SiegeWorkshop) &&
+                GroundTile(screen, out int rx, out int ry))
+            {
+                _me.Issue(new Command { Type = CommandType.SetRally, TargetId = _selectedBuilding.Id, X = rx, Y = ry });
+                ShowRealmToast("⚑   Rally point set — new recruits will muster there");
+                _sound.PlayUi(Sfx.MoveOrder);
+            }
+            return;
+        }
         var ids = new List<int>(_selected).ToArray();
 
         // Orders go through the lockstep client: Issue queues them, and this
@@ -5083,6 +5099,26 @@ public partial class World3D : Node3D
             foreach (var w in u.Waypoints) PlaceWaypointMarker(ref used, w, u.Cautious);
         }
         for (int i = used; i < _wpMarkers.Count; i++) _wpMarkers[i].Node.Visible = false;
+    }
+
+    // A green banner at the rally point of the selected production building, so you can
+    // see and reposition where its recruits will muster.
+    void UpdateRallyMarker()
+    {
+        var b = _selectedBuilding;
+        bool show = b != null && b.Alive && b.Owner == MyPlayer && b.HasRally &&
+                    (b.Type == BuildingType.Barracks || b.Type == BuildingType.SiegeWorkshop);
+        if (show)
+        {
+            if (_rallyFlag.Node == null)
+            {
+                _rallyFlag = MakeFlagPole();
+                _rallyFlag.Flag.MaterialOverride = _flagMatRally;
+            }
+            _rallyFlag.Node.Position = new Vector3(b.RallyX, 0f, b.RallyY);
+            _rallyFlag.Node.Visible = true;
+        }
+        else if (_rallyFlag.Node != null) _rallyFlag.Node.Visible = false;
     }
 
     void PlaceWaypointMarker(ref int used, Tile t, bool cautious)
