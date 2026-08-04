@@ -26,10 +26,14 @@ public partial class World3D : Node3D
     // character is ~1.8 units tall — too big for our 1-unit tiles. These bring
     // them down to size; tuned by eye.
     const float CharScale = 0.42f;
-    const float DragonFlightHeight = 3.4f;   // how high above the ground a Dragon's model rides (render only)
-    const float DragonModelScale = 2.4f;     // the Tripo dragon mesh is ~1 world-unit wide; this makes it ~2.3 tiles across
-    const float DragonYawOffset = 0f;        // radians added to a Dragon's facing, in case the mesh's "forward" isn't -Z
-    float _dragonBob;                        // advancing phase for the Dragon's idle wing-bob
+    const float DragonFlightHeight = 3.2f;   // how high above the ground a Dragon's model rides (render only)
+    const float DragonModelScale = 0.12f;    // the animated dragon mesh is ~23.7 units wide; this makes it ~2.8 tiles across
+    const float DragonYawOffset = Mathf.Pi;  // the mesh's head is local −Z; the game aims +Z at travel, so spin it 180° to fly head-first
+    const string DragonFlyClip = "Fly";      // the looping wing-flap take baked into the dragon FBX
+    const string DragonBreathClip = "FlyingBreathAtk";   // the fire-breath take, played when it attacks
+    readonly Dictionary<int, AnimationPlayer> _dragonAnim = new();   // per-dragon animation driver
+    readonly Dictionary<int, int> _dragonLastAtk = new();            // last seen AttackTimer, to fire the breath take once per blow
+    float _dragonBob;                        // advancing phase for the Dragon's idle hover-bob
 
     // Wall assembly. The pack's pieces are 5-unit modules: Wall_01 is a solid
     // 5x5x0.5 body with a FLAT top; Battlements is the 5x1.38x0.5 crenellated
@@ -666,7 +670,7 @@ public partial class World3D : Node3D
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
         _mChampion = Load("Characters/SM_Chr_Rider_01");   // a mounted knight of renown — mustered for Prestige
-        _mDragon = GD.Load<PackedScene>("res://Assets/Dragon/Dragon.glb");   // the real dragon mesh (Tripo GLB, imported under game/Assets/Dragon)
+        _mDragon = GD.Load<PackedScene>("res://Assets/Dragon/DragonAnim.fbx");   // rigged, animated dragon (FBX: Fly/breath/roar takes) under game/Assets/Dragon
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -2281,10 +2285,30 @@ public partial class World3D : Node3D
                 node.Scale = Vector3.One * scale;
                 AddChild(node);
                 _unitNodes[u.Id] = node;
-                DisableBakedAnimation(node);            // the prefab's AnimationPlayer would clobber our posing
-                var sk = Anim3D.Find(node);
-                if (sk != null) BindToSkeleton(node, sk);   // the modular meshes ship unbound — bind them so posing shows
-                _skel[u.Id] = sk;
+                if (dd.Flying)
+                {
+                    // The Dragon ships its OWN rig and baked flight animation, so we keep
+                    // its AnimationPlayer (don't strip it) and let it drive the pose — the
+                    // humanoid poser stays off (_skel = null). Its FBX material imports
+                    // semi-transparent (alpha 0.8), so force it opaque.
+                    ForceOpaque(node);
+                    var ap = FindAnimPlayer(node);
+                    if (ap != null)
+                    {
+                        var fly = ap.GetAnimation(DragonFlyClip);
+                        if (fly != null) fly.LoopMode = Animation.LoopModeEnum.Linear;   // clips import non-looping
+                        ap.Play(DragonFlyClip);
+                        _dragonAnim[u.Id] = ap;
+                    }
+                    _skel[u.Id] = null;
+                }
+                else
+                {
+                    DisableBakedAnimation(node);            // the prefab's AnimationPlayer would clobber our posing
+                    var sk = Anim3D.Find(node);
+                    if (sk != null) BindToSkeleton(node, sk);   // the modular meshes ship unbound — bind them so posing shows
+                    _skel[u.Id] = sk;
+                }
             }
 
             // Fog: an enemy is on screen only while one of ours can actually see it.
@@ -2434,6 +2458,23 @@ public partial class World3D : Node3D
                 }
                 else Anim3D.Idle(s);
             }
+            else if (_dragonAnim.TryGetValue(u.Id, out var dap) && dap != null)
+            {
+                // The Dragon drives its own baked takes. It flaps on a loop; the instant
+                // it looses fire (its AttackTimer resets upward) it plays the breath take
+                // once, then falls back to flight. Compared against the last seen timer so
+                // one blow triggers exactly one breath, not one per frame.
+                int prevAtk = _dragonLastAtk.TryGetValue(u.Id, out var pa) ? pa : 0;
+                bool justFired = u.AttackTimer > prevAtk && (u.TargetId != 0 || u.TargetBuildingId != 0);
+                _dragonLastAtk[u.Id] = u.AttackTimer;
+                if (justFired && dap.CurrentAnimation != DragonBreathClip)
+                {
+                    dap.Play(DragonBreathClip);
+                    dap.Queue(DragonFlyClip);
+                }
+                else if (!dap.IsPlaying())
+                    dap.Play(DragonFlyClip);
+            }
 
             UpdateBar(u, pos, node.Visible);
             UpdateCarry(u, pos, node.Visible);
@@ -2450,6 +2491,8 @@ public partial class World3D : Node3D
             if (!live.Contains(id)) { _carryProp[id].QueueFree(); _carryProp.Remove(id); }
         foreach (var id in new List<int>(_skel.Keys))
             if (!live.Contains(id)) { _skel.Remove(id); _phase.Remove(id); _climb.Remove(id); _onWall.Remove(id); _loiterPos.Remove(id); }
+        foreach (var id in new List<int>(_dragonAnim.Keys))
+            if (!live.Contains(id)) { _dragonAnim.Remove(id); _dragonLastAtk.Remove(id); }
 
         // A unit that was here last frame and is gone now has died (or, for a
         // peasant, been trained away). Soldiers fall with a puff; drop its bar.
@@ -3281,6 +3324,40 @@ public partial class World3D : Node3D
             if (node is AnimationPlayer) into.Add(node);
             foreach (var c in node.GetChildren()) Collect(c, into);
         }
+    }
+
+    // The first AnimationPlayer anywhere under a node (the Dragon FBX ships one that
+    // holds its baked flight/breath takes). Null if none.
+    static AnimationPlayer FindAnimPlayer(Node n)
+    {
+        if (n is AnimationPlayer ap) return ap;
+        foreach (var c in n.GetChildren())
+        {
+            var r = FindAnimPlayer(c);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    // Force every mesh under a node to render opaque. The dragon FBX's material
+    // imports semi-transparent (alpha 0.8), which makes it see-through and adds
+    // depth-sort artefacts; a legendary beast should be solid.
+    static void ForceOpaque(Node n)
+    {
+        if (n is MeshInstance3D mi && mi.Mesh != null)
+        {
+            for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
+            {
+                if (mi.GetActiveMaterial(s) is BaseMaterial3D bm)
+                {
+                    var m = (BaseMaterial3D)bm.Duplicate();
+                    m.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
+                    var c = m.AlbedoColor; c.A = 1f; m.AlbedoColor = c;
+                    mi.SetSurfaceOverrideMaterial(s, m);
+                }
+            }
+        }
+        foreach (var c in n.GetChildren()) ForceOpaque(c);
     }
 
     // Synty modular characters ship every body mesh under one skeleton with its

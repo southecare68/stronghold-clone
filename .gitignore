@@ -43,3 +43,6 @@ node_modules/
 # 3D asset pack copied into the game project for runtime use (licensed art, like the source)
 /game/Assets/
 /game/Assets.zip
+
+# Raw dragon source pack (FBX/blend/zbrush/substance/rar) — licensed art, kept out of git
+/dragonfiles/
