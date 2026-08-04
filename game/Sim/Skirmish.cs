@@ -44,7 +44,7 @@ namespace Sim
         // and feeble in a fight, sent to find the enemy, not to trade blows. Its long
         // sight also feeds the cautious march: what a scout reveals, your armies will
         // route around.
-        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet", "Champion", "Ladderman" };
+        public static readonly string[] DesignNames = { "Soldier", "Runner", "Brute", "Archer", "Scout", "Avenger", "Ram", "Catapult", "Trebuchet", "Champion", "Ladderman", "Dragon" };
 
         public static IEnumerable<UnitDesign> Designs()
         {
@@ -83,6 +83,15 @@ namespace Sim
             // while it climbs, so it must be escorted and its climb covered (Simulation
             // ScaleBuilding). Light stats, well inside the point budget.
             yield return new UnitDesign { Hp = 70, Damage = 5, SpeedStat = 12, RangeStat = 2, Cooldown = 14, Sight = 7, CanScale = true };  // Ladderman
+
+            // The Dragon (design 11): the legend, MUSTERED for a king's ransom in Prestige
+            // at a Royal Kitchen (never trained, never point-bought — Trainable = false).
+            // It FLIES, crossing the map in a straight line over walls, water and rock;
+            // it BREATHES FIRE, a heavy ranged blow that scorches troops (Damage) AND
+            // batters buildings (SiegeDamage) from beyond the ramparts. It can be answered
+            // only from the sky: another Dragon, or a Harpoon Tower's bolts. Fearsome but
+            // finite — a couple of harpoons, or a rival Dragon, bring it down.
+            yield return new UnitDesign { Hp = 520, Damage = 30, SpeedStat = 14, RangeStat = 6, Cooldown = 16, Sight = 11, Flying = true, Trainable = false, SiegeDamage = 40 };  // Dragon
         }
 
         // Where the resource nodes go. Two safe patches behind each base, and a

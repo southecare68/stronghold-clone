@@ -26,6 +26,8 @@ public partial class World3D : Node3D
     // character is ~1.8 units tall — too big for our 1-unit tiles. These bring
     // them down to size; tuned by eye.
     const float CharScale = 0.42f;
+    const float DragonFlightHeight = 4.2f;   // how high above the ground a Dragon's model rides (render only)
+    float _dragonBob;                        // advancing phase for the Dragon's idle wing-bob
 
     // Wall assembly. The pack's pieces are 5-unit modules: Wall_01 is a solid
     // 5x5x0.5 body with a FLAT top; Battlements is the 5x1.38x0.5 crenellated
@@ -156,7 +158,7 @@ public partial class World3D : Node3D
 
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
-    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger, _mChampion;
+    PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger, _mChampion, _mDragon;
     PackedScene _mRam, _mCatapult, _mTrebuchet;
 
     // Camera orbit around a target on the ground.
@@ -219,7 +221,7 @@ public partial class World3D : Node3D
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Granary, BuildingType.Market,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
-        BuildingType.RoyalKitchen, BuildingType.Statue,
+        BuildingType.RoyalKitchen, BuildingType.Statue, BuildingType.HarpoonTower,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -662,6 +664,7 @@ public partial class World3D : Node3D
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
         _mChampion = Load("Characters/SM_Chr_Rider_01");   // a mounted knight of renown — mustered for Prestige
+        _mDragon = Load("Characters/SM_Chr_Fairy_01");      // the only winged model in the pack — stands in for the Dragon, flown large & high overhead
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -686,6 +689,7 @@ public partial class World3D : Node3D
         B(BuildingType.Wall,          "Castle/SM_Bld_Castle_Wall_01", 0.5f);   // (composed in MakeWall)
         B(BuildingType.RoyalKitchen,  "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.6f);  // the court's feasting hall — feasts & tourneys → Prestige
         B(BuildingType.Statue,        "Bonus/SM_Prop_Statue_King_01", 0.6f);   // a monument raised with Prestige, radiating more of it
+        B(BuildingType.HarpoonTower,  "Castle/SM_Bld_Castle_Wall_Tower_L_01", 0.55f);  // a square flat tower mounting a dragon harpoon — the anti-air battery
 
         _wallBody = Load("Castle/SM_Bld_Castle_Wall_01");
         _wallBat  = Load("Castle/SM_Bld_Castle_Battlements_01");
@@ -1803,7 +1807,8 @@ public partial class World3D : Node3D
         BuildingType.IronMine => "Iron Mine", BuildingType.Granary => "Granary",
         BuildingType.Church => "Church", BuildingType.Wonder => "Wonder",
         BuildingType.Market => "Market", BuildingType.SiegeWorkshop => "Siege Wk",
-        BuildingType.RoyalKitchen => "Royal Kitchen", BuildingType.Statue => "Statue", _ => t.ToString(),
+        BuildingType.RoyalKitchen => "Royal Kitchen", BuildingType.Statue => "Statue",
+        BuildingType.HarpoonTower => "Harpoon", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
@@ -2257,6 +2262,7 @@ public partial class World3D : Node3D
 
     void SyncUnits(double delta)
     {
+        _dragonBob += (float)delta * 3f;   // drive the Dragon wing-bob
         AssignKeepRoofSpots();
         var live = new HashSet<int>();
         foreach (var u in _sim.Units)
@@ -2266,8 +2272,10 @@ public partial class World3D : Node3D
             {
                 node = ModelFor(u).Instantiate<Node3D>();
                 // A special unit (the exile Avenger, flagged non-trainable) towers over
-                // the rank and file, so its threat reads at a glance.
-                float scale = _sim.DesignOf(u.DesignId).Trainable ? CharScale : CharScale * 1.6f;
+                // the rank and file, so its threat reads at a glance — and a Dragon,
+                // bigger still, dominates the sky.
+                var dd = _sim.DesignOf(u.DesignId);
+                float scale = dd.Flying ? CharScale * 2.6f : dd.Trainable ? CharScale : CharScale * 1.6f;
                 node.Scale = Vector3.One * scale;
                 AddChild(node);
                 _unitNodes[u.Id] = node;
@@ -2395,6 +2403,13 @@ public partial class World3D : Node3D
                     attacking = !walking && u.TargetId != 0;
                 }
             }
+
+            // A Dragon rides the air: lift its model well clear of the ground so it
+            // reads as flying and visibly passes over walls and towers. A gentle bob
+            // sells the wingbeats. Render only — its sim tile is exactly where the sim
+            // put it (fixed-point), so this never touches determinism.
+            if (_sim.DesignOf(u.DesignId).Flying)
+                pos.Y += DragonFlightHeight + 0.25f * Mathf.Sin(_dragonBob + u.Id);
 
             node.Position = pos;
             if (face.LengthSquared() > 1e-5f) _yaw[u.Id] = Mathf.Atan2(face.X, face.Z);
@@ -3278,7 +3293,7 @@ public partial class World3D : Node3D
     {
         if (u.IsPeasant) return _mPeasant;
         return u.DesignId switch { 1 => _mRunner, 2 => _mBrute, 3 => _mArcher, 4 => _mScout, 5 => _mAvenger,
-                                   6 => _mRam, 7 => _mCatapult, 8 => _mTrebuchet, 9 => _mChampion, _ => _mSoldier };
+                                   6 => _mRam, 7 => _mCatapult, 8 => _mTrebuchet, 9 => _mChampion, 11 => _mDragon, _ => _mSoldier };
     }
 
     // ---- camera ------------------------------------------------------------
@@ -3368,10 +3383,28 @@ public partial class World3D : Node3D
             return;
         }
 
+        // Shift+M musters a DRAGON at a Royal Kitchen — the legend, dear as three
+        // Champions. A flying, fire-breathing power unit (MusterDragon); any mode.
+        // Checked before plain M so the Shift chord isn't swallowed by the Champion.
+        if (e is InputEventKey drg && drg.Pressed && drg.Keycode == Key.M && drg.ShiftPressed &&
+            !drg.CtrlPressed && !drg.MetaPressed && !drg.AltPressed)
+        {
+            if (_sim.CanMusterDragon(MyPlayer))
+            {
+                _me.Issue(new Command { Type = CommandType.MusterDragon });
+                ShowRealmToast("🐉   A Dragon answers your court");
+            }
+            else if (_sim.Prestige(MyPlayer) < Simulation.DragonCost)
+                ShowRealmToast($"Need {Simulation.DragonCost}✦ prestige to muster a Dragon");
+            else
+                ShowRealmToast("Build a Royal Kitchen to muster a Dragon");
+            return;
+        }
+
         // M musters a Champion at a Royal Kitchen, spending Prestige — a power unit,
         // not trained from a barracks. A sim order (MusterChampion), works in any mode.
         if (e is InputEventKey mus && mus.Pressed && mus.Keycode == Key.M &&
-            !mus.CtrlPressed && !mus.MetaPressed && !mus.AltPressed)
+            !mus.ShiftPressed && !mus.CtrlPressed && !mus.MetaPressed && !mus.AltPressed)
         {
             if (_sim.CanMusterChampion(MyPlayer))
             {

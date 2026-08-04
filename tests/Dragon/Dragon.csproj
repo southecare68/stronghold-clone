@@ -1,0 +1,31 @@
+<!-- Dragon — the flying, fire-breathing legend, and its counters.
+
+     A Dragon is mustered for Prestige at a Royal Kitchen (never trained). It FLIES:
+     it crosses the map in a straight line over walls, water and rock, beyond the
+     reach of ground troops and wall archers. It BREATHES FIRE: a ranged blow that
+     scorches troops and batters buildings from outside the walls. Only two things
+     answer it — another Dragon, or a Harpoon Tower's anti-air bolts. This suite
+     proves flight ignores terrain, that ground troops can neither target nor be
+     ordered onto a flyer, that the Dragon burns troops and buildings, that dragons
+     fight one another, that a Harpoon Tower shoots flyers down while ignoring
+     footsoldiers, the muster economy, and that all of it is byte-deterministic —
+     across two clients and through a wire round-trip (the new Flying design flag).
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>DragonTests</RootNamespace>
+    <AssemblyName>DragonTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+    <Compile Include="../../game/Net/*.cs" LinkBase="Net" />
+  </ItemGroup>
+
+</Project>

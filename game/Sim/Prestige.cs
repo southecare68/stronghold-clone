@@ -23,8 +23,9 @@ namespace Sim
         const int StatuePrestige = 1;      // renown each standing Statue radiates per cycle — the compounding loop
 
         // ── Spending ─────────────────────────────────────────────────────────────
-        public const int StatueCost = 20;   // Prestige to raise a Statue (on top of its stone)
-        public const int ChampionCost = 40; // Prestige to muster a Champion
+        public const int StatueCost = 20;    // Prestige to raise a Statue (on top of its stone)
+        public const int ChampionCost = 40;  // Prestige to muster a Champion
+        public const int DragonCost = 120;   // Prestige to muster a Dragon — a legend, dear as three Champions
 
         public int Prestige(int owner) => _stock.TryGetValue(owner, out var s) ? s[PrestigeIdx] : 0;
         void AddPrestige(int owner, int amount)
@@ -72,19 +73,31 @@ namespace Sim
             }
         }
 
-        // The Champion design (registered by Skirmish): the LAST non-trainable, non-siege
-        // design that isn't the Avenger. -1 if none is registered (a bare sim), so a
-        // muster fails gracefully rather than raising the wrong unit.
+        // The Champion design (registered by Skirmish): the LAST non-trainable, non-siege,
+        // non-FLYING design that isn't the Avenger. -1 if none is registered (a bare sim),
+        // so a muster fails gracefully rather than raising the wrong unit. The Flying
+        // exclusion is what keeps the Dragon (also non-trainable) from being mustered here.
         int ChampionDesign()
         {
             int avenger = AvengerDesign();
             for (int i = DesignList.Count - 1; i >= 0; i--)
-                if (!DesignList[i].Trainable && !DesignList[i].IsSiege && i != avenger) return i;
+                if (!DesignList[i].Trainable && !DesignList[i].IsSiege && !DesignList[i].Flying && i != avenger) return i;
+            return -1;
+        }
+
+        // The Dragon design (registered by Skirmish): the flying legend. -1 if none.
+        int DragonDesign()
+        {
+            for (int i = DesignList.Count - 1; i >= 0; i--)
+                if (DesignList[i].Flying) return i;
             return -1;
         }
 
         public bool CanMusterChampion(int owner) =>
             ChampionDesign() >= 0 && Prestige(owner) >= ChampionCost && HasRoyalKitchen(owner);
+
+        public bool CanMusterDragon(int owner) =>
+            DragonDesign() >= 0 && Prestige(owner) >= DragonCost && HasRoyalKitchen(owner);
 
         bool HasRoyalKitchen(int owner)
         {
@@ -105,6 +118,21 @@ namespace Sim
             AddPrestige(owner, -ChampionCost);
             var at = NearestFreeTile(court.CenterX, court.CenterY) ?? new Tile(court.CenterX, court.CenterY);
             SpawnUnit(owner, at.X, at.Y, ChampionDesign());
+        }
+
+        // Muster a Dragon: needs a standing Royal Kitchen and a king's ransom in Prestige.
+        // The legend rises beside the court, as the Champion does — but flying and
+        // fire-breathing, answerable only to another Dragon or a Harpoon Tower.
+        void TryMusterDragon(int owner)
+        {
+            if (!CanMusterDragon(owner)) return;
+            Building court = null;
+            foreach (var b in Buildings)
+                if (b.Alive && b.Complete && b.Owner == owner && b.Type == BuildingType.RoyalKitchen) { court = b; break; }
+            if (court == null) return;
+            AddPrestige(owner, -DragonCost);
+            var at = NearestFreeTile(court.CenterX, court.CenterY) ?? new Tile(court.CenterX, court.CenterY);
+            SpawnUnit(owner, at.X, at.Y, DragonDesign());
         }
     }
 }

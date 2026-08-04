@@ -25,9 +25,10 @@ namespace Sim
         MusterChampion = 19, // spend Prestige at a Royal Kitchen to raise a Champion (Prestige.cs)
         SetGuard = 20,       // X = 1 (UnitIds hold a guard post, auto-intercepting intruders) / 0 (stand down) — Guard.cs
         SetRally = 21,       // TargetId = production building, X,Y = rally tile (X = int.MinValue clears) — new units march there
+        MusterDragon = 22,   // spend Prestige at a Royal Kitchen to raise a Dragon — a flying, fire-breathing legend (Prestige.cs)
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20, HarpoonTower = 21 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -103,6 +104,7 @@ namespace Sim
         public int Sight = 7;   // vision radius in tiles (Vision.UnitSight is the classic 7); NOT point-bought
         public bool Stealth;    // a scout skill: enemies spot it only at close range (see CanSeeUnit); NOT point-bought
         public bool CanScale;   // an assault skill (the Ladderman): climbs OVER an enemy wall/tower to the far side; NOT point-bought
+        public bool Flying;     // a Dragon: crosses the map in a straight line over any terrain, and can be struck back ONLY by other flyers and Harpoon Towers (ground troops & wall archers can't reach it); NOT point-bought
         public bool Trainable = true;   // false for special units (the exile Avenger): off the barracks roster, and exempt from the point budget
         public int SiegeDamage;         // damage dealt to BUILDINGS (0 = a normal unit, which uses Damage vs buildings). A siege engine: huge here, feeble in Damage. NOT point-bought.
         public int CostWood, CostIron;  // build cost of a siege engine at the Siege Workshop (soldiers ignore these and pay the flat barracks cost)
@@ -121,7 +123,7 @@ namespace Sim
 
         public UnitDesign Clone() => new UnitDesign
         {
-            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, CanScale = CanScale, Trainable = Trainable,
+            Hp = Hp, Damage = Damage, SpeedStat = SpeedStat, RangeStat = RangeStat, Cooldown = Cooldown, Sight = Sight, Stealth = Stealth, CanScale = CanScale, Flying = Flying, Trainable = Trainable,
             SiegeDamage = SiegeDamage, CostWood = CostWood, CostIron = CostIron,
         };
         public bool IsSiege => SiegeDamage > 0;
@@ -607,8 +609,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1 };  // ...Market, SiegeWorkshop, RoyalKitchen, Statue
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2 };  // ...Market, SiegeWorkshop, RoyalKitchen, Statue, HarpoonTower
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
@@ -632,6 +634,7 @@ namespace Sim
             new[] { 45, 25, 0 },      // Siege Workshop — engineers the siege machines (built from wood & iron; see the Train command)
             new[] { 35, 20, 0 },      // Royal Kitchen — the court: feasts & tournaments turn food & gold into Prestige (see Prestige.cs)
             new[] { 0, 15, 0 },       // Statue — a monument raised WITH Prestige (checked separately) that then pays it back forever
+            new[] { 30, 45, 0 },      // Harpoon Tower — a square flat tower mounting a dragon harpoon; the anti-air battery that shoots down flyers (ResolveHarpoons)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -642,7 +645,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240, 240, 300 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240, 240, 300, 300 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -1263,7 +1266,15 @@ namespace Sim
                         u.Roaming = false;       // taking manual control ends a scout's free roam
                         u.Guarding = false;      // ...and stands a guard down off its post
 
-                        if (append && (u.HasPath || u.Waypoints.Count > 0))
+                        if (IsFlying(u))
+                        {
+                            // A dragon ignores roads, walls and water — it beelines to the
+                            // spot over any terrain. No path, no waypoint queue: one straight leg.
+                            u.Waypoints.Clear();
+                            u.Cautious = false;
+                            FlyTo(u, cmd.X, cmd.Y);
+                        }
+                        else if (append && (u.HasPath || u.Waypoints.Count > 0))
                         {
                             // Queue a stop after everything already planned. A cautious
                             // append upgrades the whole journey to cautious.
@@ -1294,6 +1305,10 @@ namespace Sim
                         var u = Units.Find(v => v.Id == id);
                         if (u != null && u.Owner == cmd.Owner && u.Id != target.Id)
                         {
+                            // A flyer is out of reach of ground troops and wall archers —
+                            // only another flyer (a Dragon) can be ordered to engage it.
+                            // (The Harpoon Tower answers the rest, autonomously.)
+                            if (IsFlying(target) && !IsFlying(u)) continue;
                             u.Job = Job.None;         // stop gathering to go fight
                             u.TargetBuildingId = 0;   // a unit target replaces a siege target
                             u.TargetId = target.Id;   // the combat phase does the chasing/hitting
@@ -1524,6 +1539,10 @@ namespace Sim
                     TryMusterChampion(cmd.Owner);
                     break;
 
+                case CommandType.MusterDragon:    // spend Prestige at a Royal Kitchen to raise a Dragon (Prestige.cs)
+                    TryMusterDragon(cmd.Owner);
+                    break;
+
                 case CommandType.SetRoam:         // X = 1 roam / 0 stop; only scouts obey
                     foreach (var id in cmd.UnitIds)
                     {
@@ -1710,6 +1729,29 @@ namespace Sim
             u.Path = new List<Tile>(_smoothPath);
             u.PathIndex = 0;
             AimAtWaypoint(u);
+        }
+
+        // ── Flight: dragons ignore the ground ───────────────────────────────────
+        bool IsFlying(Unit u) => DesignOf(u.DesignId).Flying;
+
+        // Aim a flyer straight at a tile — no pathfinding, no terrain: it glides over
+        // rock, water and walls alike. The goal is only clamped to the map; unlike a
+        // ground Order it is never refused for being "impassable", because to a dragon
+        // nothing is. The movement loop then slides it there in a straight line.
+        void FlyTo(Unit u, int goalX, int goalY)
+        {
+            u.Path = null; u.PathIndex = 0;
+            u.Tx = Fixed.FromInt(Clamp(goalX, 0, Map.Width - 1));
+            u.Ty = Fixed.FromInt(Clamp(goalY, 0, Map.Height - 1));
+        }
+
+        // Close on a goal the right way for what's moving: a flyer beelines, everyone
+        // else marches a path. The single chokepoint the combat/siege chase routes call
+        // so a dragon pursues over any terrain while ground troops still route around it.
+        void Approach(Unit u, int goalX, int goalY)
+        {
+            if (IsFlying(u)) FlyTo(u, goalX, goalY);
+            else Order(u, goalX, goalY);
         }
 
         // String-pulling. A* returns a route tile by tile, which makes units
@@ -2032,6 +2074,7 @@ namespace Sim
             ResolveScouting();      // roaming scouts call out any enemy they've spotted
             ResolveGuard();         // guards intercept intruders on their land, and warn of them (Guard.cs)
             ResolveGarrison();      // station soldiers on their ramparts...
+            ResolveHarpoons();      // ...Harpoon Towers loose their bolts at enemy dragons overhead...
             ResolveCombat();        // ...then let the garrison and the field fight
             RemoveDead();
             RemoveDestroyedBuildings();
@@ -2736,7 +2779,7 @@ namespace Sim
                     // would run A* for every fighting unit on every frame.
                     bool needsPath = !u.HasPath || TickNumber % ChaseRepathEvery == 0;
                     if (needsPath)
-                        Order(u, Fixed.ToInt(target.X), Fixed.ToInt(target.Y));
+                        Approach(u, Fixed.ToInt(target.X), Fixed.ToInt(target.Y));
                 }
             }
         }
@@ -2807,6 +2850,7 @@ namespace Sim
             foreach (var v in Units)                        // id order
             {
                 if (v.Owner == u.Owner || !v.Alive) continue;
+                if (IsFlying(v)) continue;                   // a rampart archer can't touch a dragon — that's the Harpoon Tower's job
                 if (!CanSeeUnit(u.Owner, v)) continue;
                 int dist = Fixed.VLen(v.X - u.X, v.Y - u.Y);
                 if (dist <= reach && dist < bestDist) { bestDist = dist; best = v; }
@@ -2821,6 +2865,55 @@ namespace Sim
                 u.AttackTimer = d.Cooldown;
                 ShotsThisTick.Add(new Shot { FromX = u.X, FromY = u.Y, ToX = best.X, ToY = best.Y });
             }
+        }
+
+        // ── Harpoon Towers: the anti-air battery ────────────────────────────────
+        // A square flat tower mounting a dragon harpoon. It answers what walls and
+        // ground troops can't touch — enemy FLYERS — firing on its own the way a
+        // garrisoned rampart does, but at a building's initiative and only skyward.
+        // Its reload rides the tower's BuildTimer slot (a Harpoon Tower never trains,
+        // so that field is otherwise idle) — already hashed, cloned and wired, so no
+        // new determinism plumbing. Runs in id order off the shared RNG, so every
+        // machine fires the same bolt at the same dragon on the same tick.
+        const int HarpoonRange = 9;      // tiles: a wide skyward reach, well past a wall archer's
+        const int HarpoonDamage = 42;    // a heavy bolt — a couple of towers make the sky lethal
+        const int HarpoonReload = 26;    // ticks between bolts (~1.3s)
+
+        void ResolveHarpoons()
+        {
+            foreach (var b in Buildings)                     // id order
+            {
+                if (b.Type != BuildingType.HarpoonTower || !b.Alive || !b.Complete) continue;
+                if (b.BuildTimer > 0) { b.BuildTimer--; continue; }
+
+                int reachFixed = Fixed.FromInt(HarpoonRange);
+                int cx = Fixed.FromInt(b.CenterX), cy = Fixed.FromInt(b.CenterY);
+                Unit best = null; int bestDist = int.MaxValue;
+                foreach (var v in Units)                     // id order → deterministic tie-break
+                {
+                    if (v.Owner == b.Owner || !v.Alive) continue;
+                    if (!IsFlying(v)) continue;               // the harpoon aims ONLY at the sky
+                    if (!CanSeeUnit(b.Owner, v)) continue;
+                    int dist = Fixed.VLen(v.X - cx, v.Y - cy);
+                    if (dist <= reachFixed && dist < bestDist) { bestDist = dist; best = v; }
+                }
+                if (best == null) continue;
+
+                int dmg = _rng.NextInt(HarpoonDamage - 3, HarpoonDamage + 4);
+                if (best.Hp > 0 && best.Hp <= dmg) RegisterBuildingKill(b.Owner, best);
+                best.Hp -= dmg;
+                b.BuildTimer = HarpoonReload;
+                ShotsThisTick.Add(new Shot { FromX = cx, FromY = cy, ToX = best.X, ToY = best.Y });
+            }
+        }
+
+        // Credit a kill scored by a building (a Harpoon Tower), not a unit: it still
+        // loots for the owner and feeds their court's renown, but there is no veteran
+        // to promote. Mirrors the unit-kill bookkeeping in RegisterKill.
+        void RegisterBuildingKill(int owner, Unit victim)
+        {
+            WarPayoff(owner);
+            AddPrestige(owner, GloryPerKill);
         }
 
         // Damage a blow actually lands, after cover. A soldier stationed on a wall
@@ -2885,9 +2978,11 @@ namespace Sim
             else if (!u.HasPath || TickNumber % ChaseRepathEvery == 0)
             {
                 // Walk to a tile touching the footprint. If none is reachable
-                // (fully walled in), the unit simply can't get to it.
+                // (fully walled in), the unit simply can't get to it — but a dragon
+                // flies over the walls and burns it from directly above regardless.
                 var spot = SpawnPointAround(b);
-                if (spot.HasValue) Order(u, spot.Value.X, spot.Value.Y);
+                if (spot.HasValue) Approach(u, spot.Value.X, spot.Value.Y);
+                else if (IsFlying(u)) FlyTo(u, b.CenterX, b.CenterY);
             }
         }
 
@@ -3077,9 +3172,13 @@ namespace Sim
         {
             Unit best = null;
             int bestDist = int.MaxValue;
+            bool flyer = IsFlying(u);
             foreach (var v in Units)
             {
                 if (v.Owner == u.Owner || !v.Alive) continue;
+                // A flyer overhead is beyond a ground fighter's reach — only another
+                // flyer picks it up as a target (Harpoon Towers handle the rest).
+                if (IsFlying(v) && !flyer) continue;
                 if (!CanSeeUnit(u.Owner, v)) continue;
                 int dist = Fixed.VLen(v.X - u.X, v.Y - u.Y);
                 if (dist > AggroRange) continue;
@@ -3174,7 +3273,7 @@ namespace Sim
             Mix(_designs.Count);
             foreach (var d in _designs)
             {
-                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.CanScale ? 1 : 0); Mix(d.Trainable ? 1 : 0);
+                Mix(d.Hp); Mix(d.Damage); Mix(d.SpeedStat); Mix(d.RangeStat); Mix(d.Cooldown); Mix(d.Sight); Mix(d.Stealth ? 1 : 0); Mix(d.CanScale ? 1 : 0); Mix(d.Flying ? 1 : 0); Mix(d.Trainable ? 1 : 0);
                 Mix(d.SiegeDamage); Mix(d.CostWood); Mix(d.CostIron);
             }
 

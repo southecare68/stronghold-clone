@@ -220,6 +220,7 @@ namespace Netcode
                 PutInt(buf, d.Sight);
                 PutInt(buf, d.Stealth ? 1 : 0);
                 PutInt(buf, d.CanScale ? 1 : 0);
+                PutInt(buf, d.Flying ? 1 : 0);
                 PutInt(buf, d.Trainable ? 1 : 0);
                 PutInt(buf, d.SiegeDamage);
                 PutInt(buf, d.CostWood);
@@ -427,6 +428,7 @@ namespace Netcode
                         Sight = GetInt(data, ref p),
                         Stealth = GetInt(data, ref p) != 0,
                         CanScale = GetInt(data, ref p) != 0,
+                        Flying = GetInt(data, ref p) != 0,
                         Trainable = GetInt(data, ref p) != 0,
                         SiegeDamage = GetInt(data, ref p),
                         CostWood = GetInt(data, ref p),
