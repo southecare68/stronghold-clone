@@ -172,7 +172,9 @@ public partial class World3D : Node3D
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
     PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger, _mChampion, _mDragon;
-    Texture2D _dragNormal, _dragRough, _dragMetal, _dragAo;   // dragon PBR maps, layered onto its embedded base colour
+    Texture2D _dragNormal, _dragRough, _dragMetal, _dragAo;   // dragon PBR maps, shared across all colours
+    Texture2D[] _dragonSkins;                                 // base-colour variants by owner: [0]=P1 … matched to CampColors
+    Texture2D _dragonSkinDefault;                             // black, for any owner past the table
     PackedScene _mRam, _mCatapult, _mTrebuchet;
 
     // Camera orbit around a target on the ground.
@@ -683,6 +685,16 @@ public partial class World3D : Node3D
         _dragRough  = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Roughness.png");       // matte scales vs slick membrane
         _dragMetal  = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Metallic.png");
         _dragAo     = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Mixed_AO.png");        // baked crevice shadowing
+        // A dragon wears its owner's colour, matched to CampColors (blue/red/green/gold).
+        const string skin = "res://Assets/Dragon/Textures/M_Dragon_Base_color_";
+        _dragonSkins = new[]
+        {
+            GD.Load<Texture2D>(skin + "lightBlue.png"),   // player 1 — blue
+            GD.Load<Texture2D>(skin + "red.png"),         // player 2 — red
+            GD.Load<Texture2D>(skin + "Green.png"),       // player 3 — green
+            GD.Load<Texture2D>(skin + "Yellow.png"),      // player 4 — gold
+        };
+        _dragonSkinDefault = GD.Load<Texture2D>(skin + "Black.png");   // any further owner
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -2302,8 +2314,9 @@ public partial class World3D : Node3D
                     // The Dragon ships its OWN rig and baked flight animation, so we keep
                     // its AnimationPlayer (don't strip it) and let it drive the pose — the
                     // humanoid poser stays off (_skel = null). Its FBX material imports
-                    // semi-transparent (alpha 0.8), so force it opaque, and layer on the PBR maps.
-                    DressDragon(node);
+                    // semi-transparent (alpha 0.8), so force it opaque, layer on the PBR maps,
+                    // and paint it the owner's colour.
+                    DressDragon(node, u.Owner);
                     var ap = FindAnimPlayer(node);
                     if (ap != null)
                     {
@@ -3412,8 +3425,9 @@ public partial class World3D : Node3D
     // alpha 0.8, which is see-through and depth-sorts badly) and layer the PBR maps
     // on top of its embedded base colour — a normal map for scale relief, roughness
     // so the membrane reads slick against matte hide, metallic, and baked AO.
-    void DressDragon(Node n)
+    void DressDragon(Node n, int owner)
     {
+        var skin = DragonSkin(owner);
         if (n is MeshInstance3D mi && mi.Mesh != null)
         {
             for (int s = 0; s < mi.Mesh.GetSurfaceCount(); s++)
@@ -3423,6 +3437,7 @@ public partial class World3D : Node3D
                     var m = (BaseMaterial3D)bm.Duplicate();
                     m.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
                     var c = m.AlbedoColor; c.A = 1f; m.AlbedoColor = c;
+                    if (skin != null) m.AlbedoTexture = skin;   // the owner's colour
                     if (_dragNormal != null) { m.NormalEnabled = true; m.NormalTexture = _dragNormal; }
                     if (_dragRough != null)  { m.RoughnessTexture = _dragRough; m.Roughness = 1f; m.RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Red; }
                     if (_dragMetal != null)  { m.MetallicTexture = _dragMetal; m.Metallic = 1f; m.MetallicTextureChannel = BaseMaterial3D.TextureChannel.Red; }
@@ -3431,7 +3446,15 @@ public partial class World3D : Node3D
                 }
             }
         }
-        foreach (var c in n.GetChildren()) DressDragon(c);
+        foreach (var c in n.GetChildren()) DressDragon(c, owner);
+    }
+
+    // The base-colour texture a dragon wears, by owner — matched to the player colours
+    // in CampColors (blue/red/green/gold), with black for any owner beyond the table.
+    Texture2D DragonSkin(int owner)
+    {
+        int i = owner - 1;
+        return (i >= 0 && i < _dragonSkins.Length) ? _dragonSkins[i] : _dragonSkinDefault;
     }
 
     // Synty modular characters ship every body mesh under one skeleton with its
