@@ -31,8 +31,14 @@ public partial class World3D : Node3D
     const float DragonYawOffset = Mathf.Pi;  // the mesh's head is local −Z; the game aims +Z at travel, so spin it 180° to fly head-first
     const string DragonFlyClip = "Fly";      // the looping wing-flap take baked into the dragon FBX
     const string DragonBreathClip = "FlyingBreathAtk";   // the fire-breath take, played when it attacks
+    const string DragonDieClip = "Die";      // the death take, played once when a dragon is shot down
+    const float DragonFallTime = 1.0f;       // seconds a shot-down dragon takes to plummet to the ground
+    const float DragonDeathTime = 3.0f;      // total lifetime of the corpse before it's cleared (≈ the Die take length)
+    const float DragonSinkTime = 0.6f;       // of that, the final stretch spent sinking out of view
     readonly Dictionary<int, AnimationPlayer> _dragonAnim = new();   // per-dragon animation driver
     readonly Dictionary<int, int> _dragonLastAtk = new();            // last seen AttackTimer, to fire the breath take once per blow
+    readonly List<DyingDragon> _dyingDragons = new();                // shot-down dragons mid-death, no longer in the sim
+    sealed class DyingDragon { public Node3D Node; public float T; public float FromY; }
     float _dragonBob;                        // advancing phase for the Dragon's idle hover-bob
 
     // Wall assembly. The pack's pieces are 5-unit modules: Wall_01 is a solid
@@ -2482,6 +2488,17 @@ public partial class World3D : Node3D
             UpdateGuardPip(u, pos, node.Visible);
             _lastSeen[u.Id] = (pos, u.IsPeasant);
         }
+
+        // A Dragon that just left the sim was shot down. Rescue its node out of
+        // _unitNodes BEFORE Prune frees it, and hand it to the death loop so it plays
+        // its Die take and plummets, instead of blinking out mid-air.
+        foreach (var id in new List<int>(_dragonAnim.Keys))
+            if (!live.Contains(id) && _unitNodes.TryGetValue(id, out var dyer))
+            {
+                _unitNodes.Remove(id);          // so Prune leaves it alone
+                StartDragonDeath(dyer, _dragonAnim[id]);
+            }
+
         Prune(_unitNodes, live);
         foreach (var id in new List<int>(_rankPip.Keys))
             if (!live.Contains(id)) { _rankPip[id].QueueFree(); _rankPip.Remove(id); }
@@ -2503,6 +2520,49 @@ public partial class World3D : Node3D
             _lastSeen.Remove(id);
             if (_bars.Remove(id, out var b)) b.Root.QueueFree();
             if (!peasant) { Spark(at + Vector3.Up * 0.5f, new Color(0.7f, 0.16f, 0.13f), 16, 3.2f); _sound.Play(Sfx.UnitDeath, at); }
+        }
+
+        UpdateDyingDragons(delta);
+    }
+
+    // Begin a downed dragon's death: stop the flapping, play the Die take once (it holds
+    // the collapsed pose at the end), and record where it fell so the death loop can drop
+    // it to the ground.
+    void StartDragonDeath(Node3D node, AnimationPlayer ap)
+    {
+        if (ap != null && ap.HasAnimation(DragonDieClip))
+        {
+            ap.GetAnimation(DragonDieClip).LoopMode = Animation.LoopModeEnum.None;
+            ap.Play(DragonDieClip);
+        }
+        _dyingDragons.Add(new DyingDragon { Node = node, T = 0f, FromY = node.Position.Y });
+    }
+
+    // Advance every downed dragon: plummet from flight height to the ground (accelerating),
+    // let the corpse lie while the Die take finishes, then sink it out of view and free it.
+    void UpdateDyingDragons(double delta)
+    {
+        for (int i = _dyingDragons.Count - 1; i >= 0; i--)
+        {
+            var d = _dyingDragons[i];
+            if (d.Node == null || !IsInstanceValid(d.Node)) { _dyingDragons.RemoveAt(i); continue; }
+            d.T += (float)delta;
+
+            var p = d.Node.Position;
+            if (d.T >= DragonDeathTime - DragonSinkTime)
+            {
+                // final stretch: sink the corpse beneath the terrain so it doesn't pop out
+                float s = (d.T - (DragonDeathTime - DragonSinkTime)) / DragonSinkTime;
+                p.Y = -2.5f * Mathf.Clamp(s, 0f, 1f);
+            }
+            else
+            {
+                float f = Mathf.Clamp(d.T / DragonFallTime, 0f, 1f);
+                p.Y = Mathf.Lerp(d.FromY, 0f, f * f);   // ease-in plummet
+            }
+            d.Node.Position = p;
+
+            if (d.T >= DragonDeathTime) { d.Node.QueueFree(); _dyingDragons.RemoveAt(i); }
         }
     }
 
