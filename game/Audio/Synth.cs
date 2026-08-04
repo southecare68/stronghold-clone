@@ -36,6 +36,7 @@ namespace Audio
         GateMove,       // a gatehouse opened or closed
         Collapse,       // a building came down
         Denied,         // an order the game would not accept
+        DragonRoar,     // a dragon's roar as it's mustered
     }
 
     public static class Synth
@@ -48,7 +49,7 @@ namespace Audio
         {
             Sfx.Select, Sfx.MoveOrder, Sfx.AttackOrder, Sfx.MeleeHit, Sfx.BowShot,
             Sfx.ArrowHit, Sfx.UnitDeath, Sfx.BuildPlace, Sfx.BuildDone, Sfx.Deposit,
-            Sfx.GateMove, Sfx.Collapse, Sfx.Denied,
+            Sfx.GateMove, Sfx.Collapse, Sfx.Denied, Sfx.DragonRoar,
         };
 
         // Peak level every sound is normalised to. Short of full scale so that
@@ -76,6 +77,7 @@ namespace Audio
                 Sfx.Deposit => 0.09f,
                 Sfx.GateMove => 0.55f,
                 Sfx.Collapse => 0.80f,
+                Sfx.DragonRoar => 1.4f,
                 _ => 0.16f,
             };
 
@@ -100,6 +102,7 @@ namespace Audio
                 case Sfx.Deposit: Build_Deposit(buf); break;
                 case Sfx.GateMove: Build_GateMove(buf, rng); break;
                 case Sfx.Collapse: Build_Collapse(buf, rng); break;
+                case Sfx.DragonRoar: Build_DragonRoar(buf, rng); break;
                 default: Build_Denied(buf); break;
             }
 
@@ -263,6 +266,46 @@ namespace Audio
                 b[i] += v * Decay(t, 0.02f, 0.26f) * 0.95f;
             }
             Tone(b, 0f, 0.80f, 90f, 45f, 0.35f, Wave.Sine);
+        }
+
+        // A dragon's roar: a low guttural growl that swells and falls away. Built by
+        // hand rather than from Tone, because it needs a pitch that RISES then SAGS
+        // (Tone only sweeps one way), a stack of harmonics for a brassy, throaty body,
+        // and a fast amplitude flutter — the gargle that reads as a living beast rather
+        // than a foghorn. Noise low-passed to a rasp sits on top so it has grain.
+        static void Build_DragonRoar(float[] b, Noise rng)
+        {
+            int n = b.Length;
+            var lp = new OnePole();
+            var lp2 = new OnePole();
+            float p1 = 0f, p2 = 0f, p3 = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)SampleRate;
+                float k = i / (float)n;                      // 0..1 across the roar
+
+                // Pitch rears up to a peak around a third of the way in, then falls
+                // away — the shape of a real roar drawing breath and letting go.
+                float f = k < 0.35f ? Lerp(65f, 145f, k / 0.35f)
+                                    : Lerp(145f, 55f, (k - 0.35f) / 0.65f);
+
+                // Fundamental plus the 2nd and 3rd harmonics for a thick, brassy body.
+                p1 += 2f * MathF.PI * f / SampleRate;
+                p2 += 2f * MathF.PI * (f * 2f) / SampleRate;
+                p3 += 2f * MathF.PI * (f * 3f) / SampleRate;
+                float tone = MathF.Sin(p1) * 0.6f + MathF.Sin(p2) * 0.28f + MathF.Sin(p3) * 0.16f;
+
+                // Throaty rasp: white noise low-passed twice into a growl.
+                float rasp = lp2.LowPass(lp.LowPass(rng.Next(), 1500f), 1500f);
+
+                // The gargle: a fast amplitude flutter riding on everything.
+                float flutter = 0.72f + 0.28f * MathF.Sin(2f * MathF.PI * 34f * t);
+
+                // Swell in over ~0.12 of the length, hold, fall away over the last third.
+                float env = MathF.Min(1f, k / 0.12f) * MathF.Min(1f, (1f - k) / 0.30f);
+
+                b[i] += (tone * 0.8f + rasp * 0.5f) * flutter * env;
+            }
         }
 
         // Refusal: a flat, unmusical buzz. Deliberately unpleasant — it only

@@ -2324,7 +2324,14 @@ public partial class World3D : Node3D
                         if (fly != null) fly.LoopMode = Animation.LoopModeEnum.Linear;   // clips import non-looping
                         // A dragon's node is created the instant it's mustered, so roar on
                         // entrance, then settle into the looping flight take.
-                        if (ap.HasAnimation(DragonRoarClip)) { ap.Play(DragonRoarClip); ap.Queue(DragonFlyClip); }
+                        if (ap.HasAnimation(DragonRoarClip))
+                        {
+                            ap.Play(DragonRoarClip); ap.Queue(DragonFlyClip);
+                            // The roar carries: sound it at the muster spot — always for your
+                            // own, and for an enemy's only if you can actually see it raised.
+                            if (_sound != null && (u.Owner == MyPlayer || _sim.CanSeeUnit(MyPlayer, u)))
+                            { var sp = SimXZ(u); _sound.Play(Sfx.DragonRoar, Aud(sp.X, sp.Y)); }
+                        }
                         else ap.Play(DragonFlyClip);
                         _dragonAnim[u.Id] = ap;
                     }
