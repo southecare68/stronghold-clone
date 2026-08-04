@@ -172,6 +172,7 @@ public partial class World3D : Node3D
     readonly Dictionary<BuildingType, PackedScene> _bldModel = new();
     readonly Dictionary<BuildingType, float> _bldScale = new();
     PackedScene _mSoldier, _mPeasant, _mRunner, _mBrute, _mArcher, _mScout, _mAvenger, _mChampion, _mDragon;
+    Texture2D _dragNormal, _dragRough, _dragMetal, _dragAo;   // dragon PBR maps, layered onto its embedded base colour
     PackedScene _mRam, _mCatapult, _mTrebuchet;
 
     // Camera orbit around a target on the ground.
@@ -678,6 +679,10 @@ public partial class World3D : Node3D
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
         _mChampion = Load("Characters/SM_Chr_Rider_01");   // a mounted knight of renown — mustered for Prestige
         _mDragon = GD.Load<PackedScene>("res://Assets/Dragon/DragonAnim.fbx");   // rigged, animated dragon (FBX: Fly/breath/roar takes) under game/Assets/Dragon
+        _dragNormal = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Normal_OpenGL.png");   // surface detail
+        _dragRough  = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Roughness.png");       // matte scales vs slick membrane
+        _dragMetal  = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Metallic.png");
+        _dragAo     = GD.Load<Texture2D>("res://Assets/Dragon/Textures/M_Dragon_Mixed_AO.png");        // baked crevice shadowing
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -2297,8 +2302,8 @@ public partial class World3D : Node3D
                     // The Dragon ships its OWN rig and baked flight animation, so we keep
                     // its AnimationPlayer (don't strip it) and let it drive the pose — the
                     // humanoid poser stays off (_skel = null). Its FBX material imports
-                    // semi-transparent (alpha 0.8), so force it opaque.
-                    ForceOpaque(node);
+                    // semi-transparent (alpha 0.8), so force it opaque, and layer on the PBR maps.
+                    DressDragon(node);
                     var ap = FindAnimPlayer(node);
                     if (ap != null)
                     {
@@ -3403,10 +3408,11 @@ public partial class World3D : Node3D
         return null;
     }
 
-    // Force every mesh under a node to render opaque. The dragon FBX's material
-    // imports semi-transparent (alpha 0.8), which makes it see-through and adds
-    // depth-sort artefacts; a legendary beast should be solid.
-    static void ForceOpaque(Node n)
+    // Dress every mesh under a dragon: force it opaque (its FBX material imports at
+    // alpha 0.8, which is see-through and depth-sorts badly) and layer the PBR maps
+    // on top of its embedded base colour — a normal map for scale relief, roughness
+    // so the membrane reads slick against matte hide, metallic, and baked AO.
+    void DressDragon(Node n)
     {
         if (n is MeshInstance3D mi && mi.Mesh != null)
         {
@@ -3417,11 +3423,15 @@ public partial class World3D : Node3D
                     var m = (BaseMaterial3D)bm.Duplicate();
                     m.Transparency = BaseMaterial3D.TransparencyEnum.Disabled;
                     var c = m.AlbedoColor; c.A = 1f; m.AlbedoColor = c;
+                    if (_dragNormal != null) { m.NormalEnabled = true; m.NormalTexture = _dragNormal; }
+                    if (_dragRough != null)  { m.RoughnessTexture = _dragRough; m.Roughness = 1f; m.RoughnessTextureChannel = BaseMaterial3D.TextureChannel.Red; }
+                    if (_dragMetal != null)  { m.MetallicTexture = _dragMetal; m.Metallic = 1f; m.MetallicTextureChannel = BaseMaterial3D.TextureChannel.Red; }
+                    if (_dragAo != null)     { m.AOEnabled = true; m.AOTexture = _dragAo; m.AOTextureChannel = BaseMaterial3D.TextureChannel.Red; }
                     mi.SetSurfaceOverrideMaterial(s, m);
                 }
             }
         }
-        foreach (var c in n.GetChildren()) ForceOpaque(c);
+        foreach (var c in n.GetChildren()) DressDragon(c);
     }
 
     // Synty modular characters ship every body mesh under one skeleton with its
