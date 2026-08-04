@@ -26,7 +26,9 @@ public partial class World3D : Node3D
     // character is ~1.8 units tall — too big for our 1-unit tiles. These bring
     // them down to size; tuned by eye.
     const float CharScale = 0.42f;
-    const float DragonFlightHeight = 4.2f;   // how high above the ground a Dragon's model rides (render only)
+    const float DragonFlightHeight = 3.4f;   // how high above the ground a Dragon's model rides (render only)
+    const float DragonModelScale = 2.4f;     // the Tripo dragon mesh is ~1 world-unit wide; this makes it ~2.3 tiles across
+    const float DragonYawOffset = 0f;        // radians added to a Dragon's facing, in case the mesh's "forward" isn't -Z
     float _dragonBob;                        // advancing phase for the Dragon's idle wing-bob
 
     // Wall assembly. The pack's pieces are 5-unit modules: Wall_01 is a solid
@@ -664,7 +666,7 @@ public partial class World3D : Node3D
         _mScout   = Load("Characters/SM_Chr_Hermit_01");   // a hooded wanderer — the far-seeing recon unit
         _mAvenger = Load("Characters/SM_Chr_Headsman_01"); // the exiled king's champion — a grim executioner out for blood
         _mChampion = Load("Characters/SM_Chr_Rider_01");   // a mounted knight of renown — mustered for Prestige
-        _mDragon = Load("Characters/SM_Chr_Fairy_01");      // the only winged model in the pack — stands in for the Dragon, flown large & high overhead
+        _mDragon = GD.Load<PackedScene>("res://Assets/Dragon/Dragon.glb");   // the real dragon mesh (Tripo GLB, imported under game/Assets/Dragon)
         _mRam       = Load("SiegeEngines/SM_Wep_Rammer_01");
         _mCatapult  = Load("SiegeEngines/SM_Wep_Catapult_01");
         _mTrebuchet = Load("SiegeEngines/SM_Wep_Trebuchet_01");
@@ -2275,7 +2277,7 @@ public partial class World3D : Node3D
                 // the rank and file, so its threat reads at a glance — and a Dragon,
                 // bigger still, dominates the sky.
                 var dd = _sim.DesignOf(u.DesignId);
-                float scale = dd.Flying ? CharScale * 2.6f : dd.Trainable ? CharScale : CharScale * 1.6f;
+                float scale = dd.Flying ? DragonModelScale : dd.Trainable ? CharScale : CharScale * 1.6f;
                 node.Scale = Vector3.One * scale;
                 AddChild(node);
                 _unitNodes[u.Id] = node;
@@ -2413,7 +2415,9 @@ public partial class World3D : Node3D
 
             node.Position = pos;
             if (face.LengthSquared() > 1e-5f) _yaw[u.Id] = Mathf.Atan2(face.X, face.Z);
-            node.Rotation = new Vector3(0, _yaw.TryGetValue(u.Id, out var yy) ? yy : 0f, 0);
+            float drawYaw = (_yaw.TryGetValue(u.Id, out var yy) ? yy : 0f)
+                          + (_sim.DesignOf(u.DesignId).Flying ? DragonYawOffset : 0f);
+            node.Rotation = new Vector3(0, drawYaw, 0);
 
             if (_skel.TryGetValue(u.Id, out var s) && s != null)
             {
