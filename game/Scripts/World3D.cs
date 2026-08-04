@@ -32,6 +32,7 @@ public partial class World3D : Node3D
     const string DragonFlyClip = "Fly";      // the looping wing-flap take baked into the dragon FBX
     const string DragonBreathClip = "FlyingBreathAtk";   // the fire-breath take, played when it attacks
     const string DragonDieClip = "Die";      // the death take, played once when a dragon is shot down
+    const string DragonRoarClip = "Roar";    // the roar take, played once on muster (its entrance) before it settles into flight
     const float DragonFallTime = 1.0f;       // seconds a shot-down dragon takes to plummet to the ground
     const float DragonDeathTime = 3.0f;      // total lifetime of the corpse before it's cleared (≈ the Die take length)
     const float DragonSinkTime = 0.6f;       // of that, the final stretch spent sinking out of view
@@ -2303,7 +2304,10 @@ public partial class World3D : Node3D
                     {
                         var fly = ap.GetAnimation(DragonFlyClip);
                         if (fly != null) fly.LoopMode = Animation.LoopModeEnum.Linear;   // clips import non-looping
-                        ap.Play(DragonFlyClip);
+                        // A dragon's node is created the instant it's mustered, so roar on
+                        // entrance, then settle into the looping flight take.
+                        if (ap.HasAnimation(DragonRoarClip)) { ap.Play(DragonRoarClip); ap.Queue(DragonFlyClip); }
+                        else ap.Play(DragonFlyClip);
                         _dragonAnim[u.Id] = ap;
                     }
                     _skel[u.Id] = null;
