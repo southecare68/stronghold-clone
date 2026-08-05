@@ -28,7 +28,7 @@ public partial class World3D : Node3D
     const float CharScale = 0.42f;
     const float DragonFlightHeight = 3.2f;   // how high above the ground a Dragon's model rides (render only)
     const float DragonModelScale = 0.12f;    // the animated dragon mesh is ~23.7 units wide; this makes it ~2.8 tiles across
-    const float DragonYawOffset = Mathf.Pi;  // the mesh's head is local −Z; the game aims +Z at travel, so spin it 180° to fly head-first
+    const float DragonYawOffset = 0f;        // the mesh's head is local +Z, which already matches the game's facing — no spin needed
     const string DragonFlyClip = "Fly";      // the looping wing-flap take baked into the dragon FBX
     const string DragonBreathClip = "FlyingBreathAtk";   // the fire-breath take, played when it attacks
     const string DragonDieClip = "Die";      // the death take, played once when a dragon is shot down
