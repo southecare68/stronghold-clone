@@ -237,7 +237,7 @@ public partial class World3D : Node3D
         BuildingType.WoodcutterHut, BuildingType.Quarry, BuildingType.IronMine, BuildingType.Storehouse,
         BuildingType.Farm, BuildingType.Granary, BuildingType.Market,
         BuildingType.Church, BuildingType.Wonder, BuildingType.Keep,
-        BuildingType.RoyalKitchen, BuildingType.Statue, BuildingType.HarpoonTower,
+        BuildingType.RoyalKitchen, BuildingType.Statue, BuildingType.HarpoonTower, BuildingType.Well,
     };
 
     // HUD: a live status bar over the 3D view. Read-only view of the sim's
@@ -720,6 +720,7 @@ public partial class World3D : Node3D
         B(BuildingType.RoyalKitchen,  "Buildings/Preset_Houses/SM_Bld_Preset_House_04_Optimized", 0.6f);  // the court's feasting hall — feasts & tourneys → Prestige
         B(BuildingType.Statue,        "Bonus/SM_Prop_Statue_King_01", 0.6f);   // a monument raised with Prestige, radiating more of it
         B(BuildingType.HarpoonTower,  "Castle/SM_Bld_Castle_Wall_Tower_L_01", 0.55f);  // a square flat tower mounting a dragon harpoon — the anti-air battery
+        B(BuildingType.Well,          "Props/SM_Prop_Well_01", 0.7f);   // draws water to douse dragon-fire nearby
 
         _wallBody = Load("Castle/SM_Bld_Castle_Wall_01");
         _wallBat  = Load("Castle/SM_Bld_Castle_Battlements_01");
@@ -1838,7 +1839,7 @@ public partial class World3D : Node3D
         BuildingType.Church => "Church", BuildingType.Wonder => "Wonder",
         BuildingType.Market => "Market", BuildingType.SiegeWorkshop => "Siege Wk",
         BuildingType.RoyalKitchen => "Royal Kitchen", BuildingType.Statue => "Statue",
-        BuildingType.HarpoonTower => "Harpoon", _ => t.ToString(),
+        BuildingType.HarpoonTower => "Harpoon", BuildingType.Well => "Well", _ => t.ToString(),
     };
 
     // Cost as a compact string: nonzero amounts with a resource initial. Owner-aware,
@@ -2995,9 +2996,61 @@ public partial class World3D : Node3D
             }
 
             UpdateWorkerWarning(b);
+            UpdateBuildingFire(b);
         }
         Prune(_buildingNodes, live);
         Prune(_workerWarn, live);
+        foreach (var id in new List<int>(_buildingFire.Keys))
+            if (!live.Contains(id)) { _buildingFire[id].QueueFree(); _buildingFire.Remove(id); }
+    }
+
+    // Flames over a building the dragon set alight — raised the moment it catches, cleared
+    // when the fire is doused or the building falls. The flicker rides the shared fire-FX
+    // list (UpdateFires). Only shown while the building itself is on screen.
+    readonly Dictionary<int, Node3D> _buildingFire = new();
+    void UpdateBuildingFire(Building b)
+    {
+        bool ablaze = b.Alive && b.Burning > 0
+                      && _buildingNodes.TryGetValue(b.Id, out var bn) && bn.Visible;
+        if (ablaze && !_buildingFire.ContainsKey(b.Id)) _buildingFire[b.Id] = MakeBuildingFire(b);
+        else if (!ablaze && _buildingFire.TryGetValue(b.Id, out var fx))
+        { fx.QueueFree(); _buildingFire.Remove(b.Id); }
+    }
+
+    Node3D MakeBuildingFire(Building b)
+    {
+        var root = new Node3D { Position = new Vector3(b.X + (b.W - 1) / 2f, 0, b.Y + (b.H - 1) / 2f) };
+        AddChild(root);
+        var flameMat = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            AlbedoColor = new Color(1f, 0.5f, 0.13f),
+        };
+        float top = b.Type == BuildingType.Keep ? 2.4f : 1.3f;
+        int cones = Mathf.Clamp(b.W * b.H, 3, 9);
+        var flames = new MeshInstance3D[cones];
+        for (int i = 0; i < cones; i++)
+        {
+            float ox = ((i % Mathf.Max(1, b.W)) - (b.W - 1) / 2f) * 0.72f;
+            float oz = ((i / Mathf.Max(1, b.W)) - (b.H - 1) / 2f) * 0.72f;
+            flames[i] = new MeshInstance3D
+            {
+                Mesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 0.22f, Height = 0.7f + 0.18f * (i % 2), RadialSegments = 6 },
+                MaterialOverride = flameMat,
+                Position = new Vector3(ox, top, oz),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+            root.AddChild(flames[i]);
+        }
+        var light = new OmniLight3D
+        {
+            Position = new Vector3(0, top + 0.7f, 0),
+            LightColor = new Color(1f, 0.55f, 0.2f),
+            OmniRange = 7f, LightEnergy = 2.2f,
+        };
+        root.AddChild(light);
+        _fires.Add(new FireFx { Flames = flames, Light = light, Phase = _fires.Count * 1.7f });
+        return root;
     }
 
     // Raise or clear the floating "no worker" marker over one of your buildings. Only

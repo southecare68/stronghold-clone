@@ -28,7 +28,7 @@ namespace Sim
         MusterDragon = 22,   // spend Prestige at a Royal Kitchen to raise a Dragon — a flying, fire-breathing legend (Prestige.cs)
     }
 
-    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20, HarpoonTower = 21 }
+    public enum BuildingType { Keep = 0, Barracks = 1, Wall = 2, Gatehouse = 3, WoodcutterHut = 4, Storehouse = 5, Quarry = 6, Farm = 7, Mill = 8, Bakery = 9, House = 10, Steps = 11, Turret = 12, IronMine = 13, Granary = 14, Church = 15, Wonder = 16, Market = 17, SiegeWorkshop = 18, RoyalKitchen = 19, Statue = 20, HarpoonTower = 21, Well = 22 }
 
     // Wood and Stone are gathered from the map; Food is the goal resource that
     // feeds an army. Grain and Flour are the food chain's intermediates — a farm
@@ -173,6 +173,11 @@ namespace Sim
         public int RallyX = int.MinValue, RallyY;
         public bool HasRally => RallyX != int.MinValue;
 
+        // Ticks of fire left. A dragon's breath sets a building ablaze; while it burns it
+        // loses hit points and can spread to a neighbour — unless a Well douses it. Zero
+        // for a building that isn't on fire (see ResolveFires). Post-freeze state.
+        public int Burning;
+
         public bool Alive => Hp > 0;
         public bool Complete => Construction <= 0;   // a finished (counting) building
         public int CenterX => X + W / 2;
@@ -183,7 +188,7 @@ namespace Sim
             Id = Id, Owner = Owner, Type = Type, X = X, Y = Y, W = W, H = H,
             Hp = Hp, MaxHp = MaxHp, TrainQueue = new List<int>(TrainQueue),
             BuildTimer = BuildTimer, Construction = Construction, Open = Open, WorkerId = WorkerId,
-            RallyX = RallyX, RallyY = RallyY,
+            RallyX = RallyX, RallyY = RallyY, Burning = Burning,
         };
     }
 
@@ -609,8 +614,8 @@ namespace Sim
         // Footprint size and placement cost per building type, indexed by
         // (int)BuildingType. Cost is [wood, stone, food]. Walls and gatehouses
         // are 1x1 so a player lays them out tile by tile into a curtain wall.
-        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2 };  // ...Market, SiegeWorkshop, RoyalKitchen, Statue, HarpoonTower
-        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2 };
+        static readonly int[] FootW = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2, 2 };  // ...Market, SiegeWorkshop, RoyalKitchen, Statue, HarpoonTower, Well
+        static readonly int[] FootH = { 3, 2, 1, 1, 2, 2, 2, 3, 2, 2, 2, 1, 1, 2, 2, 2, 3, 3, 2, 2, 1, 2, 2 };
         static readonly int[][] BuildCost =
         {
             new[] { 100, 150, 0 },   // Keep — the founding cost of a NEW territory (Build command only; setup places the first free via PlaceBuilding)
@@ -635,6 +640,7 @@ namespace Sim
             new[] { 35, 20, 0 },      // Royal Kitchen — the court: feasts & tournaments turn food & gold into Prestige (see Prestige.cs)
             new[] { 0, 15, 0 },       // Statue — a monument raised WITH Prestige (checked separately) that then pays it back forever
             new[] { 30, 45, 0 },      // Harpoon Tower — a square flat tower mounting a dragon harpoon; the anti-air battery that shoots down flyers (ResolveHarpoons)
+            new[] { 10, 20, 0 },      // Well — draws water to douse dragon-fire on any friendly building within reach; ring your castle with them (ResolveFires)
         };
         // Costs are [wood, stone, food, grain]. Every building lists only the first
         // three (grain 0) — nothing costs grain to BUILD. The mill and bakery used to,
@@ -645,7 +651,7 @@ namespace Sim
         // without a mill feeding it flour) is enough.
         // Structural hit points per type. A wall is tough enough to buy time but
         // not permanent — a handful of soldiers breach it in well under a minute.
-        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240, 240, 300, 300 };
+        static readonly int[] BuildHp = { 600, 250, 200, 250, 180, 220, 200, 150, 220, 220, 160, 150, 260, 220, 220, 240, 500, 240, 240, 240, 300, 300, 200 };
 
         // The default match seed. Both machines must seed identically, so this is
         // a fixed constant for now; a real lobby would agree one at match start
@@ -2076,6 +2082,7 @@ namespace Sim
             ResolveGarrison();      // station soldiers on their ramparts...
             ResolveHarpoons();      // ...Harpoon Towers loose their bolts at enemy dragons overhead...
             ResolveCombat();        // ...then let the garrison and the field fight
+            ResolveFires();         // dragon-fire eats the buildings it lit, and Wells douse it
             RemoveDead();
             RemoveDestroyedBuildings();
             ResolveExile();         // a realm whose last keep just fell flees into exile, and refounds after a regroup (Exile.cs)
@@ -2928,6 +2935,59 @@ namespace Sim
             return raw;
         }
 
+        // ── Fire: a dragon's breath sets buildings alight; Wells put them out ─────
+        const int FireEvery = 10;         // resolve fire on this cadence (~0.5 s)
+        const int FireDuration = 160;     // ticks a fresh blaze burns (~8 s) before it dies down
+        const int FireDamage = 10;        // hit points the fire eats each cadence
+        const int FireSpreadChance = 18;  // percent chance per cadence a blaze jumps to a neighbour
+        const int FireSpreadRange = 5;    // tiles (centre-to-centre) a fire can jump to a neighbour
+        const int DouseRate = 45;         // Burning a Well strips each cadence — a covered blaze is out in ~2 s
+        const int WellReach = 7;          // tiles a Well's water reaches
+
+        // Burning buildings lose hit points and can spread — unless a friendly Well is in
+        // reach, which fights the blaze down instead. Runs in id order off the sim RNG, so
+        // it is byte-identical on every machine. Idle (no RNG, no cost) when nothing burns,
+        // which is why every pre-dragon scenario is untouched.
+        void ResolveFires()
+        {
+            if (TickNumber % FireEvery != 0) return;
+            foreach (var b in Buildings)                 // id order
+            {
+                if (!b.Alive || b.Burning <= 0) continue;
+                if (WellCovers(b)) { b.Burning = Math.Max(0, b.Burning - DouseRate); continue; }   // being fought: no structural loss
+                b.Hp -= FireDamage;
+                b.Burning -= FireEvery;
+                if (b.Burning > 0) TrySpreadFire(b);
+            }
+        }
+
+        // A friendly, standing Well within reach — its water can douse a blaze there.
+        bool WellCovers(Building fire)
+        {
+            foreach (var w in Buildings)
+                if (w.Type == BuildingType.Well && w.Alive && w.Complete && w.Owner == fire.Owner)
+                {
+                    long dx = w.CenterX - fire.CenterX, dy = w.CenterY - fire.CenterY;
+                    if (dx * dx + dy * dy <= (long)WellReach * WellReach) return true;
+                }
+            return false;
+        }
+
+        // A blaze may jump to the nearest un-burnt friendly building close by — but never
+        // to one a Well protects. One RNG draw per burning building per cadence, id order.
+        void TrySpreadFire(Building src)
+        {
+            if (_rng.NextInt(100) >= FireSpreadChance) return;
+            Building best = null; long bestD = long.MaxValue;
+            foreach (var b in Buildings)                 // id order
+            {
+                if (b.Id == src.Id || !b.Alive || b.Burning > 0 || b.Owner != src.Owner) continue;
+                long dx = b.CenterX - src.CenterX, dy = b.CenterY - src.CenterY, d = dx * dx + dy * dy;
+                if (d <= (long)FireSpreadRange * FireSpreadRange && d < bestD) { bestD = d; best = b; }
+            }
+            if (best != null && !WellCovers(best)) best.Burning = FireDuration;
+        }
+
         // Besiege a building: close to its wall, then batter it on cooldown.
         // Damage comes from the same RNG as unit combat, drawn in the same
         // id-ordered sequence, so it stays deterministic. A destroyed target
@@ -2951,6 +3011,10 @@ namespace Sim
                     int hit = d.IsSiege ? d.SiegeDamage : d.Damage;
                     b.Hp -= _rng.NextInt(hit - 2, hit + 3);
                     u.AttackTimer = d.Cooldown;
+                    // A dragon's breath doesn't just batter — it SETS THE BUILDING ABLAZE.
+                    // The fire lingers after the dragon moves on, eating the structure and
+                    // able to spread, unless a Well douses it (ResolveFires).
+                    if (IsFlying(u)) b.Burning = FireDuration;
                     // Conquest: an attacker who has researched it ANNEXES a keep struck
                     // down rather than razing it — the territory and its people change
                     // hands (see AnnexKeep). Without the tech, the keep just falls, and
@@ -3339,6 +3403,7 @@ namespace Sim
                 Mix(b.Open ? 1 : 0);
                 Mix(b.WorkerId);
                 Mix(b.RallyX); Mix(b.RallyY);
+                Mix(b.Burning);
             }
 
             // Fog. Only the EXPLORED half — see Vision.cs for why the currently

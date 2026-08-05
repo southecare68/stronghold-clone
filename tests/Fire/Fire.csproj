@@ -1,0 +1,27 @@
+<!-- Fire — dragon-breath sets buildings alight, and Wells put the fires out.
+
+     A dragon's fire doesn't just batter a building, it IGNITES it: the blaze lingers
+     after the dragon moves on, eats the structure, and can spread to a neighbour. A
+     Well within reach douses any friendly building on fire — no structural loss — and
+     stops the spread. This suite proves ignition, burn-down, dousing, spread, a well
+     blocking spread, and that all of it is byte-deterministic across two clients and a
+     wire round-trip (the new Burning building field).
+
+     Godot-free, so it runs on the Ubuntu x86 box too. Exit 0 = pass, 1 = fail. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>FireTests</RootNamespace>
+    <AssemblyName>FireTests</AssemblyName>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../game/Sim/*.cs" LinkBase="Sim" />
+    <Compile Include="../../game/Net/*.cs" LinkBase="Net" />
+  </ItemGroup>
+
+</Project>

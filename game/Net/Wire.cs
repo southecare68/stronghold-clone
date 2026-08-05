@@ -207,6 +207,7 @@ namespace Netcode
                 PutInt(buf, b.WorkerId);
                 PutInt(buf, b.RallyX);
                 PutInt(buf, b.RallyY);
+                PutInt(buf, b.Burning);
             }
 
             PutInt(buf, snap.Designs.Length);
@@ -410,6 +411,7 @@ namespace Netcode
                     buildings[i].WorkerId = GetInt(data, ref p);
                     buildings[i].RallyX = GetInt(data, ref p);
                     buildings[i].RallyY = GetInt(data, ref p);
+                    buildings[i].Burning = GetInt(data, ref p);
                 }
                 snap.Buildings = buildings;
 
