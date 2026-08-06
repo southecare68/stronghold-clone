@@ -2690,23 +2690,45 @@ namespace Sim
 
         // Nearest node of the given resource within the building's reach, ties
         // broken by node id.
+        readonly List<(long D, ResourceNode N)> _resCands = new();
+        readonly List<Tile> _reachScratch = new();
+
+        // The nearest deposit of a resource the harvester can actually WALK to. It is not
+        // enough that the node's tile is passable: a node sealed off from the building —
+        // behind the rock ridge, across water, walled off, or boxed in by your own
+        // buildings — is no good, because the worker would be handed an assignment it can
+        // only stand and stare at (the bug that stalled quarries and iron mines next to
+        // ore they couldn't path to). So candidates are gathered, sorted by distance, and
+        // the first REACHABLE one wins. A farm's own field skips the path test — it is
+        // always planted right beside the farm, and this runs every tick for a farm.
         ResourceNode NearestResource(Building wb, ResourceType res)
         {
-            ResourceNode best = null;
-            long bestD = long.MaxValue;
             long reach = (long)WorkRange * WorkRange;
+            _resCands.Clear();
             foreach (var n in Nodes)                  // id order
             {
-                if (n.Type != res || n.Amount <= 0) continue;
-                // A node the worker could never reach — one buried under a
-                // building — is no node at all. Skip it, or the building hands its
-                // worker an assignment it can only stand and stare at.
-                if (!Map.Passable(n.X, n.Y)) continue;
-                long dx = n.X - wb.CenterX, dy = n.Y - wb.CenterY;
-                long d = dx * dx + dy * dy;
-                if (d <= reach && d < bestD) { bestD = d; best = n; }
+                if (n.Type != res || n.Amount <= 0 || !Map.Passable(n.X, n.Y)) continue;
+                long dx = n.X - wb.CenterX, dy = n.Y - wb.CenterY, d = dx * dx + dy * dy;
+                if (d <= reach) _resCands.Add((d, n));
             }
-            return best;
+            if (_resCands.Count == 0) return null;
+            _resCands.Sort(static (a, b) => a.D != b.D ? a.D.CompareTo(b.D) : a.N.Id.CompareTo(b.N.Id));
+
+            if (res == ResourceType.Food) return _resCands[0].N;   // a field is always beside its farm
+            var from = SpawnPointAround(wb);
+            if (from == null) return _resCands[0].N;               // building boxed in: nothing reachable anyway
+            foreach (var c in _resCands)
+                if (PathReaches(from.Value.X, from.Value.Y, c.N.X, c.N.Y)) return c.N;
+            return null;
+        }
+
+        // Does a walkable path exist between two tiles? Deterministic A* (no RNG), so the
+        // assignment it feeds is byte-identical on every machine.
+        bool PathReaches(int sx, int sy, int gx, int gy)
+        {
+            if (!Map.Passable(sx, sy) || !Map.Passable(gx, gy)) return false;
+            _reachScratch.Clear();
+            return _pathFinder.TryFindPath(sx, sy, gx, gy, _reachScratch);
         }
 
         bool WithinRange(Unit u, int tileX, int tileY, int range) =>

@@ -30,6 +30,7 @@ static class Program
         AStorehouseByTheForestDoesNotStrandTheWorker();
         ABuildingDroppedOnAUnitDoesNotTrapIt();
         AQuarryMinesStoneTheSameWay();
+        AWorkerIgnoresOreItCannotWalkTo();
         TwoClientsAgreeOnTheWoodChain();
 
         Console.WriteLine(_failures == 0 ? "\nPASS" : $"\nFAIL — {_failures} check(s) failed");
@@ -281,6 +282,28 @@ static class Program
         Check($"stone is accumulating on its own ({sim.Stockpile(1, ResourceType.Stone)})",
               sim.Stockpile(1, ResourceType.Stone) > 0);
         Check("and it left the wood alone", sim.Stockpile(1, ResourceType.Wood) == 0);
+    }
+
+    // Regression: a harvester must not be handed the CLOSEST deposit if it can't walk
+    // to it (sealed off by rock/water/walls) — it stalled forever, standing next to ore
+    // it could never reach. It should skip to the nearest deposit it CAN path to.
+    static void AWorkerIgnoresOreItCannotWalkTo()
+    {
+        Console.WriteLine("\na quarry ignores ore it can't walk to and mines what it can:");
+        var map = new TileMap(20, 20);
+        for (int y = 0; y < 20; y++) map.Set(6, y, Terrain.Rock);   // a full rock wall splits the map
+        map.SealTerrain();
+        var sim = new Simulation(map);
+        sim.PlaceBuilding(BuildingType.Keep, 1, 0, 0);              // drop-off, left of the wall
+        Seed(sim, 1, 2);
+        var quarry = sim.PlaceBuilding(BuildingType.Quarry, 1, 3, 4);
+        sim.SpawnNode(ResourceType.Stone, 7, 3, 500);              // right of the wall — CLOSER, but sealed off
+        sim.SpawnNode(ResourceType.Stone, 3, 13, 500);            // left — reachable, but further
+        Settle(sim);
+        Check("the quarry hired a worker", quarry.WorkerId != 0);
+        for (int i = 0; i < 900; i++) sim.Tick(Array.Empty<Command>());
+        Check($"it mined the reachable deposit instead of stalling on the closer sealed one ({sim.Stockpile(1, ResourceType.Stone)})",
+              sim.Stockpile(1, ResourceType.Stone) > 0);
     }
 
     // The one that matters most: the whole self-running chain, computed twice,
