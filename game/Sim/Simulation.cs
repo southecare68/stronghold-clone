@@ -2243,24 +2243,39 @@ namespace Sim
         // to (fx,fy). Both are drop-offs (a granary is just the storehouse's twin,
         // meant for the food chain); iterated in id order with a strict compare, so
         // every machine picks the same one.
+        readonly List<(long D, Tile T)> _dropCands = new();
+
+        // The nearest drop-off (keep or storehouse/granary) the LOADED worker can actually
+        // walk to. Same trap as picking ore: the closest drop-off by straight-line distance
+        // is useless if a path can't reach it — a storehouse boxed in by your own buildings,
+        // or across the ridge/water — and the hauler would stand there full, unable to bank
+        // its load. So candidates are sorted by distance and the first REACHABLE one wins.
         bool NearestDropOff(int owner, int fx, int fy, out Tile best)
         {
             best = default;
-            long bestD = long.MaxValue;
-            bool found = false;
+            int wx = Fixed.ToInt(fx), wy = Fixed.ToInt(fy);
+            _dropCands.Clear();
 
             if (_dropOff.TryGetValue(owner, out var keep))
-            {
-                bestD = DropDist(keep.X, keep.Y, fx, fy); best = keep; found = true;
-            }
+                _dropCands.Add((DropDist(keep.X, keep.Y, fx, fy), keep));
             foreach (var b in Buildings)               // id order
             {
                 if ((b.Type != BuildingType.Storehouse && b.Type != BuildingType.Granary) || b.Owner != owner || !b.Alive) continue;
                 var t = SpawnPointAround(b) ?? new Tile(b.CenterX, b.CenterY);
-                long d = DropDist(t.X, t.Y, fx, fy);
-                if (d < bestD) { bestD = d; best = t; found = true; }
+                _dropCands.Add((DropDist(t.X, t.Y, fx, fy), t));
             }
-            return found;
+            if (_dropCands.Count == 0) return false;
+
+            _dropCands.Sort(static (a, b) =>
+            {
+                int c = a.D.CompareTo(b.D);
+                if (c != 0) return c;
+                c = a.T.X.CompareTo(b.T.X);
+                return c != 0 ? c : a.T.Y.CompareTo(b.T.Y);
+            });
+            foreach (var c in _dropCands)
+                if (PathReaches(wx, wy, c.T.X, c.T.Y)) { best = c.T; return true; }
+            best = _dropCands[0].T; return true;   // none reachable (all boxed in): keep prior behaviour
         }
 
         static long DropDist(int tx, int ty, int fx, int fy)
